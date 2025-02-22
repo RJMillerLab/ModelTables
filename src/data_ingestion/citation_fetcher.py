@@ -222,6 +222,7 @@ def search_and_fetch_info(doi=None, title=None, api_priority=["semantic_scholar"
     citations = best_api.get_citations(paper_id)
 
     return {
+        "paper_id": paper_id,
         "info": info,
         "references": references,
         "citations": citations
