@@ -1,95 +1,108 @@
-
-import pandas as pd
-import dask.dataframe as dd
+import os
+import json
+import time
 import numpy as np
-from tqdm import tqdm
-from joblib import Parallel, delayed
-from data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
-from data_ingestion.bibtex_parser import BibTeXFactory
-from data_ingestion.citation_fetcher import search_and_fetch_info
-import os, re, time, json
-from utils import load_data, get_statistics_table, clean_title
-import asyncio
-tqdm.pandas()
+import pandas as pd
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
-async def citation_retrieve(df, key="parsed_bibtex_tuple_list"):
-    async def process_row(idx, row):
-        parsed_bibtex_entries = row[key]
-        if not ((isinstance(parsed_bibtex_entries, (list, tuple)) and parsed_bibtex_entries) or
-                (isinstance(parsed_bibtex_entries, np.ndarray) and parsed_bibtex_entries.size)):
-            print(f"[Row {idx}] ❌ No valid BibTeX entries.")
-            return (json.dumps([]), json.dumps([]), False)
-        for parsed_data in parsed_bibtex_entries:
-            if isinstance(parsed_data, (list, np.ndarray, tuple)) and not parsed_data:
-                continue
-            if not parsed_data:
-                continue
-            doi = parsed_data.get("doi")
-            title = parsed_data.get("title")
-            title = clean_title(title)
-            if doi:
-                doi = doi.lower().strip()
-            print(f"[Row {idx}] 🔎 Searching for: DOI={doi}, Title={title}")
-            try:
-                # Run sync search_and_fetch_info in a thread
-                info_dict = await asyncio.to_thread(search_and_fetch_info, doi=doi, title=title)
-                if info_dict is not None:
-                    info = info_dict.get("info", {})
-                    references = info_dict.get("references", [])
-                    citations = info_dict.get("citations", [])
-                    if len(references) < 3 or len(citations) < 3:
-                        print(f"[Row {idx}] ⚠️ Low results! Only {len(references)} references & {len(citations)} citations.")
-                    print(f"[Row {idx}] ✅ Found {len(references)} references and {len(citations)} citations.")
-                    return (json.dumps(references), json.dumps(citations), True)
-                else:
-                    print(f"[Row {idx}] ⚠️ No results found.")
-            except Exception as e:
-                print(f"[Row {idx}] ❌ Error: {e}")
-        return (json.dumps([]), json.dumps([]), False)
+def extract_titles(bibtex_list):
+    """Extract clean titles from a list of BibTeX entries."""
+    if not isinstance(bibtex_list, (list, tuple, np.ndarray)):
+        return []
+    titles = []
+    for entry in bibtex_list:
+        if isinstance(entry, dict):
+            raw_title = entry.get("title")
+            if raw_title:
+                clean_title = raw_title.replace("{", "").replace("}", "")
+                titles.append(clean_title)
+    return titles
 
-    tasks = [process_row(idx, row) for idx, row in df.iterrows()]
-    results = await asyncio.gather(*tasks)
-    total_success = sum(1 for _, _, success in results if success)
-    total_failed = len(results) - total_success
-    print(f"\n✅ Total Success: {total_success}, ❌ Total Failed: {total_failed}")
-    return results
+def extract_json_titles(json_input):
+    """Extract titles from references and citations stored in JSON format."""
+    if isinstance(json_input, str):
+        try:
+            parsed = json.loads(json_input)
+        except Exception as e:
+            print(f"[extract_json_titles] ❌ JSON parse error: {e}")
+            return []
+    elif isinstance(json_input, dict):
+        parsed = json_input
+    else:
+        return []
+    
+    if not (isinstance(parsed, dict) and "data" in parsed):
+        return []
+    
+    titles = []
+    for item in parsed.get("data", []):
+        if isinstance(item, dict):
+            for key in ["citedPaper", "citingPaper"]:
+                if key in item and isinstance(item[key], dict):
+                    title = item[key].get("title")
+                    if isinstance(title, str):
+                        titles.append(title)
+    return titles
 
-def citation_retrieve_process(df, key="parsed_bibtex_tuple_list"):
-    assert key in df.columns
-    valid_bibtex_indices = df[
-        df[key].apply(lambda x: isinstance(x, (list, np.ndarray, tuple)) and len(x) > 0)
-    ].index
-    valid_rows = df.loc[valid_bibtex_indices].copy()
-    print('length of valid rows:', len(valid_rows))
-    processed_results = asyncio.run(citation_retrieve(valid_rows, key=key))
-    references_list, citations_list, success_flags = zip(*processed_results)
-    valid_rows["references_within_dataset"] = references_list
-    valid_rows["citations_within_dataset"] = citations_list
-    valid_rows["success_flag"] = success_flags
-    df.loc[valid_rows.index, "references_within_dataset"] = valid_rows["references_within_dataset"]
-    df.loc[valid_rows.index, "citations_within_dataset"] = valid_rows["citations_within_dataset"]
-    df.loc[valid_rows.index, "success_flag"] = valid_rows["success_flag"]
+def process_row(i, keys, titles_dict, ref_cite_dict):
+    """Check for citation associations between different csv_path entries."""
+    cp_i = keys[i]
+    associations = []
+    print(f"[Process Row] 🔍 Checking index {i}: {cp_i}")
+    for j in range(i + 1, len(keys)):
+        cp_j = keys[j]
+        found = any(t in ref_cite_dict.get(cp_j, []) for t in titles_dict.get(cp_i, []))
+        if not found:
+            found = any(t in ref_cite_dict.get(cp_i, []) for t in titles_dict.get(cp_j, []))
+        if found:
+            associations.append((cp_i, cp_j))
+    print(f"[Process Row] ✅ Completed index {i}: Found {len(associations)} associations.")
+    return associations
 
 def main():
-    output_dir = "data"
-    os.makedirs(output_dir, exist_ok=True)
-
-    data_type = 'modelcard'
-    # Load data
+    data_type = "modelcard"
+    input_file = f"data/{data_type}_step3.parquet"
+    output_file = "groundtruth_associations.json"
+    
+    print("⚠️ Step 1: Loading data...")
     start_time = time.time()
-    t1 = start_time
-    print("⚠️Step 1: Loading data...")
-    df_new = load_data(f"{output_dir}/{data_type}_step4.parquet", columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path', 'parsed_bibtex_tuple_list'])
-    df_makeup = load_data(f"{output_dir}/{data_type}_step3.parquet", columns=['modelId', 'downloads'])
-    df = df_new.merge(df_makeup, on='modelId')
-    del df_new, df_makeup
-    print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    print("⚠️Step 2: Retrieving citations...")
-    start_time = time.time()
-    citation_retrieve_process(df, key="parsed_bibtex_tuple_list")
-    print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    df.to_parquet(f"{output_dir}/{data_type}_step5.parquet", index=False)
-    print("Final time cost: {:.2f} seconds.".format(time.time() - t1))
+    df = pd.read_parquet(input_file)
+    print(f"✅ Data loaded. Time cost: {time.time() - start_time:.2f} seconds.")
+    
+    print("⚠️ Step 2: Extracting titles...")
+    df["title"] = df["parsed_bibtex_tuple_list"].apply(extract_titles)
+    
+    groundtruth = {row["csv_path"]: [] for _, row in df.iterrows() if pd.notnull(row["csv_path"])}
+    
+    titles_dict = {}
+    ref_cite_dict = {}
+    for _, row in df.iterrows():
+        csv_path = row["csv_path"]
+        if pd.isnull(csv_path):
+            continue
+        titles_dict[csv_path] = [t.lower().strip() for t in row["title"]] if isinstance(row["title"], list) else []
+        refs = extract_json_titles(row["references_within_dataset"])
+        cites = extract_json_titles(row["citations_within_dataset"])
+        ref_cite_dict[csv_path] = [t.lower().strip() for t in refs + cites]
+    
+    print("⚠️ Step 3: Processing associations in parallel...")
+    all_associations = []
+    keys = list(groundtruth.keys())
+    
+    with ProcessPoolExecutor() as executor:
+        futures = [executor.submit(process_row, i, keys, titles_dict, ref_cite_dict) for i in range(len(keys))]
+        for completed, fut in enumerate(as_completed(futures), 1):
+            all_associations.extend(fut.result())
+            print(f"[Parallel] Completed {completed}/{len(keys)} rows.")
+    
+    for cp_i, cp_j in all_associations:
+        groundtruth[cp_i].append(cp_j)
+        groundtruth[cp_j].append(cp_i)
+    
+    print("⚠️ Step 4: Saving results...")
+    with open(output_file, "w") as f:
+        json.dump(groundtruth, f, indent=4, ensure_ascii=False)
+    print("✅ Groundtruth associations saved successfully!")
 
 if __name__ == "__main__":
     main()

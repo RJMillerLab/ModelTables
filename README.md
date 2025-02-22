@@ -22,8 +22,10 @@ $ git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_me
 Run this command
 ```
 # cd src
-python -m data_preprocess.step3 # process bibtex and download markdown csvs
-python -m data_preprocess.step4 # download citations, produce real annotation dataset
-python -m data_preprocess.step4_statistic_table # get statistic tables, not need to run step4, but require to run step3
-python -m data_preprocess.step4_save_starmie_results # analyze searching results of starmie
+python -m data_preprocess.step1 # Split readme and tags, Parse tags into columns with name start with `card_tag_xx`, extract markdown table
+python -m data_preprocess.step2 # process bibtex and download markdown csvs
+python -m data_preprocess.step3 # download citations, produce real annotation dataset
+python -m data_preprocess.step3_statistic_table # get statistic tables, not need to run step4, but require to run step3
+python -m data_preprocess.step3_save_starmie_results # analyze searching results of starmie
+python -m data_preprocess.step4 # process groundtruth
 ```

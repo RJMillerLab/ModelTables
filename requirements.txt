@@ -1,3 +1,7 @@
 pybtex
 aiohttp
 bibtexparser
+ruamel.yaml
+
+tqdm_joblib
+

@@ -4,11 +4,40 @@ import os, re
 from tqdm import tqdm
 import numpy as np
 
-def clean_title(title):
-    """Removes unnecessary BibTeX characters like {} and trims spaces."""
-    if title:
-        return re.sub(r"[{}]", "", title).strip()
-    return title
+def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/"):
+    assert data_type in ["modelcard", "datasetcard"], "data_type must be 'modelcard' or 'datasetcard'"
+    if data_type == "modelcard":
+        file_names = [f"train-0000{i}-of-00004.parquet" for i in range(4)]
+    elif data_type == "datasetcard":
+        file_names = [f"train-0000{i}-of-00003.parquet" for i in range(3)]
+    dfs = [pd.read_parquet(os.path.join(file_path, file)) for file in file_names]
+    combined_df = pd.concat(dfs, ignore_index=True)
+    return combined_df
+
+def get_statistics_card(df):
+    """
+    Get statistics for the card data.
+    -- Usage --
+    stats = get_statistics_card(df)
+    print(json.dumps(stats, indent=4))
+    """
+    total_models = len(df)
+    non_empty_model_cards = df['card'].notna().sum()
+    created_at_dates = pd.to_datetime(df['createdAt'], errors='coerce')
+    start_date = created_at_dates.min()
+    end_date = created_at_dates.max()
+    last_modiifed_dates = pd.to_datetime(df['last_modified'], errors='coerce')
+    modified_early_date = last_modiifed_dates.min()
+    modified_end_date = last_modiifed_dates.max()
+    stats = {
+        "Total Models": int(total_models),
+        "Models with Non-Empty Model Card": int(non_empty_model_cards),
+        "Start Date (createdAt)": str(start_date.isoformat()),
+        "End Date (createdAt)": str(end_date.isoformat()),
+        "Last Modified Early Date": str(modified_early_date.isoformat()),
+        "Last Modified Last Date": str(modified_end_date.isoformat()),
+    }
+    return stats
 
 def load_data(file_path, columns=None):
     """Load data from a Parquet file."""
@@ -17,6 +46,12 @@ def load_data(file_path, columns=None):
     df = pd.read_parquet(file_path, columns=columns)
     print(f"Loaded {len(df)} rows.")
     return df
+
+def clean_title(title):
+    """Removes unnecessary BibTeX characters like {} and trims spaces."""
+    if title:
+        return re.sub(r"[{}]", "", title).strip()
+    return title
 
 def get_statistics_table(unique_by_markdown, key_csv_path = "csv_path"):
     assert key_csv_path in unique_by_markdown.columns, f"Key column {key_csv_path} not found in DataFrame."
@@ -81,3 +116,36 @@ def save_analysis_results(df, returnResults, file_name="retrieval_results.csv"):
     final_df = pd.DataFrame(all_rows, columns=['Sample', 'Type', 'modelId','title', 'parsed_bibtex_tuple_list', 'csv_path'])
     final_df.to_csv(file_name, index=False)
     return final_df
+
+
+import pandas as pd
+import json
+
+def save_parquet_lossless(df, file_path):
+    """
+    Save a DataFrame to a Parquet file with no data loss.
+    
+    Args:
+    - df: The DataFrame to save.
+    - file_path: Path to save the Parquet file.
+    """
+    # Serialize only columns with lists or dicts
+    serialized_columns = {}
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            if df[col].apply(lambda x: isinstance(x, (list, dict))).any():
+                # Serialize lists and dicts into JSON strings
+                df[col] = df[col].apply(lambda x: json.dumps(x) if isinstance(x, (list, dict)) else x)
+                serialized_columns[col] = True
+            else:
+                serialized_columns[col] = False
+        else:
+            serialized_columns[col] = False
+
+    # Save the DataFrame and serialized column metadata
+    metadata = {"serialized_columns": serialized_columns}
+    df.to_parquet(file_path, index=False, engine="pyarrow", metadata={"custom_metadata": json.dumps(metadata)})
+    print(f"File saved successfully to {file_path}")
+    
+file_path = f"data/{data_type}_step2_data_split_tags.parquet"
+save_parquet_lossless(df_split_temp, file_path)
