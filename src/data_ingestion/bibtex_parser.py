@@ -14,7 +14,7 @@ def ensure_string(bibtex_entry):
         try:
             return bibtex_entry.decode("utf-8")
         except UnicodeDecodeError:
-            print("Error decoding BibTeX entry")
+            #print("Error decoding BibTeX entry")
             return None
     return bibtex_entry
 
@@ -22,7 +22,7 @@ class BibTeXFactory:
     def __init__(self):
         pass
     @staticmethod
-    def parse_bibtex(bibtex_entry):
+    def parse_bibtex(bibtex_entry, verbose=False):
         """Attempt to parse a BibTeX entry using multiple approaches with a cascade of fallback methods."""
         result = {}
         bibtex_entry = ensure_string(bibtex_entry)
@@ -52,7 +52,8 @@ class BibTeXFactory:
                     result["url"] = entry_data.get("url", "")
                     return result, True
             except Exception as e:
-                #print(f"bibtexparser also failed: {e}")
+                #if verbose:
+                #    print(f"bibtexparser also failed: {e}")
                 # Third attempt: Apply formatting fixes and retry with pybtex
                 try:
                     fixed_entry = BibTeXFactory.fix_bibtex_entry(bibtex_entry)
@@ -66,7 +67,8 @@ class BibTeXFactory:
                         result["url"] = entry_data.fields.get("url", "")
                     return result, True
                 except Exception as e:
-                    print(f"Final parsing attempt after fix failed: {e}")
+                    if verbose:
+                        print(f"Final parsing attempt after fix failed: {e}")
         # If all methods fail, return None
         return None, False  
     @staticmethod

@@ -112,7 +112,7 @@ class MarkdownHandler:
         return "\n".join(standardized_rows)
 
     @staticmethod
-    def markdown_to_csv(markdown_text, output_path):
+    def markdown_to_csv(markdown_text, output_path, verbose=False):
         """Convert cleaned and standardized markdown table to CSV and save it."""
         cleaned_markdown = MarkdownHandler.clean_markdown_table(markdown_text)
         standardized_markdown = MarkdownHandler.standardize_table_format(cleaned_markdown)
@@ -121,7 +121,8 @@ class MarkdownHandler:
             df.to_csv(output_path, index=False, encoding="utf-8")
             return output_path
         except Exception as e:
-            print(f"Failed to convert markdown to CSV for {output_path}: {e}")
+            if verbose:
+                print(f"Failed to convert markdown to CSV for {output_path}: {e}")
             return None
 
 class ExtractionFactory:
