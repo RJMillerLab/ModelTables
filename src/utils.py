@@ -2,6 +2,7 @@ import pandas as pd
 import dask.dataframe as dd
 import os, re
 from tqdm import tqdm
+import numpy as np
 
 def clean_title(title):
     """Removes unnecessary BibTeX characters like {} and trims spaces."""
@@ -49,3 +50,34 @@ def get_statistics_table(unique_by_markdown, key_csv_path = "csv_path"):
     benchmark_df = pd.DataFrame(benchmark_data)
     benchmark_df = pd.concat([benchmark_df, pd.DataFrame([new_row])], ignore_index=True)
     return benchmark_df
+
+
+def extract_title_from_parsed(parsed_list):
+    if isinstance(parsed_list, (list, tuple, np.ndarray)):  
+        title_list = []
+        for entry in parsed_list:
+            if isinstance(entry, dict) and "title" in entry and entry["title"]:
+                title_list.append(entry["title"].replace('{', '').replace('}', ''))
+    return title_list
+
+def save_analysis_results(df, returnResults, file_name="retrieval_results.csv"):
+    # returnResults is like {query_csv: [retrieved_csvs], ...}, here we ignore the parent_path
+    assert "csv_path" in df.columns, "csv_path column is required"
+    assert "parsed_bibtex_tuple_list" in df.columns, "parsed_bibtex_tuple_list column is required"
+    assert "modelId" in df.columns, "modelId column is required"
+    df = df.dropna(subset=['csv_path']).copy()
+    df['csv_path'] = df['csv_path'].apply(lambda x: x.split('/')[-1]) # only match in the file name !!!
+    all_rows = []
+    for sample_idx, (query_csv, retrieved_csvs) in enumerate(returnResults.items(), start=1):
+        sample_name = f"Sample {sample_idx}"
+        block_csvs = [query_csv] + retrieved_csvs
+        matched_rows = df[df['csv_path'].isin(block_csvs)]
+        if not matched_rows.empty:
+            matched_rows = matched_rows.assign(Sample=sample_name)
+            matched_rows.loc[matched_rows['csv_path'] == query_csv, 'Type'] = "Query"
+            matched_rows.loc[matched_rows['csv_path'] != query_csv, 'Type'] = "Retrieved"
+            matched_rows['title'] = matched_rows['parsed_bibtex_tuple_list'].apply(lambda x: extract_title_from_parsed(x) if isinstance(x, (list, tuple, np.ndarray)) else "Unknown title")
+            all_rows.extend(matched_rows.to_dict(orient='records'))
+    final_df = pd.DataFrame(all_rows, columns=['Sample', 'Type', 'modelId','title', 'parsed_bibtex_tuple_list', 'csv_path'])
+    final_df.to_csv(file_name, index=False)
+    return final_df
