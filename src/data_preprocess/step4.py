@@ -1,39 +1,29 @@
-import os
+# -*- coding: utf-8 -*-
 import json
 import time
 import numpy as np
 import pandas as pd
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
+from collections import defaultdict
 
 def extract_titles(bibtex_list):
-    """Extract clean titles from a list of BibTeX entries."""
     if not isinstance(bibtex_list, (list, tuple, np.ndarray)):
         return []
-    titles = []
-    for entry in bibtex_list:
-        if isinstance(entry, dict):
-            raw_title = entry.get("title")
-            if raw_title:
-                clean_title = raw_title.replace("{", "").replace("}", "")
-                titles.append(clean_title)
-    return titles
+    return [d.get("title", "").replace("{", "").replace("}", "").lower().strip()
+            for d in bibtex_list if isinstance(d, dict) and d.get("title")]
 
 def extract_json_titles(json_input):
-    """Extract titles from references and citations stored in JSON format."""
     if isinstance(json_input, str):
         try:
             parsed = json.loads(json_input)
         except Exception as e:
-            print(f"[extract_json_titles] ❌ JSON parse error: {e}")
             return []
     elif isinstance(json_input, dict):
         parsed = json_input
     else:
         return []
-    
     if not (isinstance(parsed, dict) and "data" in parsed):
         return []
-    
     titles = []
     for item in parsed.get("data", []):
         if isinstance(item, dict):
@@ -41,23 +31,8 @@ def extract_json_titles(json_input):
                 if key in item and isinstance(item[key], dict):
                     title = item[key].get("title")
                     if isinstance(title, str):
-                        titles.append(title)
+                        titles.append(title.replace("{", "").replace("}", "").lower().strip())
     return titles
-
-def process_row(i, keys, titles_dict, ref_cite_dict):
-    """Check for citation associations between different csv_path entries."""
-    cp_i = keys[i]
-    associations = []
-    print(f"[Process Row] 🔍 Checking index {i}: {cp_i}")
-    for j in range(i + 1, len(keys)):
-        cp_j = keys[j]
-        found = any(t in ref_cite_dict.get(cp_j, []) for t in titles_dict.get(cp_i, []))
-        if not found:
-            found = any(t in ref_cite_dict.get(cp_i, []) for t in titles_dict.get(cp_j, []))
-        if found:
-            associations.append((cp_i, cp_j))
-    print(f"[Process Row] ✅ Completed index {i}: Found {len(associations)} associations.")
-    return associations
 
 def main():
     data_type = "modelcard"
@@ -69,38 +44,53 @@ def main():
     df = pd.read_parquet(input_file)
     print(f"✅ Data loaded. Time cost: {time.time() - start_time:.2f} seconds.")
     
-    print("⚠️ Step 2: Extracting titles...")
-    df["title"] = df["parsed_bibtex_tuple_list"].apply(extract_titles)
-    
-    groundtruth = {row["csv_path"]: [] for _, row in df.iterrows() if pd.notnull(row["csv_path"])}
-    
-    titles_dict = {}
-    ref_cite_dict = {}
-    for _, row in df.iterrows():
-        csv_path = row["csv_path"]
-        if pd.isnull(csv_path):
-            continue
-        titles_dict[csv_path] = [t.lower().strip() for t in row["title"]] if isinstance(row["title"], list) else []
-        refs = extract_json_titles(row["references_within_dataset"])
-        cites = extract_json_titles(row["citations_within_dataset"])
-        ref_cite_dict[csv_path] = [t.lower().strip() for t in refs + cites]
-    
-    print("⚠️ Step 3: Processing associations in parallel...")
-    all_associations = []
-    keys = list(groundtruth.keys())
-    
-    with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(process_row, i, keys, titles_dict, ref_cite_dict) for i in range(len(keys))]
-        for completed, fut in enumerate(as_completed(futures), 1):
-            all_associations.extend(fut.result())
-            print(f"[Parallel] Completed {completed}/{len(keys)} rows.")
-    
-    for cp_i, cp_j in all_associations:
-        groundtruth[cp_i].append(cp_j)
-        groundtruth[cp_j].append(cp_i)
-    
-    print("⚠️ Step 4: Saving results...")
-    with open(output_file, "w") as f:
+    print("⚠️ Step 2: Extracting titles and processing new columns...")
+    start_time = time.time()
+    tqdm.pandas()
+    df["title_list"] = df["parsed_bibtex_tuple_list"].progress_apply(extract_titles)
+    df["cited_paper_list"] = df["references_within_dataset"].progress_apply(extract_json_titles)
+    df["citing_paper_list"] = df["citations_within_dataset"].progress_apply(extract_json_titles)
+
+    print("⚠️ Step 3: Building title to paper index mapping...")
+    # Replaced iteritems() with items() since iteritems() is no longer available in newer Pandas versions.
+    title_to_paper_indices = defaultdict(set)
+    for idx, titles in df["title_list"].items():
+        for title in titles:
+            title_to_paper_indices[title].add(idx)
+    print(f"✅ Title mapping built. Time cost: {time.time() - start_time:.2f} seconds.")
+
+    print("⚠️ Step 4: Finding associations...")
+    groundtruth = defaultdict(list)
+    valid_rows = df[(df['title_list'].str.len() > 0) | 
+                (df['cited_paper_list'].str.len() > 0) | 
+                (df['citing_paper_list'].str.len() > 0)]
+    print('total: ', len(valid_rows[valid_rows["csv_path"].notnull()]))
+    #print(len(valid_rows & df["csv_path"].notnull()))
+
+    for idx, row in tqdm(valid_rows.iterrows(), total=valid_rows.shape[0]):
+        overlaps = defaultdict(int)
+        ref_cite_titles = set(row.get('cited_paper_list', []) + row.get('citing_paper_list', []))
+        for title in ref_cite_titles: # for each related paper
+            candidate_indices = title_to_paper_indices.get(title, set()) # rows indices with the same title of related papers
+            for candidate_idx in candidate_indices:
+                if candidate_idx == idx: # skip the same row
+                    continue
+                candidate_csv_path = df.at[candidate_idx, "csv_path"] # get the csv path of the candidate
+                if candidate_csv_path is not None:
+                    overlaps[candidate_idx] += 1 # overlapped found!
+        current_csv_path = row["csv_path"]
+        if current_csv_path is not None:
+            for candidate_idx, count in overlaps.items():
+                candidate_csv_path = df.at[candidate_idx, "csv_path"]
+                if candidate_csv_path is not None:
+                    groundtruth[current_csv_path].append(candidate_csv_path)  # Record the current paper citing the candidate
+                    groundtruth[candidate_csv_path].append(current_csv_path)  # Record the candidate citing the current paper
+                #groundtruth[row["csv_path"]].append(df.at[candidate_idx, "csv_path"])
+    print('groundtruth length: ', len(groundtruth))
+    print(f"✅ Associations found. Time cost: {time.time() - start_time:.2f} seconds.")
+        
+    print("⚠️ Step 5: Saving results...")
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(groundtruth, f, indent=4, ensure_ascii=False)
     print("✅ Groundtruth associations saved successfully!")
 

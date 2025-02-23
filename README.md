@@ -20,7 +20,7 @@ $ git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_me
 ## Analysis
 
 Run this command
-```
+```bash
 # cd src
 python -m data_preprocess.step1 # Split readme and tags, Parse tags into columns with name start with `card_tag_xx`, extract markdown table
 python -m data_preprocess.step2 # process bibtex and download markdown csvs
@@ -29,3 +29,5 @@ python -m data_preprocess.step3_statistic_table # get statistic tables, not need
 python -m data_preprocess.step3_save_starmie_results # analyze searching results of starmie
 python -m data_preprocess.step4 # process groundtruth
 ```
+
+Then run in [starmie]()

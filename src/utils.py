@@ -86,7 +86,6 @@ def get_statistics_table(unique_by_markdown, key_csv_path = "csv_path"):
     benchmark_df = pd.concat([benchmark_df, pd.DataFrame([new_row])], ignore_index=True)
     return benchmark_df
 
-
 def extract_title_from_parsed(parsed_list):
     if isinstance(parsed_list, (list, tuple, np.ndarray)):  
         title_list = []
@@ -116,36 +115,3 @@ def save_analysis_results(df, returnResults, file_name="retrieval_results.csv"):
     final_df = pd.DataFrame(all_rows, columns=['Sample', 'Type', 'modelId','title', 'parsed_bibtex_tuple_list', 'csv_path'])
     final_df.to_csv(file_name, index=False)
     return final_df
-
-
-import pandas as pd
-import json
-
-def save_parquet_lossless(df, file_path):
-    """
-    Save a DataFrame to a Parquet file with no data loss.
-    
-    Args:
-    - df: The DataFrame to save.
-    - file_path: Path to save the Parquet file.
-    """
-    # Serialize only columns with lists or dicts
-    serialized_columns = {}
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            if df[col].apply(lambda x: isinstance(x, (list, dict))).any():
-                # Serialize lists and dicts into JSON strings
-                df[col] = df[col].apply(lambda x: json.dumps(x) if isinstance(x, (list, dict)) else x)
-                serialized_columns[col] = True
-            else:
-                serialized_columns[col] = False
-        else:
-            serialized_columns[col] = False
-
-    # Save the DataFrame and serialized column metadata
-    metadata = {"serialized_columns": serialized_columns}
-    df.to_parquet(file_path, index=False, engine="pyarrow", metadata={"custom_metadata": json.dumps(metadata)})
-    print(f"File saved successfully to {file_path}")
-    
-file_path = f"data/{data_type}_step2_data_split_tags.parquet"
-save_parquet_lossless(df_split_temp, file_path)
