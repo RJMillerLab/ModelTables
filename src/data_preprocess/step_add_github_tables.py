@@ -89,8 +89,10 @@ def main():
     df_readme = parallel_load_github_readme(df_readme)
     df_readme["github_readme"] = df_readme["github_readme"].apply(lambda x: str(x) if pd.notnull(x) else "")
     print("Extracting markdown tables from README files...")
-    extract_bibtex(df_readme, readme_key="github_readme", new_key="github_extracted_markdown_table")
-    df_readme["github_extracted_markdown_table_tuple"] = df_readme["github_extracted_markdown_table"].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
+    #extract_bibtex(df_readme, readme_key="github_readme", new_key="github_extracted_markdown_table")
+    #df_readme["github_extracted_markdown_table_tuple"] = df_readme["github_extracted_markdown_table"].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
+    results = extract_markdown(df_readme, col_name='github_readme')
+    df_readme[['github_contains_markdown_table', 'github_extracted_markdown_table']] = pd.DataFrame(results, index=df_readme.index)
     print("Saving markdown extraction results to CSV files...")
     save_markdown_to_csv(df_readme, key="github_extracted_markdown_table", output_folder="github_markdown_csvs", new_key="github_csv_path")
     output_parquet = "data/step_add_github.parquet"

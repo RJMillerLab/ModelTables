@@ -129,7 +129,6 @@ def main():
     start_time = time.time()
     add_extracted_tuples(df)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    
     print("⚠️Step 4: Processing BibTeX entries...")
     start_time = time.time()
     processed_entries = process_bibtex_entries(df)
