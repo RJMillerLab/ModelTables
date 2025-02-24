@@ -1,6 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+"""
+Author: Zhengyuan Dong
+Created: 2025-02-23
+Last Modified: 2025-02-23
+Description: Extract BibTeX entries from the 'card_readme' column and save to CSV files.
+"""
+
 import os
 import re
 import pandas as pd

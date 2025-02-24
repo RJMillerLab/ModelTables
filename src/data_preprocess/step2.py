@@ -1,3 +1,10 @@
+"""
+Author: Zhengyuan Dong
+Created: 2025-02-12
+Last Modified: 2025-02-23
+Description: Extract BibTeX entries from the 'card_readme' column and save to CSV files.
+"""
+
 import pandas as pd
 import dask.dataframe as dd
 import numpy as np

@@ -29,9 +29,12 @@ python -m data_preprocess.step3_statistic_table # get statistic tables, not need
 python -m data_preprocess.step3_save_starmie_results # analyze searching results of starmie
 python -m data_preprocess.step4 # process groundtruth
 
-# TODO: test!!!
-python -m data_preprocess.step_add_github_tables # parse github tables
-python -m data_preprocess.step_add_pdf_tables # parse pdf tables
+# TODO: add link extraction!
+python -m data_preprocess.step_download_github_readme # TODO: test, prerequest: have key 'github_link' (list), currently use `data/tmp_df_split_temp.csv`
+python -m data_preprocess.step_add_github_tables # tested!
+python -m data_preprocess.step_download_pdf # TODO: test
+python -m data_preprocess.step_add_pdf_tables # TODO: test
+# TODO: optimize the above code in parallel
 ```
 
 Then run in [starmie]()
