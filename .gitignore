@@ -1,6 +1,9 @@
 
 data/
 cleaned_markdown_csvs/
+downloaded_pdfs_by_model/
+downloaded_pdfs/
+github_readmes/
 tmp/
 *.json
 *.csv

@@ -2,6 +2,7 @@ pybtex
 aiohttp
 bibtexparser
 ruamel.yaml
-
 tqdm_joblib
-
+PyMuPDF
+fitz
+dask

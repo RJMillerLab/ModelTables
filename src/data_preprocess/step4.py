@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-import json
-import time
+import time, os, json, pickle
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -37,7 +36,6 @@ def extract_json_titles(json_input):
 def main():
     data_type = "modelcard"
     input_file = f"data/{data_type}_step3.parquet"
-    output_file = "groundtruth_associations.json"
     
     print("⚠️ Step 1: Loading data...")
     start_time = time.time()
@@ -90,8 +88,12 @@ def main():
     print(f"✅ Associations found. Time cost: {time.time() - start_time:.2f} seconds.")
         
     print("⚠️ Step 5: Saving results...")
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(groundtruth, f, indent=4, ensure_ascii=False)
+    filtered_groundtruth = {
+        os.path.basename(key): [os.path.basename(v) for v in values]
+        for key, values in groundtruth.items()
+    }
+    with open("./scilakeUnionBenchmark.pickle", "wb") as f:
+        pickle.dump(filtered_groundtruth, f)
     print("✅ Groundtruth associations saved successfully!")
 
 if __name__ == "__main__":

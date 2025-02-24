@@ -5,6 +5,7 @@ from tqdm_joblib import tqdm_joblib
 from joblib import Parallel, delayed, parallel_backend
 import re, os, json, time
 from utils import load_data
+from concurrent.futures import ThreadPoolExecutor
 from ruamel.yaml import YAML
 
 tqdm.pandas()
@@ -188,12 +189,12 @@ def detect_and_extract_markdown_table(card_content: str):
 def process_row(row):
     return detect_and_extract_markdown_table(row)
 
-def extract_markdown(df, n_jobs=4):
+def extract_markdown(df, col_name='card_readme', n_jobs=4):
     """
     Extract Markdown tables from the given DataFrame `df` in parallel.
     """
     with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-        results = list(tqdm(executor.map(process_row, df['card_readme']), total=len(df)))
+        results = list(tqdm(executor.map(process_row, df[col_name]), total=len(df)))
     return results
 
 def main():
@@ -223,7 +224,7 @@ def main():
 
     print("⚠️ Step 4: Extracting markdown tables...")
     start_time = time.time()
-    results = extract_markdown(df_split)
+    results = extract_markdown(df_split, col_name='card_readme')
     df_split_temp[['contains_markdown_table', 'extracted_markdown_table']] = pd.DataFrame(results, index=df_split_temp.index)
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     

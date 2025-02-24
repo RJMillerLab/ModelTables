@@ -28,6 +28,10 @@ python -m data_preprocess.step3 # download citations, produce real annotation da
 python -m data_preprocess.step3_statistic_table # get statistic tables, not need to run step4, but require to run step3
 python -m data_preprocess.step3_save_starmie_results # analyze searching results of starmie
 python -m data_preprocess.step4 # process groundtruth
+
+# TODO: test!!!
+python -m data_preprocess.step_add_github_tables # parse github tables
+python -m data_preprocess.step_add_pdf_tables # parse pdf tables
 ```
 
 Then run in [starmie]()

@@ -18,22 +18,20 @@ def ensure_string(entry):
     """Ensure the input is a string."""
     return str(entry) if entry is not None else None
 
-def extract_bibtex(df):
+def extract_bibtex(df, readme_key="card_readme", new_key="extracted_bibtex"):
     """Extract BibTeX entries from the 'card_readme' column."""
     print("Extracting BibTeX entries...")
     #df["extracted_bibtex"] = df["card_readme"].apply(lambda x: BibTeXExtractor().extract(x) if isinstance(x, str) else [], meta=('extracted_bibtex', 'object'))
-    df["extracted_bibtex"] = df["card_readme"].apply(lambda x: BibTeXExtractor().extract(x) if isinstance(x, str) else [])
-    print("New attributes added: 'extracted_bibtex'")
+    df[new_key] = df[readme_key].apply(lambda x: BibTeXExtractor().extract(x) if isinstance(x, str) else [])
+    print(f"New attributes added: {new_key}")
 
-def add_extracted_tuples(df):
+def add_extracted_tuples(df, key_bibtex = "extracted_bibtex", key_markdown_table = "extracted_markdown_table", add_bibtex_tuple="extracted_bibtex_tuple", add_markdown_tuple="extracted_markdown_table_tuple"):
     """Convert extracted BibTeX and markdown table to tuples for uniqueness checks."""
     print("Adding extracted tuples for uniqueness checks...")
-    key_bibtex = "extracted_bibtex"
-    key_markdown_table = "extracted_markdown_table"
     #df["extracted_bibtex_tuple"] = df[key_bibtex].apply(lambda x: tuple(x) if isinstance(x, list) else (x,), meta=('extracted_bibtex', 'object'))
     #df["extracted_markdown_table_tuple"] = df[key_markdown_table].apply(lambda x: tuple(x) if isinstance(x, list) else (x,), meta=('extracted_bibtex', 'object'))
-    df["extracted_bibtex_tuple"] = df[key_bibtex].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
-    df["extracted_markdown_table_tuple"] = df[key_markdown_table].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
+    df[add_bibtex_tuple] = df[key_bibtex].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
+    df[add_markdown_tuple] = df[key_markdown_table].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
     print("New attributes added: 'extracted_bibtex_tuple', 'extracted_markdown_table_tuple'.")
 
 def process_bibtex_tuple(entry):
@@ -100,15 +98,15 @@ def generate_csv_path(model_id, index, folder):
     sanitized_model_id = re.sub(r"[^\w\-]", "_", str(model_id) if model_id else "unknown_model")
     return os.path.join(folder, f"{sanitized_model_id}_markdown_{index}.csv")
 
-def save_markdown_to_csv(df, output_folder = "cleaned_markdown_csvs"):
+def save_markdown_to_csv(df, output_folder = "cleaned_markdown_csvs", key="extracted_markdown_table", new_key="csv_path"):
     """Extract markdown and save to local files."""
     os.makedirs(output_folder, exist_ok=True)
     # Apply the MarkdownHandler with a tqdm progress bar
-    df["csv_path"] = df.progress_apply(
+    df[new_key] = df.progress_apply(
         lambda row: MarkdownHandler.markdown_to_csv(
-            row["extracted_markdown_table"],
+            row[key],
             generate_csv_path(row["modelId"], row.name, output_folder)
-        ) if pd.notnull(row["extracted_markdown_table"]) else None,
+        ) if pd.notnull(row[key]) else None,
         axis=1
     )
 
