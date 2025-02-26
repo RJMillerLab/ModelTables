@@ -15,6 +15,7 @@ import re, os, json, time
 from utils import load_data
 from concurrent.futures import ThreadPoolExecutor
 from ruamel.yaml import YAML
+from src.utils import load_config
 
 tqdm.pandas()
 
@@ -206,15 +207,14 @@ def extract_markdown(df, col_name='card_readme', n_jobs=4):
     return results
 
 def main():
-    output_dir = "data"
-    os.makedirs(output_dir, exist_ok=True)
-
-    file_type = "modelcard"
+    data_type = "modelcard"
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
     
     print("⚠️ Step 1: Loading data...")
     start_time = time.time()
     from utils import load_combined_data
-    df = load_combined_data(data_type, file_path="~/Repo/CitationLake/data/")
+    df = load_combined_data(data_type, file_path=base_path)
     #df = load_data(f"{output_dir}/{file_type}_step1.parquet") # load them all
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
@@ -238,7 +238,7 @@ def main():
     
     print("⚠️ Step 5: Saving results to Parquet file...")
     start_time = time.time()
-    output_file = f"{output_dir}/{file_type}_step1.parquet"
+    output_file = f"{base_path}/{file_type}_step1.parquet"
     for col in df_split_temp.columns:
         if df_split_temp[col].apply(lambda x: isinstance(x, (list, tuple, np.ndarray))).any():
             df_split_temp[col] = df_split_temp[col].apply(

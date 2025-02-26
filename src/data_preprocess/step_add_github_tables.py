@@ -15,10 +15,11 @@ import fitz
 from tqdm import tqdm
 from joblib import Parallel, delayed
 
-from data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
-from data_ingestion.bibtex_parser import BibTeXFactory
-from data_preprocess.step2 import save_markdown_to_csv, extract_bibtex, add_extracted_tuples
-from data_preprocess.step1 import extract_markdown
+from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
+from src.data_ingestion.bibtex_parser import BibTeXFactory
+from src.data_preprocess.step2 import save_markdown_to_csv, extract_bibtex, add_extracted_tuples
+from src.data_preprocess.step1 import extract_markdown
+from src.utils import load_config
 
 def extract_table_from_pdf(pdf_path):
     try:
@@ -88,7 +89,9 @@ def parallel_load_github_readme(df):
     return df
 
 def main():
-    readme_csv_path = "../github_readmes_info.csv"
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
+    readme_csv_path = f"{base_path}/github_readmes_info.csv"
     print("Loading CSV files...")
     df_readme = pd.read_csv(readme_csv_path)
     df_readme = df_readme[df_readme['readme_path'].notnull()].copy()

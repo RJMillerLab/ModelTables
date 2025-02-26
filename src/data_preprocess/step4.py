@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
+from src.utils import load_config
 
 def extract_titles(bibtex_list):
     if not isinstance(bibtex_list, (list, tuple, np.ndarray)):
@@ -35,7 +36,9 @@ def extract_json_titles(json_input):
 
 def main():
     data_type = "modelcard"
-    input_file = f"data/{data_type}_step3.parquet"
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
+    input_file = f"{base_path}/{data_type}_step3.parquet"
     
     print("⚠️ Step 1: Loading data...")
     start_time = time.time()
@@ -92,7 +95,7 @@ def main():
         os.path.basename(key): [os.path.basename(v) for v in values]
         for key, values in groundtruth.items()
     }
-    with open("./scilakeUnionBenchmark.pickle", "wb") as f:
+    with open(f"{base_path}/scilakeUnionBenchmark.pickle", "wb") as f:
         pickle.dump(filtered_groundtruth, f)
     print("✅ Groundtruth associations saved successfully!")
 

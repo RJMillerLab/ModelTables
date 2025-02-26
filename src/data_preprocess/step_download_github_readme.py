@@ -8,6 +8,7 @@ import os
 import pandas as pd
 import requests
 from tqdm import tqdm
+from src.utils import load_config
 
 # Assuming df_split_temp is available and contains 'github_link' and 'modelId' columns
 # Replace this with actual DataFrame loading if necessary
@@ -67,12 +68,15 @@ def download_readme(github_url, output_path):
         return None
 
 if __name__ == "__main__":
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
+
     base_output_dir = "github_readmes"
     os.makedirs(base_output_dir, exist_ok=True)
 
-    df_split_temp = pd.read_csv('data/tmp_df_split_temp.csv')
+    df_split_temp = pd.read_csv(f'{base_path}/tmp_df_split_temp.csv')
 
-    to_path = "data/github_readmes_info.csv"
+    to_path = f"{base_path}/github_readmes_info.csv"
     download_info_df = main_download(df_split_temp, to_path=to_path)
     print(download_info_df.head())
     print(f"Downloaded READMEs saved to '{to_path}'.")

@@ -6,3 +6,5 @@ tqdm_joblib
 PyMuPDF
 fitz
 dask
+pdf2image
+pytesseract

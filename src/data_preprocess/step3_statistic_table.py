@@ -4,10 +4,12 @@ import dask.dataframe as dd
 import numpy as np
 from tqdm import tqdm
 from joblib import Parallel, delayed
-from data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
-from data_ingestion.bibtex_parser import BibTeXFactory
+from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
+from src.data_ingestion.bibtex_parser import BibTeXFactory
+from src.utils import load_config
+
 import os, re, time, json
-from utils import load_data, get_statistics_table, clean_title
+from src.utils import load_data, get_statistics_table, clean_title
 tqdm.pandas()
 
 def remove_duplicates(df):
@@ -33,16 +35,16 @@ def filter_entries(df):
     return filtered_df
 
 def main():
-    output_dir = "data"
-    os.makedirs(output_dir, exist_ok=True)
-
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
     data_type = 'modelcard'
+
     # Load data
     start_time = time.time()
     t1 = start_time
     print("⚠️Step 1: Loading data...")
-    df_new = load_data(f"{output_dir}/{data_type}_step4.parquet", columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path'])
-    df_makeup = load_data(f"{output_dir}/{data_type}_step3.parquet", columns=['modelId', 'downloads'])
+    df_new = load_data(f"{base_path}/{data_type}_step4.parquet", columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path'])
+    df_makeup = load_data(f"{base_path}/{data_type}_step3.parquet", columns=['modelId', 'downloads'])
     df = df_new.merge(df_makeup, on='modelId')
     del df_new, df_makeup
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))

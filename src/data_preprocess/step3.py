@@ -4,12 +4,14 @@ import dask.dataframe as dd
 import numpy as np
 from tqdm import tqdm
 from joblib import Parallel, delayed
-from data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
-from data_ingestion.bibtex_parser import BibTeXFactory
-from data_ingestion.citation_fetcher import search_and_fetch_info
+from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
+from src.data_ingestion.bibtex_parser import BibTeXFactory
+from src.data_ingestion.citation_fetcher import search_and_fetch_info
 import os, re, time, json
 from utils import load_data, get_statistics_table, clean_title
 import asyncio
+from src.utils import load_config
+
 tqdm.pandas()
 
 async def citation_retrieve(df, key="parsed_bibtex_tuple_list"):
@@ -77,16 +79,16 @@ def citation_retrieve_process(df, key="parsed_bibtex_tuple_list"):
     print('New attributes added: ["paper_id", "info", "references_within_dataset", "citations_within_dataset", "success_flag"].')
 
 def main():
-    output_dir = "data"
-    os.makedirs(output_dir, exist_ok=True)
-
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
     data_type = 'modelcard'
+
     # Load data
     start_time = time.time()
     t1 = start_time
     print("⚠️Step 1: Loading data...")
-    df_new = load_data(f"{output_dir}/{data_type}_step2.parquet", columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path', 'parsed_bibtex_tuple_list'])
-    df_makeup = load_data(f"{output_dir}/{data_type}_step3.parquet", columns=['modelId', 'downloads'])
+    df_new = load_data(f"{base_path}/{data_type}_step2.parquet", columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path', 'parsed_bibtex_tuple_list'])
+    df_makeup = load_data(f"{base_path}/{data_type}_step3.parquet", columns=['modelId', 'downloads'])
     df = df_new.merge(df_makeup, on='modelId')
     del df_new, df_makeup
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
@@ -94,7 +96,7 @@ def main():
     start_time = time.time()
     citation_retrieve_process(df, key="parsed_bibtex_tuple_list")
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    df.to_parquet(f"{output_dir}/{data_type}_step3.parquet", index=False)
+    df.to_parquet(f"{base_path}/{data_type}_step3.parquet", index=False)
     print("Final time cost: {:.2f} seconds.".format(time.time() - t1))
 
 if __name__ == "__main__":

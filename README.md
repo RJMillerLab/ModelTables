@@ -34,6 +34,8 @@ python -m data_preprocess.step_download_github_readme # TODO: test, prerequest: 
 python -m data_preprocess.step_add_github_tables # tested!
 python -m data_preprocess.step_download_pdf # TODO: test
 python -m data_preprocess.step_add_pdf_tables # TODO: test
+python -m data_preprocess.step_download_tex # tested!
+python -m data_preprocess.step_add_tex_tables # TODO: test
 # TODO: optimize the above code in parallel
 ```
 

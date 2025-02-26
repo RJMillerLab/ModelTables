@@ -9,6 +9,7 @@ import os
 import pandas as pd
 import requests
 from tqdm import tqdm
+from src.utils import load_config
 
 def download_pdf(url, output_path):
     if os.path.exists(output_path):
@@ -55,8 +56,10 @@ def main_download(df, base_output_dir="downloaded_pdfs_by_model", to_path="data/
     return download_info_df
 
 if __name__ == "__main__":
-    df_processed = pd.read_csv("processed_final_urls.csv")
-    to_path="data/downloaded_pdfs_info.csv"
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
+    df_processed = pd.read_csv(f"{base_path}/processed_final_urls.csv")
+    to_path=f"{base_path}/downloaded_pdfs_info.csv"
     download_info_df = main_download(df_processed, to_path=to_path)
     print(download_info_df.head())
     print(f"Downloaded PDFs saved to '{to_path}'.")

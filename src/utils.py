@@ -3,6 +3,11 @@ import dask.dataframe as dd
 import os, re
 from tqdm import tqdm
 import numpy as np
+import yaml
+
+def load_config(file_path):
+    with open(file_path, 'r') as file:
+        return yaml.safe_load(file)
 
 def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/"):
     assert data_type in ["modelcard", "datasetcard"], "data_type must be 'modelcard' or 'datasetcard'"

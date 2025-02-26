@@ -10,10 +10,11 @@ import dask.dataframe as dd
 import numpy as np
 from tqdm import tqdm
 from joblib import Parallel, delayed
-from data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
-from data_ingestion.bibtex_parser import BibTeXFactory
+from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
+from src.data_ingestion.bibtex_parser import BibTeXFactory
 import os, re, time
-from utils import load_data
+from src.utils import load_data, load_config
+
 tqdm.pandas()
 
 def setup_logging(log_filename):
@@ -118,15 +119,15 @@ def save_markdown_to_csv(df, output_folder = "cleaned_markdown_csvs", key="extra
     )
 
 def main():
-    output_dir = "data"
-    os.makedirs(output_dir, exist_ok=True)
-
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
     data_type = 'modelcard'
+    
     # Load data
     start_time = time.time()
     t1 = start_time
     print("⚠️Step 1: Loading data...")
-    df = load_data(f"{output_dir}/{data_type}_step1.parquet", columns=['modelId', 'downloads', 'card_readme', 'contains_markdown_table', 'extracted_markdown_table'])
+    df = load_data(f"{base_path}/{data_type}_step1.parquet", columns=['modelId', 'downloads', 'card_readme', 'contains_markdown_table', 'extracted_markdown_table'])
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("⚠️Step 2: Extracting BibTeX entries...")
     start_time = time.time()
@@ -150,7 +151,7 @@ def main():
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("⚠️Step 6: Saving results to Parquet file...")
     start_time = time.time()
-    output_file = f"{output_dir}/{data_type}_step2.parquet"
+    output_file = f"{base_path}/{data_type}_step2.parquet"
     df.to_parquet(output_file)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Results saved to:", output_file)

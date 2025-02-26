@@ -1,46 +1,58 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+"""
+Author: Zhengyuan Dong
+Created: 2025-02-23
+Last Modified: 2025-02-23
+Description: Extract tables from PDF files and save to CSV files.
+"""
+
 import os
 import re
 import pandas as pd
 import fitz
 from tqdm import tqdm
 from joblib import Parallel, delayed
+from pdf2image import convert_from_path
+import cv2
+import pytesseract
+import numpy as np
+from src.utils import load_config
 
-from data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
-from data_ingestion.bibtex_parser import BibTeXFactory
-from data_preprocess.step2 import save_markdown_to_csv, extract_bibtex, add_extracted_tuples
-from data_preprocess.step1 import extract_markdown
+def pdf_to_images(pdf_path, dpi=300):
+    images = convert_from_path(pdf_path, dpi=dpi)
+    return images
+
+def preprocess_image(image):
+    gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+    _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+    return binary
+
+def extract_table_from_image(image):
+    custom_config = "--psm 6"
+    extracted_text = pytesseract.image_to_string(image, config=custom_config)
+    return extracted_text
 
 def extract_table_from_pdf(pdf_path):
-    try:
-        doc = fitz.open(pdf_path)
-    except Exception as e:
-        print(f"Error opening {pdf_path}: {e}")
-        return None
-
+    images = pdf_to_images(pdf_path)
     table_data = []
-    for page in doc:
-        text = page.get_text("text")
-        lines = text.split('\n')
+    for img in images:
+        processed_img = preprocess_image(img)
+        table_text = extract_table_from_image(processed_img)
+        lines = table_text.split('\n')
         for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            row = re.split(r'\s{2,}', line)
+            row = re.split(r'\s{2,}', line.strip())
             if len(row) > 1:
                 table_data.append(row)
-    doc.close()
     return table_data if table_data else None
 
-def process_pdf_row(row):
+def process_pdf_row(row, output_folder = "pdf_extracted_csv"):
+    os.makedirs(output_folder, exist_ok=True)
     local_path = row.get('local_path')
     if pd.notnull(local_path) and os.path.isfile(local_path):
         table = extract_table_from_pdf(local_path)
         if table:
-            output_folder = "pdf_extracted_csv"
-            os.makedirs(output_folder, exist_ok=True)
             csv_filename = os.path.splitext(os.path.basename(local_path))[0] + ".csv"
             output_csv_path = os.path.join(output_folder, csv_filename)
             try:
@@ -51,19 +63,6 @@ def process_pdf_row(row):
     else:
         return None
 
-def load_github_readme(row):
-    readme_path = row.get('readme_path')
-    if pd.notnull(readme_path) and os.path.isfile(readme_path):
-        try:
-            with open(readme_path, "r", encoding="utf8") as f:
-                content = f.read()
-            return content
-        except Exception as e:
-            print(f"Error reading {readme_path}: {e}")
-            return ""
-    else:
-        return ""
-
 def parallel_process_pdf_entries(df):
     results = Parallel(n_jobs=-1)(
         delayed(process_pdf_row)(row) for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing PDFs")
@@ -72,28 +71,19 @@ def parallel_process_pdf_entries(df):
     df['extracted_pdf_table'] = results
     return df
 
-def parallel_load_github_readme(df):
-    results = Parallel(n_jobs=-1)(
-        delayed(load_github_readme)(row) for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing READMEs")
-    )
-    df = df.copy()
-    df['github_readme'] = results
-    return df
-
 def main():
-    pdf_csv_path = "../downloaded_pdfs_by_model_info.csv"
+    config = load_config('config.yaml')
+    base_path = config.get('base_path')
+    pdf_csv_path = f"{base_path}/downloaded_pdfs_by_model_info.csv"
+    
     print("Loading CSV files...")
     df_pdf = pd.read_csv(pdf_csv_path)
     df_pdf = df_pdf[df_pdf['local_path'].notnull()].copy()
     print("Extracting tables from PDF files in parallel...")
     df_pdf = parallel_process_pdf_entries(df_pdf)
-    print("Merging the two DataFrames by modelId...")
-    #final_df = pd.merge(df_pdf, df_readme, on="modelId", how="outer", suffixes=('_pdf', '_readme'))
-    final_df = df_pdf
-    print("Saving markdown extraction results to CSV files...")
-    #save_markdown_to_csv(final_df, key="pdf_extracted_markdown_table", output_folder="pdf_csvs")
+    print("Saving extracted tables to CSV files...")
     output_parquet = "data/step_pdf_table.parquet"
-    final_df.to_parquet(output_parquet, index=False)
+    df_pdf.to_parquet(output_parquet, index=False)
     print("Final data saved as Parquet file:", output_parquet)
 
 if __name__ == "__main__":
