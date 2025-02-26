@@ -26,7 +26,7 @@ def download_pdf(url, output_path):
     except Exception as e:
         return None
 
-def main_download(df, base_output_dir="downloaded_pdfs_by_model", to_path="data/downloaded_pdfs_info.csv"):
+def main_download(df, base_output_dir="downloaded_pdfs_by_model", to_path="data/downloaded_pdfs_info.parquet"):
     assert 'final_url' in df.columns, "Missing 'final_url' column in DataFrame."
     assert 'modelId' in df.columns, "Missing 'modelId' column in DataFrame."
     os.makedirs(base_output_dir, exist_ok=True)
@@ -50,7 +50,7 @@ def main_download(df, base_output_dir="downloaded_pdfs_by_model", to_path="data/
                 "local_path": downloaded_path if downloaded_path else None
             })
     download_info_df = pd.DataFrame(download_info)
-    download_info_df.to_csv(to_path, index=False)
+    download_info_df.to_parquet(to_path, index=False)
     print(f"Downloaded {len([d for d in download_info if d['local_path']])} PDFs.")
     print(f"Skipped {len([d for d in download_info if not d['local_path']])} PDFs.")
     return download_info_df
@@ -58,8 +58,8 @@ def main_download(df, base_output_dir="downloaded_pdfs_by_model", to_path="data/
 if __name__ == "__main__":
     config = load_config('config.yaml')
     base_path = config.get('base_path')
-    df_processed = pd.read_csv(f"{base_path}/processed_final_urls.csv")
-    to_path=f"{base_path}/downloaded_pdfs_info.csv"
+    df_processed = pd.read_parquet(os.path.join(base_path, "processed_final_urls.parquet"), columns=['final_url', 'modelId'])
+    to_path = os.path.join(base_path, "downloaded_pdfs_info.parquet")
     download_info_df = main_download(df_processed, to_path=to_path)
     print(download_info_df.head())
     print(f"Downloaded PDFs saved to '{to_path}'.")

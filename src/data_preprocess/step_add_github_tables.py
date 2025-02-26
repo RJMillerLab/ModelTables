@@ -91,9 +91,8 @@ def parallel_load_github_readme(df):
 def main():
     config = load_config('config.yaml')
     base_path = config.get('base_path')
-    readme_csv_path = f"{base_path}/github_readmes_info.csv"
     print("Loading CSV files...")
-    df_readme = pd.read_csv(readme_csv_path)
+    df_readme = pd.read_parquet(os.path.join(base_path, "github_readmes_info.parquet"))
     df_readme = df_readme[df_readme['readme_path'].notnull()].copy()
     print("Extracting content from README files in parallel...")
     df_readme = parallel_load_github_readme(df_readme)
@@ -105,7 +104,7 @@ def main():
     df_readme[['github_contains_markdown_table', 'github_extracted_markdown_table']] = pd.DataFrame(results, index=df_readme.index)
     print("Saving markdown extraction results to CSV files...")
     save_markdown_to_csv(df_readme, key="github_extracted_markdown_table", output_folder="github_markdown_csvs", new_key="github_csv_path")
-    output_parquet = "data/step_add_github.parquet"
+    output_parquet = os.path.join(base_path, "step_add_github.parquet")
     df_readme.to_parquet(output_parquet, index=False)
     print("Final data saved as Parquet file:", output_parquet)
 

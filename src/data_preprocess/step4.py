@@ -37,12 +37,11 @@ def extract_json_titles(json_input):
 def main():
     data_type = "modelcard"
     config = load_config('config.yaml')
-    base_path = config.get('base_path')
-    input_file = f"{base_path}/{data_type}_step3.parquet"
+    processed_base_path = os.path.join(config.get('base_path'), "processed")
     
     print("⚠️ Step 1: Loading data...")
     start_time = time.time()
-    df = pd.read_parquet(input_file)
+    df = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step3.parquet"), columns=['parsed_bibtex_tuple_list', 'references_within_dataset', 'citations_within_dataset', 'csv_path'])
     print(f"✅ Data loaded. Time cost: {time.time() - start_time:.2f} seconds.")
     
     print("⚠️ Step 2: Extracting titles and processing new columns...")
@@ -95,7 +94,8 @@ def main():
         os.path.basename(key): [os.path.basename(v) for v in values]
         for key, values in groundtruth.items()
     }
-    with open(f"{base_path}/scilakeUnionBenchmark.pickle", "wb") as f:
+    os.makedirs(os.path.join(config.get('base_path'), "gt"), exist_ok=True)
+    with open(os.path.join(config.get('base_path'), "gt", f"scilakeUnionBenchmark.pickle"), "wb") as f:
         pickle.dump(filtered_groundtruth, f)
     print("✅ Groundtruth associations saved successfully!")
 

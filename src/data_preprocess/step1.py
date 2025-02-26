@@ -2,7 +2,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-02-23
-Last Modified: 2025-02-23
+Last Modified: 2025-02-25
 
 Description: Extract BibTeX entries from the 'card_readme' column and save to CSV files.
 """
@@ -12,10 +12,9 @@ from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 from joblib import Parallel, delayed, parallel_backend
 import re, os, json, time
-from utils import load_data
 from concurrent.futures import ThreadPoolExecutor
 from ruamel.yaml import YAML
-from src.utils import load_config
+from src.utils import load_data, load_config, load_combined_data
 
 tqdm.pandas()
 
@@ -209,12 +208,11 @@ def extract_markdown(df, col_name='card_readme', n_jobs=4):
 def main():
     data_type = "modelcard"
     config = load_config('config.yaml')
-    base_path = config.get('base_path')
+    raw_base_path = os.path.join(config.get('base_path'), 'raw')
     
     print("⚠️ Step 1: Loading data...")
     start_time = time.time()
-    from utils import load_combined_data
-    df = load_combined_data(data_type, file_path=base_path)
+    df = load_combined_data(data_type, file_path=raw_base_path)
     #df = load_data(f"{output_dir}/{file_type}_step1.parquet") # load them all
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
@@ -238,15 +236,13 @@ def main():
     
     print("⚠️ Step 5: Saving results to Parquet file...")
     start_time = time.time()
-    output_file = f"{base_path}/{file_type}_step1.parquet"
     for col in df_split_temp.columns:
         if df_split_temp[col].apply(lambda x: isinstance(x, (list, tuple, np.ndarray))).any():
             df_split_temp[col] = df_split_temp[col].apply(
                 lambda x: ", ".join(map(str, x)) if isinstance(x, (list, tuple, np.ndarray)) else x
             )
-    df_split_temp.to_parquet(output_file)
+    df_split_temp.to_parquet(os.path.join(config.get('base_path'), 'processed', f"{data_type}_step2.parquet"))
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    print("Results saved to:", output_file)
 
 if __name__ == "__main__":
     main()

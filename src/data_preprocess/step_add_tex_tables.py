@@ -91,14 +91,13 @@ def parallel_process_tex_entries(df):
 def main():
     config = load_config('config.yaml')
     base_path = config.get('base_path')
-    tex_csv_path = f"{base_path}/downloaded_tex_info.csv"
+    tex_csv_path = os.path.join(base_path, "downloaded_tex_info.parquet")
     print("Loading CSV files...")
-    df_tex = pd.read_csv(tex_csv_path)
+    df_tex = pd.read_(tex_csv_path)
     df_tex = df_tex[df_tex['local_path'].notnull()].copy()
     print("Extracting tables from .tex files in parallel...")
     df_tex = parallel_process_tex_entries(df_tex)
-    output_parquet = f"{base_path}/step_tex_table.parquet"
-    df_tex.to_parquet(output_parquet, index=False)
+    df_tex.to_parquet(os.path.join(base_path, "step_tex_table.parquet"), index=False)
     print("Final data saved as Parquet:", output_parquet)
 
 if __name__ == "__main__":

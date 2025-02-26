@@ -74,7 +74,7 @@ def download_tex_row(row, base_output_dir):
         }
     return None
 
-def main_download(df, base_output_dir="downloaded_tex_files", to_path="data/downloaded_tex_info.csv"):
+def main_download(df, base_output_dir="downloaded_tex_files", to_path="data/downloaded_tex_info.parquet"):
     assert 'final_url' in df.columns, "Missing 'final_url' column in DataFrame."
     assert 'modelId' in df.columns, "Missing 'modelId' column in DataFrame."
     os.makedirs(base_output_dir, exist_ok=True)
@@ -84,16 +84,16 @@ def main_download(df, base_output_dir="downloaded_tex_files", to_path="data/down
     )
     download_info = [info for info in download_info if info is not None]
     download_info_df = pd.DataFrame(download_info)
-    download_info_df.to_csv(to_path, index=False)
+    download_info_df.to_parquet(to_path, index=False)
     print(f"Downloaded {len(download_info)} .tar.gz files.")
     print(f"Skipped {len(df) - len(download_info)} .tar.gz files.")
     return download_info_df
 
 if __name__ == "__main__":
     config = load_config('config.yaml')
-    base_path = config.get('base_path')
-    df_processed = pd.read_csv(f"{base_path}/processed_final_urls.csv")
-    to_path = f"{base_path}/downloaded_tex_info.csv"
+    processed_base_path = os.path.join(config.get('base_path'), "processed_final_urls.parquet")
+    df_processed = pd.read_parquet(os.path.join(processed_base_path, "processed_final_urls.parquet")) 
+    to_path = os.path.join(processed_base_path, "downloaded_tex_info.parquet")
     download_info_df = main_download(df_processed, to_path=to_path)
     print(download_info_df.head())
     print(f"Downloaded .tar.gz files saved to '{to_path}'.")

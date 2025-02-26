@@ -36,15 +36,15 @@ def filter_entries(df):
 
 def main():
     config = load_config('config.yaml')
-    base_path = config.get('base_path')
+    processed_base_path = os.path.join(config.get('base_path'), "processed")
     data_type = 'modelcard'
 
     # Load data
     start_time = time.time()
     t1 = start_time
     print("⚠️Step 1: Loading data...")
-    df_new = load_data(f"{base_path}/{data_type}_step4.parquet", columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path'])
-    df_makeup = load_data(f"{base_path}/{data_type}_step3.parquet", columns=['modelId', 'downloads'])
+    df_new = load_data(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path'])
+    df_makeup = load_data(os.path.join(processed_base_path, f"{data_type}_step3.parquet"), columns=['modelId', 'downloads'])
     df = df_new.merge(df_makeup, on='modelId')
     del df_new, df_makeup
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
@@ -59,8 +59,8 @@ def main():
     print("⚠️Step 4: Getting statistics table...")
     start_time = time.time()
     benchmark_df = get_statistics_table(unique_by_markdown)
-    os.makedirs("statistics", exist_ok=True)
-    benchmark_df.to_csv("statistics/benchmark_results.csv", index=False)
+    os.makedirs(os.path.join(config.get('base_path'), "statistics"), exist_ok=True)
+    benchmark_df.to_parquet(os.path.join(config.get('base_path'), "statistics", "benchmark_results.parquet"), index=False)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Final time cost: {:.2f} seconds.".format(time.time() - t1))
 

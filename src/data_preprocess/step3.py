@@ -80,15 +80,15 @@ def citation_retrieve_process(df, key="parsed_bibtex_tuple_list"):
 
 def main():
     config = load_config('config.yaml')
-    base_path = config.get('base_path')
+    processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
 
     # Load data
     start_time = time.time()
     t1 = start_time
     print("⚠️Step 1: Loading data...")
-    df_new = load_data(f"{base_path}/{data_type}_step2.parquet", columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path', 'parsed_bibtex_tuple_list'])
-    df_makeup = load_data(f"{base_path}/{data_type}_step3.parquet", columns=['modelId', 'downloads'])
+    df_new = load_data(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path', 'parsed_bibtex_tuple_list'])
+    df_makeup = load_data(os.path.join(processed_base_path, f"{data_type}_step2.parquet"), columns=['modelId', 'downloads'])
     df = df_new.merge(df_makeup, on='modelId')
     del df_new, df_makeup
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
@@ -96,7 +96,7 @@ def main():
     start_time = time.time()
     citation_retrieve_process(df, key="parsed_bibtex_tuple_list")
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    df.to_parquet(f"{base_path}/{data_type}_step3.parquet", index=False)
+    df.to_parquet(os.path.join(processed_base_path, f"{data_type}_step3.parquet"), index=False)
     print("Final time cost: {:.2f} seconds.".format(time.time() - t1))
 
 if __name__ == "__main__":

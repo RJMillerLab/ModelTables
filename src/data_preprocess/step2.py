@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-02-12
-Last Modified: 2025-02-23
+Last Modified: 2025-02-25
 Description: Extract BibTeX entries from the 'card_readme' column and save to CSV files.
 """
 
@@ -120,14 +120,14 @@ def save_markdown_to_csv(df, output_folder = "cleaned_markdown_csvs", key="extra
 
 def main():
     config = load_config('config.yaml')
-    base_path = config.get('base_path')
+    processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
     
     # Load data
     start_time = time.time()
     t1 = start_time
     print("⚠️Step 1: Loading data...")
-    df = load_data(f"{base_path}/{data_type}_step1.parquet", columns=['modelId', 'downloads', 'card_readme', 'contains_markdown_table', 'extracted_markdown_table'])
+    df = load_data(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'downloads', 'card_readme', 'contains_markdown_table', 'extracted_markdown_table'])
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("⚠️Step 2: Extracting BibTeX entries...")
     start_time = time.time()
@@ -151,7 +151,7 @@ def main():
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("⚠️Step 6: Saving results to Parquet file...")
     start_time = time.time()
-    output_file = f"{base_path}/{data_type}_step2.parquet"
+    output_file = os.path.join(processed_base_path, f"{data_type}_step2.parquet")
     df.to_parquet(output_file)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Results saved to:", output_file)

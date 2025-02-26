@@ -74,15 +74,15 @@ def parallel_process_pdf_entries(df):
 def main():
     config = load_config('config.yaml')
     base_path = config.get('base_path')
-    pdf_csv_path = f"{base_path}/downloaded_pdfs_by_model_info.csv"
+    pdf_csv_path = os.path.join(base_path, "downloaded_pdfs_by_model_info.parquet")
     
     print("Loading CSV files...")
-    df_pdf = pd.read_csv(pdf_csv_path)
+    df_pdf = pd.read_parquet(pdf_csv_path)
     df_pdf = df_pdf[df_pdf['local_path'].notnull()].copy()
     print("Extracting tables from PDF files in parallel...")
     df_pdf = parallel_process_pdf_entries(df_pdf)
     print("Saving extracted tables to CSV files...")
-    output_parquet = "data/step_pdf_table.parquet"
+    output_parquet = os.path.join(base_path, "step_pdf_table.parquet")
     df_pdf.to_parquet(output_parquet, index=False)
     print("Final data saved as Parquet file:", output_parquet)
 
