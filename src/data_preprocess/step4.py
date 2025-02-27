@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+"""
+Author: Zhengyuan Dong
+Created: 2025-02-24
+Last Modified: 2025-02-27
+Description: 
+"""
 import time, os, json, pickle
 import numpy as np
 import pandas as pd
@@ -69,7 +75,7 @@ def main():
 
     for idx, row in tqdm(valid_rows.iterrows(), total=valid_rows.shape[0]):
         overlaps = defaultdict(int)
-        ref_cite_titles = set(row.get('cited_paper_list', []) + row.get('citing_paper_list', []))
+        ref_cite_titles = set(row.get('cited_paper_list', []) + row.get('citing_paper_list', [])  + row.get('title_list', []))
         for title in ref_cite_titles: # for each related paper
             candidate_indices = title_to_paper_indices.get(title, set()) # rows indices with the same title of related papers
             for candidate_idx in candidate_indices:

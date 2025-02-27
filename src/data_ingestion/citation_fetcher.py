@@ -68,14 +68,14 @@ class SemanticScholarAPI(AcademicAPI):
         return None
 
     def get_references(self, identifier: str):
-        url = f"{self.BASE_URL}/{identifier}/references"
+        url = f"{self.BASE_URL}/{identifier}/reference&fields=intents,contexts,isInfluential,abstracts"
         response = requests.get(url)
         if response.status_code == 200:
             return response.json()
         return None
 
     def get_citations(self, identifier: str):
-        url = f"{self.BASE_URL}/{identifier}/citations"
+        url = f"{self.BASE_URL}/{identifier}/citations?fields=contexts,intents,isInfluential,abstract"
         response = requests.get(url)
         if response.status_code == 200:
             return response.json()
