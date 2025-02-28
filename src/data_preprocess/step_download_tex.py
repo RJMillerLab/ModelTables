@@ -10,14 +10,13 @@ Description: Download .tar.gz files from arXiv links extracted from input CSV.
 """
 
 
-import os
+import os, re, arxiv
 import pandas as pd
+from tqdm import tqdm
 import requests
 import tarfile
 import subprocess
-from tqdm import tqdm
 from joblib import Parallel, delayed
-import re
 from src.utils import load_config
 import feedparser
 
@@ -62,80 +61,59 @@ def fetch_arxiv_version(arxiv_id):
     version = entry.id.split('v')[-1]
     return version
 
-def download_arxiv_source(arxiv_id, output_dir='downloads'):
-    #src_url = f'https://arxiv.org/e-print/{arxiv_id}'
-    #src_url = f'https://arxiv.org/src/{arxiv_id}' # this need v1, v2 to work, otherwise we only download the html
-    api_url = f'http://export.arxiv.org/api/query?id_list={arxiv_id}'
-    response = requests.get(api_url)
-    response.raise_for_status()
-    entry = feedparser.parse(response.content).entries[0]
-    if 'id' in entry:
-        pass
-    else:
-        return None
-    version = entry.id.split('v')[-1]  # Extract version from the ID
-    src_url = f'https://arxiv.org/src/{arxiv_id}v{version}'  # Construct the URL with version
-    print(src_url)
-    #response = requests.get(src_url, stream=True)
-    #if response.status_code == 404:
-    #    print(f"Warning: {src_url} not found.")
-    #    return None  # Return None if the file is not found
-    #response.raise_for_status()
-    #arxiv_id = arxiv_id.replace('/', '_')
-    file_path = os.path.join(output_dir, f'{arxiv_id}v{version}.tar.gz')
-    #file_path = os.path.join(output_dir, f'{arxiv_id}.tar.gz')
-    try:
-        subprocess.run([
-            'wget', 
-            src_url, 
-            '-O', file_path, 
-            '--header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            '--header', 'Referer: https://arxiv.org/'
-        ], check=True)
-        print(f"Downloaded {file_path}")
-        return file_path
-    except subprocess.CalledProcessError as e:
-        print(f"Failed to download {src_url}: {e}")
-        return None
-    #with open(file_path, 'wb') as file:
-    #    for chunk in response.iter_content(chunk_size=8192):
-    #        file.write(chunk)
-    return file_path
-
 def download_tex_source(arxiv_id, output_dir="downloads"):
     os.makedirs(output_dir, exist_ok=True)
     try:
         version = fetch_arxiv_version(arxiv_id)
     except Exception as e:
         print(f"Error retrieving version for {arxiv_id}: {e}")
-        return None
-    src_url = f'https://arxiv.org/src/{arxiv_id}v{version}'
-    print(f"Downloading from: {src_url}")
-    output_file = os.path.join(output_dir, f'{arxiv_id}v{version}.tar.gz')
+        return {"tex": None, "html": None}
+    tex_url = f'https://arxiv.org/src/{arxiv_id}v{version}'
+    html_url = f'https://arxiv.org/abs/{arxiv_id}v{version}'
+    print(f"Downloading TEX from: {tex_url}")
+    print(f"Downloading HTML from: {html_url}")
+    tex_output_file = os.path.join(output_dir, f'{arxiv_id}v{version}_tex.tar.gz')
+    html_output_file = os.path.join(output_dir, f'{arxiv_id}v{version}_abs.html')
+    # Download TEX source file (.tar.gz)
     try:
         subprocess.run([
             'wget',
-            src_url,
-            '-O', output_file,
+            tex_url,
+            '-O', tex_output_file,
             '--header', f'User-Agent: {USER_AGENT}',
             '--header', 'Referer: https://arxiv.org/'
         ], check=True)
+        print(f"Downloaded TEX file to: {tex_output_file}")
     except subprocess.CalledProcessError as e:
-        print(f"Download failed for {src_url}: {e}")
-        return None
-    print(f"Downloaded file to: {output_file}")
-    return output_file
+        print(f"Download failed for {tex_url}: {e}")
+        tex_output_file = None
+    # Download HTML abstract page
+    try:
+        subprocess.run([
+            'wget',
+            html_url,
+            '-O', html_output_file,
+            '--header', f'User-Agent: {USER_AGENT}',
+            '--header', 'Referer: https://arxiv.org/'
+        ], check=True)
+        print(f"Downloaded HTML file to: {html_output_file}")
+    except subprocess.CalledProcessError as e:
+        print(f"Download failed for {html_url}: {e}")
+        html_output_file = None
+    return {"tex": tex_output_file, "html": html_output_file}
 
 def download_tex_row(row, base_output_dir):
     url = row['final_url']
     arxiv_id = extract_arxiv_id(url)
     if arxiv_id:
         model_id = row['modelId']
-        downloaded_path = download_tex_source(arxiv_id, output_dir=base_output_dir)
+        downloads = download_tex_source(arxiv_id, output_dir=base_output_dir)
         return {
             "modelId": model_id,
             "final_url": url,
-            "local_path": downloaded_path if downloaded_path else None
+            #"local_path": downloaded_path if downloaded_path else None,
+            "local_tex_path": downloads["tex"],
+            "local_html_path": downloads["html"]
         }
     return None
 

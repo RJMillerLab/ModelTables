@@ -30,13 +30,12 @@ python -m data_preprocess.step3_save_starmie_results # analyze searching results
 python -m data_preprocess.step4 # process groundtruth
 
 # TODO: add link extraction!
-python -m data_preprocess.step_download_github_readme # TODO: test, prerequest: have key 'github_link' (list), currently use `data/tmp_df_split_temp.csv`
-python -m data_preprocess.step_add_github_tables # tested!
-python -m data_preprocess.step_download_pdf # TODO: test
-python -m data_preprocess.step_add_pdf_tables # TODO: test
-python -m data_preprocess.step_download_tex # tested!
-python -m data_preprocess.step_add_tex_tables # TODO: test
-# TODO: optimize the above code in parallel
+python -m data_preprocess.step_download_github_readme
+python -m data_preprocess.step_add_github_tables
+python -m data_preprocess.step_download_pdf 
+python -m data_preprocess.step_add_pdf_tables 
+python -m data_preprocess.step_download_tex
+python -m data_preprocess.step_add_tex_tables
 ```
 
 Then run in [starmie]()

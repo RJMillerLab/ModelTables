@@ -8,3 +8,5 @@ fitz
 dask
 pdf2image
 pytesseract
+arxiv
+feedparser
