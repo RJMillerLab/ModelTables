@@ -93,7 +93,7 @@ def main():
     base_path = config.get('base_path')
     tex_csv_path = os.path.join(base_path, "downloaded_tex_info.parquet")
     print("Loading CSV files...")
-    df_tex = pd.read_(tex_csv_path)
+    df_tex = pd.read_parquet(tex_csv_path)
     df_tex = df_tex[df_tex['local_path'].notnull()].copy()
     print("Extracting tables from .tex files in parallel...")
     df_tex = parallel_process_tex_entries(df_tex)
