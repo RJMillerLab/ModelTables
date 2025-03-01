@@ -9,7 +9,6 @@ Last Modified: 2025-02-24
 Description: Download .tar.gz files from arXiv links extracted from input CSV.
 """
 
-
 import os, re, arxiv
 import pandas as pd
 from tqdm import tqdm
@@ -19,8 +18,34 @@ import subprocess
 from joblib import Parallel, delayed
 from src.utils import load_config
 import feedparser
+from stem.control import Controller
 
+TOR_PROXY = "socks5h://127.0.0.1:9050"
+PROXIES = {"http": TOR_PROXY, "https": TOR_PROXY}
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+def untar(fname, output_dir):
+    if not os.path.exists(fname):
+        print(f"❌ File not found: {fname}")
+        return False
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        with tarfile.open(fname, "r:gz") as tar:
+            tar.extractall(path=output_dir)
+        print(f"✅ Unzip successfully: {output_dir}")
+        return True
+    except tarfile.ReadError:
+        print(f"❌ Not a valid tar.gz file: {fname}")
+    except Exception as e:
+        print(f"❌ Failed to extract {fname}: {e}")
+    return False
+
+def change_tor_ip():
+    with Controller.from_port(port=9051) as controller:
+        controller.authenticate()
+        controller.signal(2)
+        print("Change IP")
+        time.sleep(5)
 
 def extract_arxiv_id(url):
     match = re.search(r'(\d{4}\.\d{5})', url)
@@ -74,8 +99,11 @@ def download_tex_source(arxiv_id, output_dir="downloads"):
     print(f"Downloading HTML from: {html_url}")
     tex_output_file = os.path.join(output_dir, f'{arxiv_id}v{version}_tex.tar.gz')
     html_output_file = os.path.join(output_dir, f'{arxiv_id}v{version}_abs.html')
+    extract_path = os.path.join(output_dir, f"{arxiv_id}v{version}")
+    #change_tor_ip()
+    #time.sleep(random.uniform(5, 10))
     # Download TEX source file (.tar.gz)
-    try:
+    """try:
         subprocess.run([
             'wget',
             tex_url,
@@ -100,6 +128,34 @@ def download_tex_source(arxiv_id, output_dir="downloads"):
     except subprocess.CalledProcessError as e:
         print(f"Download failed for {html_url}: {e}")
         html_output_file = None
+    """
+    if os.path.exists(tex_output_file): # cache mechanism
+        if is_valid_tar_gz(tex_output_file):
+            print(f"✅ Cache hit: Using cached TEX file {tex_output_file}")
+            return {"tex": tex_output_file, "html": html_output_file}
+        else:
+            print(f"⚠️ Cache invalid: Removing corrupt TEX file {tex_output_file}")
+            os.remove(tex_output_file)
+
+    if download_file(tex_url, tex_output_file): # and is_valid_tar_gz(tex_output_file):
+        print(f"✅ Successfully downloaded and untared: {tex_output_file}")
+        if is_valid_tar_gz(tex_output_file):
+            print(f"✅ File is a valid tar.gz: {tex_output_file}")
+            if untar(tex_output_file, extract_path):
+                print(f"🗑️ Deleting original .tar.gz: {tex_output_file}")
+                os.remove(tex_output_file)
+            else:
+                print(f"⚠️ Failed to extract {tex_output_file}")
+        else:
+            print(f"❌ Invalid tar.gz file: {tex_output_file}")
+            tex_output_file = None
+        #if untar(tex_output_file, extract_path):
+            #os.remove(tex_output_file)
+            #print(f"🗑️ Deleting original .tar.gz: {tex_output_file}")
+    else:
+        tex_output_file = None
+    if not download_file(html_url, html_output_file):
+        html_output_file = None
     return {"tex": tex_output_file, "html": html_output_file}
 
 def download_tex_row(row, base_output_dir):
@@ -107,7 +163,11 @@ def download_tex_row(row, base_output_dir):
     arxiv_id = extract_arxiv_id(url)
     if arxiv_id:
         model_id = row['modelId']
-        downloads = download_tex_source(arxiv_id, output_dir=base_output_dir)
+        try:
+            downloads = download_tex_source(arxiv_id, output_dir=base_output_dir)
+        except Exception as e:
+            print(f"Error downloading TEX for {arxiv_id}: {e}")
+            downloads = {"tex": None, "html": None}
         return {
             "modelId": model_id,
             "final_url": url,
@@ -116,6 +176,21 @@ def download_tex_row(row, base_output_dir):
             "local_html_path": downloads["html"]
         }
     return None
+
+def download_file(url, output_path):
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://arxiv.org/"}
+    try:
+        #response = requests.get(url, headers=headers, proxies=PROXIES, stream=True)
+        response = requests.get(url, headers=headers, stream=True)
+        response.raise_for_status()
+        with open(output_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"✅ Download successfully: {output_path}")
+        return True
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Download failure {url}: {e}")
+        return False
 
 def main_download(df, base_output_dir="downloaded_tex_files", to_path="data/downloaded_tex_info.parquet"):
     assert 'final_url' in df.columns, "Missing 'final_url' column in DataFrame."

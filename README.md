@@ -22,20 +22,25 @@ $ git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_me
 Run this command
 ```bash
 # cd src
-python -m data_preprocess.step1 # Split readme and tags, Parse tags into columns with name start with `card_tag_xx`, extract markdown table
-python -m data_preprocess.step2 # process bibtex and download markdown csvs
-python -m data_preprocess.step3 # download citations, produce real annotation dataset
-python -m data_preprocess.step3_statistic_table # get statistic tables, not need to run step4, but require to run step3
-python -m data_preprocess.step3_save_starmie_results # analyze searching results of starmie
-python -m data_preprocess.step4 # process groundtruth
+python -m src.data_preprocess.step1 # Split readme and tags, Parse tags into columns with name start with `card_tag_xx`, extract markdown table
+python -m src.data_preprocess.step2 # process bibtex and download markdown csvs
+python -m src.data_preprocess.step3 # download citations, produce real annotation dataset
+python -m src.data_preprocess.step3_statistic_table # get statistic tables, not need to run step4, but require to run step3
+python -m src.data_preprocess.step3_save_starmie_results # analyze searching results of starmie
+python -m src.data_preprocess.step4 # process groundtruth
 
 # TODO: add link extraction!
-python -m data_preprocess.step_download_github_readme
-python -m data_preprocess.step_add_github_tables
-python -m data_preprocess.step_download_pdf 
-python -m data_preprocess.step_add_pdf_tables 
-python -m data_preprocess.step_download_tex
-python -m data_preprocess.step_add_tex_tables
+python -m src.data_preprocess.step_download_github_readme
+python -m src.data_preprocess.step_add_github_tables
+python -m src.data_preprocess.step_download_pdf 
+python -m src.data_preprocess.step_add_pdf_tables 
+python -m src.data_preprocess.step_download_tex
+python -m src.data_preprocess.step_add_tex_tables
+
+# tmp:
+python -m src.data_ingestion.tmp_extract_url # Update PDF url from extracted url (some don't have .pdf, need to extract from html or add)
+python -m src.data_ingestion.tmp_extract_table # Extract table/figures caption and cited text from s2orc dumped data, but don't contain text and figure detailed content!
+
 ```
 
 Then run in [starmie]()
