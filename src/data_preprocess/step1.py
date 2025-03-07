@@ -13,13 +13,78 @@ from tqdm_joblib import tqdm_joblib
 from joblib import Parallel, delayed, parallel_backend
 import re, os, json, time
 from concurrent.futures import ThreadPoolExecutor
-from ruamel.yaml import YAML
-from src.utils import load_data, load_config, load_combined_data
+from src.utils import load_data, load_config, load_combined_data, safe_json_dumps
+from urllib.parse import urlparse
+import pyarrow as pa
+import pyarrow.parquet as pq
+from src.data_ingestion.readme_parser import BibTeXExtractor
 
 tqdm.pandas()
 
-# Initialize the YAML parser
-yaml_parser = YAML(typ="safe")
+# List of valid PDF link domains
+VALID_PDF_LINKS = [
+    "arxiv.org", "biorxiv.org", "medrxiv.org", "dl.acm.org",
+    "dblp.uni-trier.de", "scholar.google.com", "pubmed.ncbi.nlm.nih.gov",
+    "frontiersin.org", "mdpi.com", "cvpr.thecvf.com", "nips.cc",
+    "icml.cc", "ijcai.org", "webofscience.com", "journals.plos.org",
+    "nature.com", "semanticscholar.org", "chemrxiv.org", "link.springer.com",
+    "ieeexplore.ieee.org", "aaai.org", "openaccess.thecvf.com",
+]
+
+ARXIV_IGNORE_IDS = ["arxiv:1910.09700"]
+
+URL_REGEX = re.compile(r"(https?://\S+|www\.\S+)")
+
+def is_valid_pdf_link(link):
+    """
+    Check if the given link is a valid PDF link.
+    It is valid if the URL's domain is in the allowed list
+    or the link ends with '.pdf'.
+    """
+    try:
+        parsed_url = urlparse(link)
+        domain = parsed_url.netloc.lstrip("www.")
+    except Exception:
+        return False
+    return (domain in VALID_PDF_LINKS or link.lower().endswith(".pdf"))
+
+def extract_links(text):
+    """
+    Extract all URLs from the given text and filter out PDF and GitHub links.
+    Additional URL types (e.g., bibtex, arXiv identifiers) can be added as needed.
+    """
+    if pd.isna(text):
+        return {"pdf_link": None, "github_link": None, "all_links": []}
+    # Find all URLs (matching http(s):// and www.)
+    all_links = [link.strip(".,)") for link in URL_REGEX.findall(text)]
+    # Filter PDF and GitHub links
+    pdf_links = [link for link in all_links if is_valid_pdf_link(link)]
+    github_links = [link for link in all_links if "github.com" in link or "github.io" in link]
+    # Special handling: if any ignored arXiv ID is found and it's the only PDF link, ignore it.
+    ignore_found = any(ignore_id in link for link in all_links for ignore_id in ARXIV_IGNORE_IDS)
+    if ignore_found and len(pdf_links) == 1 and any(ignore_id in pdf_links[0] for ignore_id in ARXIV_IGNORE_IDS):
+        pdf_links = []
+    return {
+        "pdf_link": pdf_links if pdf_links else None,
+        "github_link": github_links if github_links else None,
+        "all_links": all_links if all_links else None
+    }
+
+def process_basic_elements_parallel(df, n_jobs=-1):
+    """
+    Process the 'card_readme' column in parallel to extract URL information.
+    """
+    # Ensure card_readme is filled with empty string for NaN values
+    texts = df['card_readme'].fillna('').tolist()
+    # Process each text using the extract_links function in parallel
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(extract_links)(text) for text in tqdm(texts, desc="Extracting URLs")
+    )
+    # Update the DataFrame with new columns from the results
+    df['pdf_link'] = [res["pdf_link"] if res["pdf_link"] else None for res in results]
+    df['github_link'] = [res["github_link"] if res["github_link"] else None for res in results]
+    df['all_links'] = [', '.join(res["all_links"]) if res["all_links"] else None for res in results]
+    return df
 
 # Function to clean up line breaks and whitespace
 def clean_content(content):
@@ -87,123 +152,53 @@ def validate_parsing(df):
             })
     return pd.DataFrame(inconsistencies)
 
-def clean_yaml_content(content):
-    if content is None:
-        return None
-    # Replace tabs with spaces and normalize line endings
-    content = content.replace('\t', ' ')
-    content = content.replace('\r\n', '\n').replace('\r', '\n')
-    return content
+def extract_bibtex(df, readme_key="card_readme", new_key="extracted_bibtex"):
+    """Extract BibTeX entries from the 'card_readme' column."""
+    print("Extracting BibTeX entries...")
+    #df["extracted_bibtex"] = df["card_readme"].apply(lambda x: BibTeXExtractor().extract(x) if isinstance(x, str) else [], meta=('extracted_bibtex', 'object'))
+    df[new_key] = df[readme_key].apply(lambda x: BibTeXExtractor().extract(x) if isinstance(x, str) else [])
+    print(f"New attributes added: {new_key}")
 
-def parse_card_tags_dynamic(card_tag, full_card_content=None, model_id=None):
-    """
-    Parse the YAML in card_tag. Returns (dict, bool, str):
-        dict: Parsed tags or {}
-        bool: has_error flag
-        str: error_message if any
-    """
-    if not card_tag:
-        return {}, False, None
-    card_tag = clean_yaml_content(card_tag)
-    try:
-        parsed_data = yaml_parser.load(card_tag.strip())
-        if isinstance(parsed_data, dict):
-            return parsed_data, False, None
-        else:
-            return {}, False, None
-    except Exception as e:
-        error_message = f"Error parsing card_tags: {e}"
-        # Optionally log or store: the model ID, full card content, etc.
-        # print(error_message)
-        # print(f"Problematic card_tags content:\n{card_tag}")
-        # if model_id: 
-        #     print(f"Model ID: {model_id}")
-        # if full_card_content:
-        #     print(f"Full card content:\n{full_card_content}")
-        return {}, True, error_message  
+def process_bibtex_tuple(entry):
+    """Process a BibTeX entry and return parsed results."""
+    parsed_results = []
+    success_count = 0
+    if isinstance(entry, (tuple, np.ndarray)):
+        entry = list(entry)
+    if isinstance(entry, list):
+        for single_entry in entry:
+            single_entry = ensure_string(single_entry)
+            if single_entry:
+                parsed_entry, flag = BibTeXFactory.parse_bibtex(single_entry)
+                parsed_results.append(parsed_entry)
+                if flag:
+                    success_count += 1
+    elif isinstance(entry, str):
+        single_entry = ensure_string(entry)
+        parsed_entry, flag = BibTeXFactory.parse_bibtex(single_entry)
+        parsed_results.append(parsed_entry)
+        if flag:
+            success_count += 1
+    return parsed_results, success_count
 
-def process_tags_and_combine_dynamic_parallel(df, n_jobs=4):
-    """
-    Parse each row's card_tags in parallel, 
-    then combine results with the original dataframe.
-    """
-    def process_row(row):
-        parsed_tags, has_error, error_message = parse_card_tags_dynamic(
-            row.card_tags,
-            full_card_content=row.card,
-            model_id=getattr(row, 'modelId', None)
+def parse_bibtex_entries(df):
+    """Process BibTeX entries in the DataFrame and return results."""
+    print("Processing BibTeX entries...")
+    non_null_entries = df[df["extracted_bibtex_tuple"].notnull()]
+    # Initialize tqdm progress bar
+    results = []
+    with tqdm(total=len(non_null_entries), desc="Processing BibTeX tuples") as pbar:
+        results = Parallel(n_jobs=-1)(
+            delayed(process_bibtex_tuple)(entry) for entry in non_null_entries["extracted_bibtex_tuple"]
         )
-        # Prefix keys with 'card_tags_'
-        prefixed_tags = {f"card_tags_{k}": v for k, v in parsed_tags.items()}
-        return prefixed_tags, set(prefixed_tags.keys()), has_error, error_message
-
-    with tqdm_joblib(tqdm(desc="Processing rows", total=len(df))) as progress_bar:
-        with parallel_backend('loky'):
-            results = Parallel(n_jobs=n_jobs)(
-                delayed(process_row)(row) for row in df.itertuples()
-            )
-    """with parallel_backend('loky'):  # or 'multiprocessing'
-        results = Parallel(n_jobs=n_jobs)(
-            delayed(process_row)(row) for row in df.itertuples()
-        )"""
-    # Unzip the results
-    parsed_data, all_keys_list, error_flags, error_messages = zip(*results)
-    # Extract all unique keys
-    all_keys = set().union(*all_keys_list)
-    # Create a dict of columns -> values for the parsed tags
-    parsed_results = {
-        key: [row_dict.get(key) for row_dict in parsed_data] 
-        for key in all_keys
-    }
-    # Construct a new DataFrame with parsed data + error info
-    parsed_df = pd.DataFrame(parsed_results)
-    parsed_df['error_flag'] = error_flags
-    parsed_df['error_message'] = error_messages
-    # Combine
-    combined_df = pd.concat([df.reset_index(drop=True), parsed_df], axis=1)
-    return combined_df
-
-def chunked_parallel_processing(df, chunk_size=1000, n_jobs=4):
-    """
-    Process the DataFrame in chunks to manage memory usage.
-    Returns a list of processed DataFrames.
-    """
-    total_chunks = (len(df) + chunk_size - 1) // chunk_size
-    chunks = (df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size))
-
-    processed_list = []
-    with tqdm(total=total_chunks, desc="Processing Chunks") as pbar:
-        for chunk in chunks:
-            processed_chunk = process_tags_and_combine_dynamic_parallel(chunk, n_jobs=n_jobs)
-            processed_list.append(processed_chunk)
-            pbar.update(1)
-    return processed_list
-
-def detect_and_extract_markdown_table(card_content: str):
-    """
-    Detect and extract Markdown tables (supporting multi-line) from the given `card_content`.
-    Returns a tuple of (whether a Markdown table is present, the extracted table text).
-    """
-    if not isinstance(card_content, str):
-        return (False, None)
-    markdown_table_pattern = (
-        r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+"
-    )
-    markdown_match = re.search(markdown_table_pattern, card_content, re.MULTILINE)
-    if markdown_match:
-        return (True, markdown_match.group(0).strip())
-    return (False, None)
-
-def process_row(row):
-    return detect_and_extract_markdown_table(row)
-
-def extract_markdown(df, col_name='card_readme', n_jobs=4):
-    """
-    Extract Markdown tables from the given DataFrame `df` in parallel.
-    """
-    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-        results = list(tqdm(executor.map(process_row, df[col_name]), total=len(df)))
-    return results
+        pbar.update(len(non_null_entries))  # Update progress bar after processing
+    # Create new columns for parsed results
+    non_null_entries["parsed_bibtex_tuple_list"] = [result[0] for result in results]
+    non_null_entries["successful_parse_count"] = [result[1] for result in results]
+    df.loc[non_null_entries.index, 'parsed_bibtex_tuple_list'] = non_null_entries["parsed_bibtex_tuple_list"]
+    df.loc[non_null_entries.index, 'successful_parse_count'] = non_null_entries["successful_parse_count"]
+    print("New attributes added: 'parsed_bibtex_tuple_list', 'successful_parse_count'.")
+    return non_null_entries
 
 def main():
     data_type = "modelcard"
@@ -213,36 +208,65 @@ def main():
     print("⚠️ Step 1: Loading data...")
     start_time = time.time()
     df = load_combined_data(data_type, file_path=raw_base_path)
-    #df = load_data(f"{output_dir}/{file_type}_step1.parquet") # load them all
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
     print("⚠️ Step 2: Splitting readme and tags...")
     start_time = time.time()
-    df_split = extract_tags_and_readme_parallel(df)
+    df = extract_tags_and_readme_parallel(df)
     #inconsistencies_df = validate_parsing(df_split)
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    
-    print("⚠️ Step 3: Processing card_tags...")
+
+    print("⚠️ Step 3: Extracting URLs...")
     start_time = time.time()
-    processed_chunks = chunked_parallel_processing(df, chunk_size=1000, n_jobs=-1)
-    df_split = pd.concat(processed_chunks, ignore_index=True)
+    df = process_basic_elements_parallel(df)
+    print(f"✅ Done. Time cost: {time.time() - start_time:.2f} seconds.")
+
+    print("⚠️Step 4: Extracting BibTeX entries...")
+    start_time = time.time()
+    extract_bibtex(df)
+    df["extracted_bibtex_tuple"] = df["extracted_bibtex"].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
-    print("⚠️ Step 4: Extracting markdown tables...")
+    print("⚠️Step 5: Parsing BibTeX entries...")
     start_time = time.time()
-    results = extract_markdown(df_split, col_name='card_readme')
-    df_split_temp[['contains_markdown_table', 'extracted_markdown_table']] = pd.DataFrame(results, index=df_split_temp.index)
-    print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    
+    processed_entries = parse_bibtex_entries(df)
+    print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
+
+    print("all attributes: ", list(df.columns))
+
+
+    #print("⚠️ Step 4: Convert list to str...")
+    #start_time = time.time()
+    #for col in df.columns:
+    #    if df[col].apply(lambda x: isinstance(x, (list, tuple, np.ndarray))).any():
+    #        df[col] = [safe_json_dumps(x) if isinstance(x, (list, tuple, np.ndarray)) else x for x in df[col]]
+    #print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
+
     print("⚠️ Step 5: Saving results to Parquet file...")
     start_time = time.time()
-    for col in df_split_temp.columns:
-        if df_split_temp[col].apply(lambda x: isinstance(x, (list, tuple, np.ndarray))).any():
-            df_split_temp[col] = df_split_temp[col].apply(
-                lambda x: ", ".join(map(str, x)) if isinstance(x, (list, tuple, np.ndarray)) else x
-            )
-    df_split_temp.to_parquet(os.path.join(config.get('base_path'), 'processed', f"{data_type}_step2.parquet"))
+    pq.write_table(pa.Table.from_pandas(df), os.path.join(config.get('base_path'), 'processed', f"{data_type}_step1.parquet"))
+    #df.to_parquet(os.path.join(config.get('base_path'), 'processed', f"{data_type}_step1.parquet"))
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
+    print("Sampled data: ", df.head(5))
 
 if __name__ == "__main__":
     main()
+
+"""
+Exampled output:
+
+⚠️ Step 1: Loading data...
+✅ Done. Time cost: 5.87 seconds.
+⚠️ Step 2: Splitting readme and tags...
+Extracting Tags and README: 100%|█| 1108759/1108759 [00:29
+✅ Done. Time cost: 34.38 seconds.
+⚠️ Step 3: Extracting URLs...
+Extracting URLs: 100%|█| 1108759/1108759 [00:46<00:00, 235
+✅ Done. Time cost: 50.21 seconds.
+Index(['modelId', 'author', 'last_modified', 'downloads', 'likes',
+       'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card',
+       'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links'],
+      dtype='object')
+⚠️ Step 4: Saving results to Parquet file...
+✅ Done. Time cost: 174.67 seconds.
+"""

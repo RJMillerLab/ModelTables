@@ -1,6 +1,6 @@
 import pandas as pd
 import dask.dataframe as dd
-import os, re
+import os, re, json
 from tqdm import tqdm
 import numpy as np
 import yaml
@@ -120,3 +120,13 @@ def save_analysis_results(df, returnResults, file_name="retrieval_results.csv"):
     final_df = pd.DataFrame(all_rows, columns=['Sample', 'Type', 'modelId','title', 'parsed_bibtex_tuple_list', 'csv_path'])
     final_df.to_csv(file_name, index=False)
     return final_df
+
+
+def safe_json_dumps(x):
+    if isinstance(x, np.ndarray):
+        return json.dumps(x.tolist())
+    elif isinstance(x, (list, tuple)):
+        return json.dumps(x)
+    else:
+        return x
+

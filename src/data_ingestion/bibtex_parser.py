@@ -36,6 +36,10 @@ class BibTeXFactory:
                 result["year"] = entry_data.fields.get("year", "")
                 result["doi"] = entry_data.fields.get("doi", "")
                 result["url"] = entry_data.fields.get("url", "")
+                result["journal"] = entry_data.fields.get("journal", "")
+                result["booktitle"] = entry_data.fields.get("booktitle", "")
+                result["volume"] = entry_data.fields.get("volume", "")
+                result["pages"] = entry_data.fields.get("pages", "")
             return result, True
         except Exception as e:
             #print(f"pybtex failed: {e}")
