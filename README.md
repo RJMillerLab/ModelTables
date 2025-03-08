@@ -24,21 +24,26 @@ Run this command
 # cd src
 
 # get url, bibtex, citations relationship, extract tables
-python -m src.data_preprocess.step1 # Split readme and tags, parse urls
-# TODO: Parse tags into columns with name start with `card_tag_xx` | extract markdown table from card_readme | 
-python -m src.data_preprocess.step2 # process bibtex from card_readme | download markdown csvs
-python -m src.data_preprocess.step3 # get citations through bibtex by API | 
+python -m src.data_preprocess.step1 # Split readme and tags, parse urls, parse bibtex, 
+# get:  ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
+python -m src.data_preprocess.step2 # modelcard: extract markdown | download markdown csvs
+python -m src.data_preprocess.step3 # get citations through bibtex by API | from local files ?
+# TODO: get tags arxiv id
+# TODO: get title
+# TODO: get table from whole text in semantic scholar
+# TODO: download pdf ? formalize table text?
+# TODO: pdf2table? good or not?
 python -m src.data_preprocess.step4 # process groundtruth
 python -m src.data_preprocess.step_download_github_readme
 python -m src.data_preprocess.step_add_github_tables
-python -m src.data_preprocess.step_download_pdf 
+python -m src.data_preprocess.step_download_pdf
 python -m src.data_preprocess.step_add_pdf_tables 
 python -m src.data_preprocess.step_download_tex
 python -m src.data_preprocess.step_add_tex_tables
 
-
 # get statistics
 python -m src.data_preprocess.step1_analysis # get analysis on proportion of different links
+python -m src.data_preprocess.step1_parsetags # Parse tags into columns with name start with `card_tag_xx`
 python -m src.data_preprocess.step3_statistic_table # get statistic tables, not need to run step4, but require to run step3
 python -m src.data_preprocess.step3_save_starmie_results # analyze searching results of starmie
 
@@ -49,8 +54,6 @@ python -m src.data_ingestion.tmp_extract_table # Extract table/figures caption a
 ```
 
 Then run in [starmie]()
-
-
 
 
 
@@ -93,7 +96,7 @@ We will leverage a **Citation Graph API** to annotate and establish these relati
 
 #### 4. **Final Dataset Construction**
    - Create a structured and annotated dataset that includes:
-     - Valid and non-duplicate card data.
+     - Valid and non-duplsicate card data.
      - Citation relationships between cards.
      - Metadata for each card (downloads, likes, BibTeX, and link status).
 ---

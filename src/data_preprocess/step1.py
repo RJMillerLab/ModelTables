@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
 from src.data_ingestion.readme_parser import BibTeXExtractor
+from src.data_ingestion.bibtex_parser import BibTeXFactory
 
 tqdm.pandas()
 
@@ -154,7 +155,6 @@ def validate_parsing(df):
 
 def extract_bibtex(df, readme_key="card_readme", new_key="extracted_bibtex"):
     """Extract BibTeX entries from the 'card_readme' column."""
-    print("Extracting BibTeX entries...")
     #df["extracted_bibtex"] = df["card_readme"].apply(lambda x: BibTeXExtractor().extract(x) if isinstance(x, str) else [], meta=('extracted_bibtex', 'object'))
     df[new_key] = df[readme_key].apply(lambda x: BibTeXExtractor().extract(x) if isinstance(x, str) else [])
     print(f"New attributes added: {new_key}")
@@ -183,7 +183,6 @@ def process_bibtex_tuple(entry):
 
 def parse_bibtex_entries(df):
     """Process BibTeX entries in the DataFrame and return results."""
-    print("Processing BibTeX entries...")
     non_null_entries = df[df["extracted_bibtex_tuple"].notnull()]
     # Initialize tqdm progress bar
     results = []
@@ -199,6 +198,10 @@ def parse_bibtex_entries(df):
     df.loc[non_null_entries.index, 'successful_parse_count'] = non_null_entries["successful_parse_count"]
     print("New attributes added: 'parsed_bibtex_tuple_list', 'successful_parse_count'.")
     return non_null_entries
+
+def ensure_string(entry):
+    """Ensure the input is a string."""
+    return str(entry) if entry is not None else None
 
 def main():
     data_type = "modelcard"
@@ -234,7 +237,6 @@ def main():
 
     print("all attributes: ", list(df.columns))
 
-
     #print("⚠️ Step 4: Convert list to str...")
     #start_time = time.time()
     #for col in df.columns:
@@ -256,17 +258,21 @@ if __name__ == "__main__":
 Exampled output:
 
 ⚠️ Step 1: Loading data...
-✅ Done. Time cost: 5.87 seconds.
+✅ Done. Time cost: 6.00 seconds.
 ⚠️ Step 2: Splitting readme and tags...
-Extracting Tags and README: 100%|█| 1108759/1108759 [00:29
-✅ Done. Time cost: 34.38 seconds.
+Extracting Tags and README: 100%|█████████████████████████████████████████████| 1108759/1108759 [00:43<00:00, 25606.19it/s]
+✅ Done. Time cost: 48.46 seconds.
 ⚠️ Step 3: Extracting URLs...
-Extracting URLs: 100%|█| 1108759/1108759 [00:46<00:00, 235
-✅ Done. Time cost: 50.21 seconds.
-Index(['modelId', 'author', 'last_modified', 'downloads', 'likes',
-       'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card',
-       'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links'],
-      dtype='object')
-⚠️ Step 4: Saving results to Parquet file...
-✅ Done. Time cost: 174.67 seconds.
+Extracting URLs: 100%|████████████████████████████████████████████████████████| 1108759/1108759 [00:46<00:00, 24050.98it/s]
+✅ Done. Time cost: 48.67 seconds.
+⚠️Step 4: Extracting BibTeX entries...
+New attributes added: extracted_bibtex
+✅ Done. Time cost: 50.67 seconds.
+⚠️Step 5: Parsing BibTeX entries...
+Processing BibTeX tuples: 100%|███████████████████████████████████████████████| 1108759/1108759 [00:28<00:00, 39524.73it/s]
+New attributes added: 'parsed_bibtex_tuple_list', 'successful_parse_count'.
+✅ done. Time cost: 46.78 seconds.
+all attributes:  ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
+⚠️ Step 5: Saving results to Parquet file...
+✅ Done. Time cost: 158.64 seconds.
 """

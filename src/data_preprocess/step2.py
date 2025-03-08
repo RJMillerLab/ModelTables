@@ -11,7 +11,6 @@ import numpy as np
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from src.data_ingestion.readme_parser import MarkdownHandler
-from src.data_ingestion.bibtex_parser import BibTeXFactory
 import os, re, time
 from src.utils import load_data, load_config
 
@@ -21,11 +20,6 @@ def setup_logging(log_filename):
     logging.basicConfig(filename=log_filename, level=logging.DEBUG,
                         format='%(asctime)s - %(levelname)s - %(message)s')
     logging.info("Logging started.")
-
-def ensure_string(entry):
-    """Ensure the input is a string."""
-    return str(entry) if entry is not None else None
-
 
 def analyze_results(df):
     """Analyze the results and print statistics."""

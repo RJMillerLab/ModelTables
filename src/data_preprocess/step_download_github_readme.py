@@ -82,7 +82,6 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
     # save the cache as parquet
     cache_df = pd.DataFrame(list(cache.items()), columns=['raw_url', 'downloaded_path'])
     cache_df.to_parquet(os.path.join(config.get('base_path'), "github_readme_cache.parquet"), index=False)
-
     print(f"Downloaded {len([d for d in download_info if d['readme_path']])} READMEs.")
     print(f"Skipped {len([d for d in download_info if not d['readme_path']])} READMEs.")
     return download_info_df
@@ -170,8 +169,9 @@ if __name__ == "__main__":
     config = load_config('config.yaml')
     processed_base_path = os.path.join(config.get('base_path'), "processed")
     base_output_dir = os.path.join(config.get('base_path'), "downloaded_github_readmes")
+    data_type = "modelcard"
     os.makedirs(base_output_dir, exist_ok=True)
-    df_split_temp = pd.read_parquet(os.path.join(processed_base_path, 'tmp_df_split_temp.parquet'), columns=['github_link', 'modelId'])
+    df_split_temp = pd.read_parquet(os.path.join(processed_base_path, f'{data_type}_step1.parquet'), columns=['github_link', 'modelId'])
     df_split_temp['github_link'] = df_split_temp['github_link'].apply(lambda x: eval(x) if isinstance(x, str) and x.startswith('[') and x.endswith(']') else x)
     #df_split_temp['github_link'] = df_split_temp['github_link'].apply(lambda x: clean_github_link(x) if isinstance(x, str) else x)
     download_info_df = main_download(df_split_temp, base_output_dir, to_path=os.path.join(processed_base_path, 'github_readmes_info.parquet'))

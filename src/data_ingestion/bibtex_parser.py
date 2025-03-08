@@ -54,6 +54,10 @@ class BibTeXFactory:
                     result["year"] = entry_data.get("year", "")
                     result["doi"] = entry_data.get("doi", "")
                     result["url"] = entry_data.get("url", "")
+                    result["journal"] = entry_data.get("journal", "")
+                    result["booktitle"] = entry_data.get("booktitle", "")
+                    result["volume"] = entry_data.get("volume", "")
+                    result["pages"] = entry_data.get("pages", "")
                     return result, True
             except Exception as e:
                 #if verbose:
@@ -69,6 +73,10 @@ class BibTeXFactory:
                         result["year"] = entry_data.fields.get("year", "")
                         result["doi"] = entry_data.fields.get("doi", "")
                         result["url"] = entry_data.fields.get("url", "")
+                        result["journal"] = entry_data.fields.get("journal", "")
+                        result["booktitle"] = entry_data.fields.get("booktitle", "")
+                        result["volume"] = entry_data.fields.get("volume", "")
+                        result["pages"] = entry_data.fields.get("pages", "")
                     return result, True
                 except Exception as e:
                     if verbose:
