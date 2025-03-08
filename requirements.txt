@@ -11,4 +11,4 @@ pytesseract
 arxiv
 feedparser
 pdfplumber
-
+html2text

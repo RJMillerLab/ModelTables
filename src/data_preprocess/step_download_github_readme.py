@@ -4,15 +4,27 @@ Created: 2025-02-24
 Last Modified: 2025-02-24
 Description: Download READMEs from the GitHub URLs.
 """
-import os, re
+import os, re, time
 import pandas as pd
 import numpy as np
 import requests
 from tqdm import tqdm
 from src.utils import load_config
 import urllib.parse
+import html2text
+import hashlib
+from joblib import Parallel, delayed
+from tqdm_joblib import tqdm_joblib
 
 cache = {}
+
+def clean_github_link(github_link):
+    return github_link.split('{')[0].split('}')[0].split('[')[0].split(']')[0].split('(')[0].split(')')[0].split('<')[0].split('>')[0].split('*')[0].split('`')[0].split('"')[0].split("'")[0].split('!')[0]
+
+def create_local_filename(base_output_dir, github_url):
+    url_hash = hashlib.md5(github_url.encode('utf-8')).hexdigest()
+    filename = f"{url_hash}.md"
+    return os.path.join(base_output_dir, filename)
 
 def parse_github_link(github_link):
     if not isinstance(github_link, str):
@@ -31,51 +43,57 @@ def parse_github_link(github_link):
 def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet"):
     assert 'github_link' in df.columns, "Missing 'github_link' column in DataFrame."
     assert 'modelId' in df.columns, "Missing 'modelId' column in DataFrame."
+
+    # step1: get all links
+    start_time = time.time()
+    #df['github_link'] = df['github_link'].apply(
+    #    lambda x: eval(x) if isinstance(x, str) and x.startswith('[') and x.endswith(']') else x
+    #)
+    all_raw_links = df[['modelId', 'github_link']].explode('github_link').dropna()
+    total_links_before_dedup = len(all_raw_links)
+    all_links = set(clean_github_link(str(link).strip()) for link in all_raw_links['github_link'] if link)
+
+    print(f"Found {total_links_before_dedup} GitHub links before deduplication.")
+    print(f"Found {len(all_links)} unique GitHub URLs after deduplication.")
+    print(f"Speedup ratio: {total_links_before_dedup / len(all_links):.2f}x reduction in requests.")
+    print(f"Step1 time cost: {time.time() - start_time:.2f} seconds.")
+
+    # step2: download all
+    start_time = time.time()
+    bulk_download_github_urls(all_links, base_output_dir)
+    print(f"Step2 time cost: {time.time() - start_time:.2f} seconds.")
+    
+    # step3: link downloaded files back ot the model data
+    start_time = time.time()
     download_info = []
-    for index, row in tqdm(df.iterrows(), total=len(df)):
-        github_link = row['github_link']
+    for index, row in tqdm(df.iterrows(), total=len(df), desc="Assembling Results"):
         model_id = row['modelId']
-        if github_link is None:
-            continue
-        if isinstance(github_link, (list, tuple, np.ndarray)):
-            if len(github_link) >= 0:
-                github_link_sample = github_link[0]
-            else:
-                #print(f"Skipping invalid github_link for modelId {model_id}: {github_link} because it is empty.")
-                continue
-        elif isinstance(github_link, str):
-            github_link_sample = github_link
-        else:
-            print(f"Skipping invalid github_link for modelId {model_id}: {github_link}")
+        raw_links = row['github_link']
+        if raw_links is None:
+            download_info.append({
+                "modelId": model_id,
+                "github_link": [],
+                "readme_path": []
+            })
             continue
 
-        if github_link_sample in cache:  # Check if the link is in the cache
-            downloaded_path = cache[github_link_sample]
-            #if downloaded_path is None:
-                #print(f"Warning: Cached link for modelId {model_id} is None.")
-        else:
-            raw_url = clean_github_link(github_link_sample)
-            try:
-                user, repo = parse_github_link(raw_url)
-                if user and repo:
-                    readme_path = os.path.join(base_output_dir, f"{user}_{repo}_README.md")
-                    #raw_url = clean_github_link(github_link_sample)
-                    if raw_url in cache:
-                        downloaded_path = cache[raw_url]
-                    else:
-                        if os.path.exists(readme_path):
-                            downloaded_path = readme_path
-                        else:
-                            downloaded_path = download_readme(raw_url, readme_path)
-                        cache[raw_url] = downloaded_path
-            except:
-                downloaded_path = None
-                print(f"Error: Failed to parse {raw_url}")
-                cache[raw_url] = None
+        if isinstance(raw_links, str):
+            raw_links = [raw_links]
+        elif isinstance(raw_links, (list, tuple, np.ndarray)):
+            raw_links = list(raw_links)
+
+        readme_paths = []
+        for g_link in raw_links:
+            if not g_link:
+                continue
+            cleaned_link = clean_github_link(g_link.strip())
+            local_path = cache.get(cleaned_link)
+            if local_path:
+                readme_paths.append(local_path)
         download_info.append({
             "modelId": model_id,
-            "github_link": github_link_sample,
-            "readme_path": downloaded_path if downloaded_path else None
+            "github_link": raw_links,
+            "readme_path": readme_paths
         })
     download_info_df = pd.DataFrame(download_info)
     download_info_df.to_parquet(to_path, index=False)
@@ -84,41 +102,62 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
     cache_df.to_parquet(os.path.join(config.get('base_path'), "github_readme_cache.parquet"), index=False)
     print(f"Downloaded {len([d for d in download_info if d['readme_path']])} READMEs.")
     print(f"Skipped {len([d for d in download_info if not d['readme_path']])} READMEs.")
+    print(f"Step3 time cost: {time.time() - start_time:.2f} seconds.")
     return download_info_df
+
+def bulk_download_github_urls(all_links, base_output_dir, num_workers=8):
+    def process_link(link):
+        """ single URL downloading """
+        if link in cache:
+            return link, cache[link]
+        local_filename = create_local_filename(base_output_dir, link)
+        if os.path.exists(local_filename):
+            cache[link] = local_filename
+            return link, local_filename
+        downloaded_path = download_readme(link, local_filename)
+        cache[link] = downloaded_path
+        return link, downloaded_path
+    results = Parallel(n_jobs=num_workers)(
+        delayed(process_link)(link) for link in tqdm(all_links, desc="Bulk Download")
+    )
+    with tqdm_joblib(tqdm(desc="Bulk Download", total=len(all_links))) as progress_bar:
+        results = Parallel(n_jobs=num_workers)(
+            delayed(process_link)(link) for link in all_links
+        )
+    for link, downloaded_path in results:
+        cache[link] = downloaded_path
 
 def download_readme(github_url, output_path):
     # special domain
-    if 'issues' in github_url or 'assets' in github_url or 'sponsor' in github_url or 'discussions' in github_url:
+    EXCLUDED_TERMS = ['/issues', '/assets', '/sponsor', '/discussions', '/pull']
+    EXCLUDED_SUFFIXES = ['LICENSE']
+    if any(term in github_url for term in EXCLUDED_TERMS) or any(github_url.endswith(suffix) for suffix in EXCLUDED_SUFFIXES):
         return None
     #raw_url = clean_github_link(github_url)# clean the url
     raw_url = github_url
-    if raw_url.endswith('LICENSE'):
-        return None
     try:
         """if '](' in github_url:
             github_url = github_url.split('](')[0] # only take the first url
         if '"' in github_url and not github_url.startswith('"'):
             github_url = github_url.split('"')[0] # only take the first url"""
+        # get raw url for downloading resources
         if raw_url.endswith(':'):
             raw_url = raw_url[:-1]
         if 'gist.github.com' not in raw_url and 'github.com' in raw_url:
             raw_url = raw_url.replace('github.com', 'raw.githubusercontent.com').replace('blob/', '').replace('tree/', '').rstrip("/")
-        if '.' in raw_url.split('/')[-1]:
-            if raw_url.endswith('.md') or raw_url.endswith('.rst') or raw_url.endswith('.txt') or raw_url.endswith('.markdown'):
-                pass
-            else:
-                return None
-        #if re.search(r'/[^/]+\.(?!txt|md|rst|markdown)[^/]+$', raw_url):
-        #    return None
-        # Directly use the URL if it points to a README file
         if raw_url.endswith(('.md', '.rst', '.txt', '.markdown')) or 'gist.github.com' in raw_url:
             response = requests.get(raw_url, timeout=10)
             if response.status_code == 200:
                 with open(output_path, "w", encoding="utf-8") as f:
                     f.write(response.text)
                 return output_path
-            print(f"Error: Failed to download {raw_url} - Status code: {response.status_code}")
+            else:
+                print(f"Error: Failed to download {raw_url} - Status code: {response.status_code}")
             return None
+        #if re.search(r'/[^/]+\.(?!txt|md|rst|markdown)[^/]+$', raw_url):
+        #    return None
+        # Directly use the URL if it points to a README file
+        
         # Handle cases where URL is a directory
         if raw_url.endswith('.git'):
             raw_url = raw_url[:-4]
@@ -136,7 +175,7 @@ def download_readme(github_url, output_path):
             base_url = f"{raw_url.rstrip('/')}/master"
         # Generate all possible README URLs
         readme_urls = [f"{base_url}/{variant}" for variant in readme_variants]
-        # Attempt to download each variant
+        # Attempt to download one variant from readme
         for readme_url in readme_urls:
             try:
                 response = requests.get(readme_url, timeout=10)
@@ -148,22 +187,20 @@ def download_readme(github_url, output_path):
                 #print(f"Warning: Failed to download {readme_url} - {e}")
                 pass
                 #print(f"Warning: Failed to download {readme_url} - {e}")
-        print(f"Error: All README attempts failed for {raw_url}")
+        #print(f"Error: All README attempts failed for {raw_url}")
+        #return None
+        html_response = requests.get(raw_url, timeout=10)
+        if html_response.status_code == 200:
+            md_text = html2text.html2text(html_response.text)
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(md_text)
+            return output_path
+        else:
+            print(f"Error: HTML fallback failed for {github_url} - Status code: {html_response.status_code}")
         return None
     except Exception as e:
         print(f"Error: Exception occurred while downloading {raw_url} - {e}")
         return None
-
-"""def clean_github_link(github_link):
-    #cleaned_link = re.sub(r'[\\\]\)</br>]', '', github_link)
-    cleaned_link = github_link.replace('{', '').replace('}', '').replace('(','').replace(')','').replace('<','').replace('>','').replace('*','').replace('`','').replace('"','').replace("'",'').replace('!','')#.replace(":",'')#.replace(' ','').replace('\n','').replace('\t','').replace('\r','')
-    return cleaned_link"""
-
-"""def clean_github_link(github_link):
-    return re.split(r'[{}()<>*`"!]', github_link)[0]"""
-
-def clean_github_link(github_link):
-    return github_link.split('{')[0].split('}')[0].split('[')[0].split(']')[0].split('(')[0].split(')')[0].split('<')[0].split('>')[0].split('*')[0].split('`')[0].split('"')[0].split("'")[0].split('!')[0]
 
 if __name__ == "__main__":
     config = load_config('config.yaml')
@@ -172,7 +209,19 @@ if __name__ == "__main__":
     data_type = "modelcard"
     os.makedirs(base_output_dir, exist_ok=True)
     df_split_temp = pd.read_parquet(os.path.join(processed_base_path, f'{data_type}_step1.parquet'), columns=['github_link', 'modelId'])
+    print(df_split_temp.info())
     df_split_temp['github_link'] = df_split_temp['github_link'].apply(lambda x: eval(x) if isinstance(x, str) and x.startswith('[') and x.endswith(']') else x)
     #df_split_temp['github_link'] = df_split_temp['github_link'].apply(lambda x: clean_github_link(x) if isinstance(x, str) else x)
     download_info_df = main_download(df_split_temp, base_output_dir, to_path=os.path.join(processed_base_path, 'github_readmes_info.parquet'))
     #print(download_info_df.head())
+
+"""
+
+Exampled output:
+
+Found 664011 GitHub links before deduplication.
+Found 28293 unique GitHub URLs after deduplication.
+Speedup ratio: 23.47x reduction in requests.
+Step1 time cost: 3.16 seconds.
+
+"""
