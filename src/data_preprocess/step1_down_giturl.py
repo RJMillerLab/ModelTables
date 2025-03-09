@@ -1,8 +1,10 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-02-24
-Last Modified: 2025-02-24
-Description: Download READMEs from the GitHub URLs.
+Last Modified: 2025-03-08
+Description: Download README & HTML as .md files from the GitHub URLs.
+
+TODO: solve the memory leakage issue
 """
 import os, re, time
 import pandas as pd
@@ -15,6 +17,8 @@ import html2text
 import hashlib
 from joblib import Parallel, delayed
 from tqdm_joblib import tqdm_joblib
+import aiohttp
+import asyncio
 
 cache = {}
 
@@ -105,7 +109,34 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
     print(f"Step3 time cost: {time.time() - start_time:.2f} seconds.")
     return download_info_df
 
+async def fetch_readme(session, url, local_filename):
+    if os.path.exists(local_filename):
+        cache[url] = local_filename
+        return url, local_filename
+    try:
+        async with session.get(url, timeout=10) as response:
+            if response.status == 200:
+                content = await response.text()
+                with open(local_filename, "w", encoding="utf-8") as f:
+                    f.write(content)
+                cache[url] = local_filename
+                return url, local_filename
+            else:
+                print(f"Error: {url} - Status {response.status}")
+    except Exception as e:
+        print(f"Error fetching {url}: {e}")
+    cache[url] = None
+    return url, None
+
+async def async_download_github_urls(all_links, base_output_dir, num_workers=20):
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=50)) as session:
+        tasks = [fetch_readme(session, link, create_local_filename(base_output_dir, link)) for link in all_links]
+        results = await asyncio.gather(*tasks)
+    for url, downloaded_path in results:
+        cache[url] = downloaded_path
+
 def bulk_download_github_urls(all_links, base_output_dir, num_workers=8):
+    #asyncio.run(async_download_github_urls(all_links, base_output_dir, num_workers))
     def process_link(link):
         """ single URL downloading """
         if link in cache:
@@ -117,9 +148,9 @@ def bulk_download_github_urls(all_links, base_output_dir, num_workers=8):
         downloaded_path = download_readme(link, local_filename)
         cache[link] = downloaded_path
         return link, downloaded_path
-    results = Parallel(n_jobs=num_workers)(
-        delayed(process_link)(link) for link in tqdm(all_links, desc="Bulk Download")
-    )
+    #results = Parallel(n_jobs=num_workers)(
+    #    delayed(process_link)(link) for link in tqdm(all_links, desc="Bulk Download")
+    #)
     with tqdm_joblib(tqdm(desc="Bulk Download", total=len(all_links))) as progress_bar:
         results = Parallel(n_jobs=num_workers)(
             delayed(process_link)(link) for link in all_links

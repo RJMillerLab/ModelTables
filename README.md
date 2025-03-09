@@ -9,37 +9,39 @@
 
 This project uses datasets hosted on Hugging Face. Use the following commands to download the necessary data:
 ```bash
+git clone https://github.com/DoraDong-2023/CitationLake.git
+cd CitationLake/
+mkdir data
+mkdir data/processed
+mkdir data/raw
 # Install Git LFS (Large File Storage)
-$ git lfs install
-
-# Clone required datasets
-$ git clone https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata data/model_cards
-$ git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata data/dataset_cards
+git lfs install
+git clone https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata data/raw
+git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata data/raw
 ```
 
 ## Analysis
 
 Run this command
 ```bash
-# cd src
-
-# get url, bibtex, citations relationship, extract tables
 python -m src.data_preprocess.step1 # Split readme and tags, parse urls, parse bibtex, 
 # get:  ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
-python -m src.data_preprocess.step2 # modelcard: extract markdown | download markdown csvs
-python -m src.data_preprocess.step3 # get citations through bibtex by API | from local files ?
+python -m src.data_preprocess.step1_down_giturl # Download github URL README & HTMLs. Input: modelcard_step1.parquet, Output: data/processed/giturl_info.parquet
+#python -m src.data_preprocess.step1_down_giturl_fake # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
+
+python -m src.data_preprocess.step2 # modelcard: extract markdown table | download markdown csvs
+python -m src.data_preprocess.step3 # get citations through bibtex by API | from local files ? | get citations relationship
 # TODO: get tags arxiv id
 # TODO: get title
 # TODO: get table from whole text in semantic scholar
 # TODO: download pdf ? formalize table text?
 # TODO: pdf2table? good or not?
 python -m src.data_preprocess.step4 # process groundtruth
-python -m src.data_preprocess.step_download_github_readme
-python -m src.data_preprocess.step_add_github_tables
-python -m src.data_preprocess.step_download_pdf
-python -m src.data_preprocess.step_add_pdf_tables 
-python -m src.data_preprocess.step_download_tex
-python -m src.data_preprocess.step_add_tex_tables
+python -m src.data_preprocess.step_add_gittab
+python -m src.data_preprocess.step_down_pdf
+python -m src.data_preprocess.step_add_pdftab
+python -m src.data_preprocess.step_down_tex
+python -m src.data_preprocess.step_add_textab
 
 # get statistics
 python -m src.data_preprocess.step1_analysis # get analysis on proportion of different links
