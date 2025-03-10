@@ -25,6 +25,7 @@ def get_cache_key(parsed_data):
       
 def empty_result():
     return {"paper_id": "", "info": {}, "references": [], "citations": []}
+
 def format_result(info_dict):
     return {
         "paper_id": info_dict.get("paper_id", ""),
@@ -100,18 +101,18 @@ def main():
     start_time = time.time()
     t1 = start_time
     print("⚠️Step 1: Loading data...")
-    load_path=os.path.join(processed_base_path, f"{data_type}_step3.parquet")
+    load_path=os.path.join(processed_base_path, f"{data_type}_step1.parquet")
     print('load_path:', load_path)
-    df_new = load_data(load_path, columns=['modelId', 'parsed_bibtex_tuple_list'])
-    df_makeup = load_data(os.path.join(processed_base_path, f"{data_type}_step2.parquet"), columns=['modelId', 'downloads'])
-    df = df_new.merge(df_makeup, on='modelId')
-    del df_new, df_makeup
+    df= load_data(load_path, columns=['modelId', 'parsed_bibtex_tuple_list', 'downloads'])
+    #df_makeup = load_data(os.path.join(processed_base_path, f"{data_type}_step2.parquet"), columns=['modelId', 'downloads'])
+    #df = df_new.merge(df_makeup, on='modelId')
+    #del df_new, df_makeup
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("⚠️Step 2: Retrieving citations...")
     start_time = time.time()
     citation_retrieve_process(df, key="parsed_bibtex_tuple_list")
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    df.to_parquet(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), index=False)
+    df.to_parquet(os.path.join(processed_base_path, f"{data_type}_citation_API.parquet"), index=False)
     print("Final time cost: {:.2f} seconds.".format(time.time() - t1))
 
 if __name__ == "__main__":

@@ -1,123 +1,163 @@
-"""
-Author: Zhengyuan Dong
-Created: 2025-02-12
-Last Modified: 2025-02-25
-Description: Extract BibTeX entries from the 'card_readme' column and save to CSV files.
-"""
-
+import os
+import re
+import time
+import logging
 import pandas as pd
-import dask.dataframe as dd
-import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
-from joblib import Parallel, delayed
+import numpy as np
+
 from src.data_ingestion.readme_parser import MarkdownHandler
-import os, re, time
 from src.utils import load_data, load_config
 
 tqdm.pandas()
 
 def setup_logging(log_filename):
+    """
+    Set up logging configuration.
+    """
     logging.basicConfig(filename=log_filename, level=logging.DEBUG,
                         format='%(asctime)s - %(levelname)s - %(message)s')
     logging.info("Logging started.")
 
-def analyze_results(df):
-    """Analyze the results and print statistics."""
-    print("Analyzing results...")
-    df_failed_parsing = df[
-        (df["extracted_bibtex_tuple"].notnull()) & 
-        (df["parsed_bibtex_tuple_list"].apply(lambda x: x is None or len([i for i in x if i]) == 0))
-    ]
-    #df_failed_parsing = df[
-    #    (df["extracted_bibtex_tuple"].notnull()) & 
-    #    (df["parsed_bibtex_tuple_list"].apply(lambda x: x is None or len([i for i in x if i]) == 0), meta=('parsed_bibtex_empty', 'bool'))
-    #]
-    total_items = len(df[df["extracted_bibtex_tuple"].notnull()])
-    total_failed = len(df_failed_parsing)
-    print(f"\nProcessed {total_items} BibTeX tuples.")
-    print(f"Failed parses: {total_failed} ({(total_failed / total_items) * 100:.2f}% failure rate)\n")
-    # Output sample of failed parsing
-    return df_failed_parsing
-
-def generate_csv_path(model_id, index, folder):
-    """Generate a unique file path using modelId and index."""
-    sanitized_model_id = re.sub(r"[^\w\-]", "_", str(model_id) if model_id else "unknown_model")
-    return os.path.join(folder, f"{sanitized_model_id}_markdown_{index}.csv")
-
-def save_markdown_to_csv(df, output_folder = "cleaned_markdown_csvs", key="extracted_markdown_table", new_key="csv_path"):
-    """Extract markdown and save to local files."""
-    os.makedirs(output_folder, exist_ok=True)
-    # Apply the MarkdownHandler with a tqdm progress bar
-    df[new_key] = df.progress_apply(
-        lambda row: MarkdownHandler.markdown_to_csv(
-            row[key],
-            generate_csv_path(row["modelId"], row.name, output_folder)
-        ) if pd.notnull(row[key]) else None,
-        axis=1
-    )
-
-def detect_and_extract_markdown_table(card_content: str):
+########
+def detect_and_extract_markdown_tables(content: str):
     """
-    Detect and extract Markdown tables (supporting multi-line) from the given `card_content`.
-    Returns a tuple of (whether a Markdown table is present, the extracted table text).
+    Detect and extract all Markdown tables (supporting multi-line) from the given text.
+    Returns a tuple (bool, list), where the boolean indicates whether at least one table was found,
+    and the list contains all matched table strings; if no match is found, returns (False, []).
     """
-    if not isinstance(card_content, str):
-        return (False, None)
-    markdown_table_pattern = (
-        r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+"
-    )
-    markdown_match = re.search(markdown_table_pattern, card_content, re.MULTILINE)
-    if markdown_match:
-        return (True, markdown_match.group(0).strip())
-    return (False, None)
+    if not isinstance(content, str):
+        return (False, [])
+    markdown_table_pattern = r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+"
+    matches = re.findall(markdown_table_pattern, content, re.MULTILINE)
+    matches = [match.strip() for match in matches] if matches else []
+    return (len(matches) > 0, matches)
+########
 
-def extract_markdown(df, col_name='card_readme', n_jobs=-1):
+def extract_markdown_tables_in_parallel(df, col_name, n_jobs=-1):
     """
-    Extract Markdown tables from the given DataFrame `df` in parallel.
+    Perform parallel extraction of Markdown tables from the specified column (a string)
+    in the DataFrame. Returns a list of tuples (bool, list) for each row.
     """
     with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-        results = list(tqdm(executor.map(detect_and_extract_markdown_table, df[col_name]), total=len(df)))
+        results = list(tqdm(executor.map(detect_and_extract_markdown_tables, df[col_name]), total=len(df)))
     return results
+
+########
+def save_markdown_to_csv_from_content(model_id, content, source, file_idx, output_folder):
+    """
+    Given file content, extract Markdown tables and save them to CSV files.
+    The CSV filenames are generated as "modelId_{source}_git_readme{file_idx}_table{table_idx}.csv".
+    Returns the list of saved CSV file paths.
+    """
+    _, tables = detect_and_extract_markdown_tables(content)
+    saved_paths = []
+    for table_idx, table in enumerate(tables, start=1):
+        identifier = f"git_readme{file_idx}_table{table_idx}"
+        csv_path = generate_csv_path(model_id, source, identifier, output_folder)
+        MarkdownHandler.markdown_to_csv(table, csv_path)
+        saved_paths.append(csv_path)
+    return saved_paths
+########
+
+def generate_csv_path(model_id, source, identifier, folder):
+    """
+    Generate a unique CSV file path using modelId, source (e.g., hugging or github),
+    and an identifier string (e.g., "git_readme1_table2").
+    """
+    filename = f"{model_id}_{source}_{identifier}.csv"
+    return os.path.join(folder, filename)
+
+########
+def process_github_readmes(row, output_folder):
+    """
+    Process GitHub readme files for one row.
+    For each file in row['readme_path'] (a list of paths), read the file,
+    extract all Markdown tables, save each table to a CSV file, and return a list
+    of the saved CSV file paths.
+    """
+    model_id = row["modelId"]
+    readme_paths = row["readme_path"]
+    csv_files = []
+    if not isinstance(readme_paths, list) or len(readme_paths) == 0:
+        return csv_files
+    # Process each file (with index starting at 1 for naming)
+    for file_idx, path in enumerate(readme_paths, start=1):
+        if path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                saved = save_markdown_to_csv_from_content(model_id, content, "git", file_idx, output_folder)
+                csv_files.extend(saved)
+            except Exception as e:
+                print(f"Error processing {path}: {e}")
+    return csv_files
+########
 
 def main():
     config = load_config('config.yaml')
     processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
     
-    # Load data
-    start_time = time.time()
-    print("⚠️Step 1: Loading data...")
-    df = load_data(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'downloads', 'card_readme', 'contains_markdown_table', 'extracted_markdown_table'])
-    print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
+    print("⚠️Step 1: Loading modelcard_step1 data...")
+    df_modelcard = pd.read_parquet(
+        os.path.join(processed_base_path, f"{data_type}_step1.parquet"), 
+        columns=['modelId', 'card_readme', 'github_link']
+    )
+    print(f"✅ Loaded {len(df_modelcard)} rows from modelcard_step1.")
+    df_giturl = pd.read_parquet(
+        os.path.join(processed_base_path, "giturl_info.parquet")
+    )
+    print(f"✅ Loaded {len(df_giturl)} rows from giturl_info.")
+    df_merged = pd.merge(
+        df_modelcard, 
+        df_giturl[['modelId', 'readme_path']],
+        on='modelId', 
+        how='left'
+    )
+    print(f"✅ After merge: {len(df_merged)} rows.")
 
-    print("⚠️ Step 2: Extracting markdown tables...")
-    start_time = time.time()
-    results = extract_markdown(df_split, col_name='card_readme')
-    df_split_temp[['contains_markdown_table', 'extracted_markdown_table']] = pd.DataFrame(results, index=df_split_temp.index)
-    print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
+    # Step 2: Process HuggingFace card readme (already stored in parquet)
+    print("⚠️Step 2: Extracting markdown tables from 'card_readme'...")
+    results_hugging = extract_markdown_tables_in_parallel(df_merged, col_name='card_readme', n_jobs=4)
+    # Save the extracted tables list into a new column
+    df_merged['extracted_markdown_table_hugging'] = [res[1] for res in results_hugging]
+    
+    # Optionally, save HuggingFace CSVs if needed (similar to previous implementation)
+    output_folder_hugging = os.path.join(processed_base_path, "cleaned_markdown_csvs_hugging")
+    os.makedirs(output_folder_hugging, exist_ok=True)
+    # Save CSV files for hugging part and store file paths in a new column
+    hugging_csv_paths = []
+    for idx, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Saving hugging tables to CSV"):
+        cell = row['extracted_markdown_table_hugging']
+        row_paths = []
+        if isinstance(cell, list):
+            for j, table in enumerate(cell, start=1):
+                if table:
+                    identifier = f"table{j}"
+                    csv_path = generate_csv_path(row["modelId"], "hugging", identifier, output_folder_hugging)
+                    MarkdownHandler.markdown_to_csv(table, csv_path)
+                    row_paths.append(csv_path)
+        hugging_csv_paths.append(row_paths)
+    df_merged['hugging_csv_files'] = hugging_csv_paths
 
-    print("⚠️Step 3: Adding extracted tuples for uniqueness checks...")
-    start_time = time.time()
-    df["extracted_markdown_table_tuple"] = df["extracted_markdown_table"].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
-    print("New attributes added: 'extracted_markdown_table_tuple'.")
-    print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
+    # Step 5: Process GitHub readme files individually without loading all content at once.
+    print("⚠️Step 5: Processing GitHub readme files and saving extracted tables to CSV...")
+    output_folder_github = os.path.join(processed_base_path, "cleaned_markdown_csvs_github")
+    os.makedirs(output_folder_github, exist_ok=True)
+    # For each row, process the list of readme paths and record the CSV files generated.
+    github_csv_paths = []
+    for idx, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Processing GitHub readmes"):
+        csv_list = process_github_readmes(row, output_folder_github)
+        github_csv_paths.append(csv_list)
+    df_merged['github_csv_files'] = github_csv_paths
 
-    #print("⚠️Step 7: Analyzing results...")
-    #start_time = time.time()
-    #df_failed_sample = analyze_results(processed_entries)
-    #print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-
-    print("⚠️Step 5: Saving card markdown to CSV files...")
-    start_time = time.time()
-    save_markdown_to_csv(df, output_folder = os.path.join(processed_base_path, "cleaned_markdown_csvs"))
-    print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-
-    print("⚠️Step 6: Saving results to Parquet file...")
-    start_time = time.time()
+    # Step 6: Save the updated DataFrame (including CSV file paths) to a new Parquet file.
+    print("⚠️Step 6: Saving integrated DataFrame to Parquet file...")
     output_file = os.path.join(processed_base_path, f"{data_type}_step2.parquet")
-    df.to_parquet(output_file)
-    print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
-    print("Results saved to:", output_file)
+    df_merged.to_parquet(output_file, index=False)
+    print(f"✅ All done. Results saved to: {output_file}")
 
 if __name__ == "__main__":
     main()

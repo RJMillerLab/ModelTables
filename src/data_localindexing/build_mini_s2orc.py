@@ -3,8 +3,8 @@ Author: Zhengyuan Dong
 Created: 2025-03-09
 Last Modified: 2025-03-09
 
-python build_mini_index.py build --directory ./
-python build_mini_index.py query --title "estimating the resilience to natural disasters by using call detail records" --directory ./
+python build_mini_s2orc.py build --directory /u4/z6dong/shared_data/se_s2orc_250218
+python build_mini_s2orc.py query --title "BioMANIA: Simplifying bioinformatics data analysis through conversation" --directory /u4/z6dong/shared_data/se_s2orc_250218
 """
 
 import os
@@ -133,36 +133,37 @@ def query_paper_info(title, data_directory, db_path=DATABASE_FILE):
 
     corpusid, filename, line_index = result
     filepath = os.path.join(data_directory, filename)
-
     print(f"✅ Found paper: {title} (CorpusID: {corpusid}) in {filename} at line {line_index}")
 
-    # 确保文件存在
     if not os.path.exists(filepath):
         print(f"❌ Error: File {filename} not found in {data_directory}")
         return None
 
-    # 读取文件内容
     with open(filepath, 'r', encoding='utf-8') as f:
         lines = f.readlines()
         if line_index >= len(lines):
             print(f"❌ Error: Line index {line_index} out of range (Total lines: {len(lines)})")
             return None
-
         try:
             paper = json.loads(lines[line_index].strip())
-            print(f"📄 Extracted paper: {json.dumps(paper, indent=2)}")
-            return {
+            content_text = paper.get('content', {}).get('text', '')
+            # Extract tables and figures
+            extracted_data = extract_references(paper, content_text)
+            tables = extracted_data.get('extracted_tables', [])
+            figures = extracted_data.get('extracted_figures', [])
+            result_data = {
                 "corpusid": corpusid,
                 "title": title,
                 "filename": filename,
-                "line_index": line_index
+                "line_index": line_index,
+                "tables": tables,
+                "figures": figures
             }
+            #print(json.dumps(result_data, indent=2, ensure_ascii=False))
+            return result_data
         except json.JSONDecodeError:
             print(f"❌ Error decoding JSON for '{title}' at {filename}:{line_index}")
             return None
-
-    print(f"❌ Error: Line {line_index} not found in {filename}")
-    return None
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build/query paper index with extraction & checkpointing")
