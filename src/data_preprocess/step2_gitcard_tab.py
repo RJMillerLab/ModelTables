@@ -68,6 +68,7 @@ def generate_csv_path(model_id, source, identifier, folder):
     Generate a unique CSV file path using modelId, source (e.g., hugging or github),
     and an identifier string (e.g., "git_readme1_table2").
     """
+    model_id = model_id.replace('/', '_') # Bug here: notice if not replaced, it will cause saving error without any warning
     filename = f"{model_id}_{source}_{identifier}.csv"
     return os.path.join(folder, filename)
 
@@ -81,8 +82,8 @@ def process_github_readmes(row, output_folder):
     """
     model_id = row["modelId"]
     readme_paths = row["readme_path"]
-    print('readme_paths: ', readme_paths)
-    print('type:', type(readme_paths))
+    #print('readme_paths: ', readme_paths)
+    #print('type:', type(readme_paths))
     csv_files = []
     if not isinstance(readme_paths, (list, np.ndarray, tuple)) or len(readme_paths) == 0:
         return csv_files
@@ -135,13 +136,13 @@ def main():
     for idx, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Saving HuggingFace CSVs"):
         cell = row['extracted_markdown_table_hugging']
         row_paths = []
-        if isinstance(cell, (list, np.ndarray, tuple)):
-            for j, table in enumerate(cell, start=1):
-                if table:
-                    identifier = f"table{j}"
-                    csv_path = generate_csv_path(row["modelId"], "hugging", identifier, output_folder_hugging)
-                    MarkdownHandler.markdown_to_csv(table, csv_path)
-                    row_paths.append(csv_path)
+        #if isinstance(cell, (list, np.ndarray, tuple)):
+        for j, table in enumerate(cell, start=1):
+            #if table:
+            identifier = f"table{j}"
+            csv_path = generate_csv_path(row["modelId"], "hugging", identifier, output_folder_hugging)
+            MarkdownHandler.markdown_to_csv(table, csv_path)
+            row_paths.append(csv_path)
         hugging_csv_paths.append(row_paths)
     df_merged['hugging_csv_files'] = hugging_csv_paths
     # ---------- End of HuggingFace part ----------
@@ -165,3 +166,19 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+"""
+Exampled Output
+
+⚠️Step 1: Loading modelcard_step1 data...
+✅ Loaded 1108759 rows from modelcard_step1.
+✅ Loaded 1108759 rows from giturl_info.
+✅ After merge: 1108759 rows.
+⚠️Step 2: Extracting markdown tables from 'card_readme' (HuggingFace)...
+100%|████████████████| 1108759/1108759 [02:49<00:00, 6554.99it/s]
+Saving HuggingFace CSVs: 100%|█| 1108759/1108759 [17:01<00:00, 10
+⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...
+Processing GitHub readmes:   0%| | 1512/1108759 [00:56<6:35:18, 4
+
+"""

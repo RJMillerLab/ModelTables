@@ -52,14 +52,12 @@ python -m src.data_localindexing.build_mini_s2orc query --title "estimating the 
 
 3. Extract tables to local folder:
 ```bash
-python -m src.data_preprocess.step2 # extract table from git + modelcards | save csvs to folder
-python -m src.data_preprocess.step1_CitationInfo #  get citations relation from .db |, parse tables from citations
-# TODO: get tags arxiv id
+python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
+python -m src.data_preprocess.step2_se_url_tab # extract table from semantic scholar
 # TODO: get title
 # TODO: get table from whole text in semantic scholar
-# TODO: download pdf ? formalize table text?
-# TODO: pdf2table? good or not?
-python -m src.data_preprocess.step_add_gittab
+python -m src.data_preprocess.step1_CitationInfo #  get citations relation from .db |, parse tables from citations
+# TODO: get tags arxiv id
 ```
 
 
@@ -83,6 +81,7 @@ python -m src.data_preprocess.step_down_pdf
 python -m src.data_preprocess.step_add_pdftab # Issue: deterministic PDF2table is not accurate enough. Try LLM based image extraction (not implemented here)
 python -m src.data_preprocess.step_down_tex # Issue: IP rate limit on accessing tex files, Possible solution: use arxiv bulk downloading
 python -m src.data_preprocess.step_add_textab
+python -m src.data_preprocess.step_add_gittab
 python -m src.data_ingestion.tmp_extract_url # Update PDF url from extracted url (some don't have .pdf, need to extract from html or add)
 python -m src.data_ingestion.tmp_extract_table # Extract table/figures caption and cited text from s2orc dumped data, but don't contain text and figure detailed content!
 ```
