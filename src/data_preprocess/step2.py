@@ -3,7 +3,7 @@ import re
 import time
 import logging
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor
+from joblib import Parallel, delayed
 from tqdm import tqdm
 import numpy as np
 
@@ -38,10 +38,12 @@ def detect_and_extract_markdown_tables(content: str):
 def extract_markdown_tables_in_parallel(df, col_name, n_jobs=-1):
     """
     Perform parallel extraction of Markdown tables from the specified column (a string)
-    in the DataFrame. Returns a list of tuples (bool, list) for each row.
+    in the DataFrame using joblib.Parallel.
+    Returns a list of tuples (bool, list) for each row.
     """
-    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-        results = list(tqdm(executor.map(detect_and_extract_markdown_tables, df[col_name]), total=len(df)))
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(detect_and_extract_markdown_tables)(content) for content in tqdm(df[col_name], total=len(df))
+    )
     return results
 
 ########
@@ -79,8 +81,10 @@ def process_github_readmes(row, output_folder):
     """
     model_id = row["modelId"]
     readme_paths = row["readme_path"]
+    print('readme_paths: ', readme_paths)
+    print('type:', type(readme_paths))
     csv_files = []
-    if not isinstance(readme_paths, list) or len(readme_paths) == 0:
+    if not isinstance(readme_paths, (list, np.ndarray, tuple)) or len(readme_paths) == 0:
         return csv_files
     # Process each file (with index starting at 1 for naming)
     for file_idx, path in enumerate(readme_paths, start=1):
@@ -118,21 +122,20 @@ def main():
     )
     print(f"✅ After merge: {len(df_merged)} rows.")
 
-    # Step 2: Process HuggingFace card readme (already stored in parquet)
-    print("⚠️Step 2: Extracting markdown tables from 'card_readme'...")
+    # ---------- HuggingFace part (use original code) ----------
+    print("⚠️Step 2: Extracting markdown tables from 'card_readme' (HuggingFace)...")
     results_hugging = extract_markdown_tables_in_parallel(df_merged, col_name='card_readme', n_jobs=4)
     # Save the extracted tables list into a new column
     df_merged['extracted_markdown_table_hugging'] = [res[1] for res in results_hugging]
     
-    # Optionally, save HuggingFace CSVs if needed (similar to previous implementation)
+    # Save CSV files for HuggingFace part and store file paths in a new column
     output_folder_hugging = os.path.join(processed_base_path, "cleaned_markdown_csvs_hugging")
     os.makedirs(output_folder_hugging, exist_ok=True)
-    # Save CSV files for hugging part and store file paths in a new column
     hugging_csv_paths = []
-    for idx, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Saving hugging tables to CSV"):
+    for idx, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Saving HuggingFace CSVs"):
         cell = row['extracted_markdown_table_hugging']
         row_paths = []
-        if isinstance(cell, list):
+        if isinstance(cell, (list, np.ndarray, tuple)):
             for j, table in enumerate(cell, start=1):
                 if table:
                     identifier = f"table{j}"
@@ -141,20 +144,21 @@ def main():
                     row_paths.append(csv_path)
         hugging_csv_paths.append(row_paths)
     df_merged['hugging_csv_files'] = hugging_csv_paths
-
-    # Step 5: Process GitHub readme files individually without loading all content at once.
-    print("⚠️Step 5: Processing GitHub readme files and saving extracted tables to CSV...")
+    # ---------- End of HuggingFace part ----------
+    
+    # ---------- GitHub part ----------
+    print("⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...")
     output_folder_github = os.path.join(processed_base_path, "cleaned_markdown_csvs_github")
     os.makedirs(output_folder_github, exist_ok=True)
-    # For each row, process the list of readme paths and record the CSV files generated.
     github_csv_paths = []
     for idx, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Processing GitHub readmes"):
         csv_list = process_github_readmes(row, output_folder_github)
         github_csv_paths.append(csv_list)
     df_merged['github_csv_files'] = github_csv_paths
+    # ---------- End of GitHub part ----------
 
-    # Step 6: Save the updated DataFrame (including CSV file paths) to a new Parquet file.
-    print("⚠️Step 6: Saving integrated DataFrame to Parquet file...")
+    # ---------- Final Step ----------
+    print("⚠️Step 4: Saving integrated DataFrame to Parquet file...")
     output_file = os.path.join(processed_base_path, f"{data_type}_step2.parquet")
     df_merged.to_parquet(output_file, index=False)
     print(f"✅ All done. Results saved to: {output_file}")

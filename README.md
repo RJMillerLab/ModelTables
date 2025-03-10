@@ -52,7 +52,7 @@ python -m src.data_localindexing.build_mini_s2orc query --title "estimating the 
 
 3. Extract tables to local folder:
 ```bash
-python -m src.data_preprocess.step2 # extract table from .md git, from modelcards | save csvs to folder
+python -m src.data_preprocess.step2 # extract table from git + modelcards | save csvs to folder
 python -m src.data_preprocess.step1_CitationInfo #  get citations relation from .db |, parse tables from citations
 # TODO: get tags arxiv id
 # TODO: get title
