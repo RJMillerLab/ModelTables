@@ -157,7 +157,7 @@ def bulk_download_github_urls(all_links, base_output_dir, num_workers=8):
             cache[link] = local_filename
             return link, local_filename
         downloaded_path = download_readme(link, local_filename)
-        downloaded_path = downloaded_path.split("CitationLake/", 1)[-1] if isinstance(x, str) and "CitationLake/" in x else x
+        downloaded_path = downloaded_path.split("CitationLake/", 1)[-1] if isinstance(downloaded_path, str) and "CitationLake/" in downloaded_path else downloaded_path
         cache[link] = downloaded_path
         return link, downloaded_path
     #results = Parallel(n_jobs=num_workers)(
