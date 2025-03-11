@@ -106,14 +106,20 @@ def process_github_readmes(row, output_folder, config):
 def process_markdown_files(github_folder, output_folder):
     """
     Process all markdown files in github_folder and save them as CSV in output_folder.
+    Skips files larger than 100MB, but still records them in the mapping with value None.
+    If no tables are found, records an empty list.
     """
     os.makedirs(output_folder, exist_ok=True)
     markdown_files = [f for f in os.listdir(github_folder) if f.endswith(".md")]
     md_to_csv_mapping = {}
     for md_file in tqdm(markdown_files, desc="Processing Markdown files"):
         md_path = os.path.join(github_folder, md_file)
+        # Check file size (skip if > 100MB, but still record in mapping)
+        if os.path.getsize(md_path) > 100 * 1024 * 1024:  # 100MB threshold
+            print(f"⚠️ Skipping {md_file} (File too large: {os.path.getsize(md_path) / (1024 * 1024):.2f} MB)")
+            md_to_csv_mapping[md_file.replace(".md", "")] = None  # Record as None
+            continue
         base_csv_name = md_file.replace(".md", "")
-        #csv_path = os.path.join(output_folder, md_file.replace(".md", ".csv"))
         with open(md_path, 'r', encoding='utf-8') as f:
             md_content = f.read()
         _, tables = detect_and_extract_markdown_tables(md_content)
@@ -123,7 +129,9 @@ def process_markdown_files(github_folder, output_folder):
             csv_path = os.path.join(output_folder, csv_basename)
             MarkdownHandler.markdown_to_csv(table, csv_path)
             table_csv_basenames.append(csv_basename)
-        md_to_csv_mapping[base_csv_name] = table_csv_basenames
+        # If no tables found, store an empty list instead of skipping
+        md_to_csv_mapping[base_csv_name] = table_csv_basenames if table_csv_basenames else []
+    # Save mapping as JSON for reference
     mapping_json_path = os.path.join(output_folder, "md_to_csv_mapping.json")
     with open(mapping_json_path, 'w', encoding='utf-8') as json_file:
         json.dump(md_to_csv_mapping, json_file, indent=4)
