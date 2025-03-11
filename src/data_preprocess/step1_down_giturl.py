@@ -44,6 +44,15 @@ def parse_github_link(github_link):
         return user, repo
     return None, None
 
+def is_text_file(url):
+    try:
+        response = requests.head(url, allow_redirects=True, timeout=5)
+        content_type = response.headers.get("Content-Type", "")
+        mime_type = content_type.split(";")[0].strip().lower()
+        return mime_type.startswith("text/")
+    except:
+        return False
+
 def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet"):
     assert 'github_link' in df.columns, "Missing 'github_link' column in DataFrame."
     assert 'modelId' in df.columns, "Missing 'modelId' column in DataFrame."
@@ -104,6 +113,8 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
     # save the cache as parquet
     cache_df = pd.DataFrame(list(cache.items()), columns=['raw_url', 'downloaded_path'])
     cache_df.to_parquet(os.path.join(config.get('base_path'), "github_readme_cache.parquet"), index=False)
+    skipped_df = pd.DataFrame(skipped_links, columns=['raw_url', 'reason'])
+    skipped_df.to_parquet(os.path.join(config.get('base_path'), "skipped_urls.parquet"), index=False)
     print(f"Downloaded {len([d for d in download_info if d['readme_path']])} READMEs.")
     print(f"Skipped {len([d for d in download_info if not d['readme_path']])} READMEs.")
     print(f"Step3 time cost: {time.time() - start_time:.2f} seconds.")
@@ -146,6 +157,7 @@ def bulk_download_github_urls(all_links, base_output_dir, num_workers=8):
             cache[link] = local_filename
             return link, local_filename
         downloaded_path = download_readme(link, local_filename)
+        downloaded_path = downloaded_path.split("CitationLake/", 1)[-1] if isinstance(x, str) and "CitationLake/" in x else x
         cache[link] = downloaded_path
         return link, downloaded_path
     #results = Parallel(n_jobs=num_workers)(
@@ -158,22 +170,46 @@ def bulk_download_github_urls(all_links, base_output_dir, num_workers=8):
     for link, downloaded_path in results:
         cache[link] = downloaded_path
 
+skipped_links = []
+
 def download_readme(github_url, output_path):
     # special domain
-    EXCLUDED_TERMS = ['/issues', '/assets', '/sponsor', '/discussions', '/pull']
+    EXCLUDED_TERMS = ['/issues', '/assets', '/sponsor', '/discussions', '/pull', '/tag']
     EXCLUDED_SUFFIXES = ['LICENSE']
     if any(term in github_url for term in EXCLUDED_TERMS) or any(github_url.endswith(suffix) for suffix in EXCLUDED_SUFFIXES):
+        print(f"Skipping link (excluded pattern): {github_url}")
+        skipped_links.append((github_url, "excluded pattern"))
         return None
     #raw_url = clean_github_link(github_url)# clean the url
     raw_url = github_url
+    if raw_url.endswith('.git'):
+        raw_url = raw_url[:-4]
+    if raw_url.endswith(':'):
+        raw_url = raw_url[:-1]
     try:
         """if '](' in github_url:
             github_url = github_url.split('](')[0] # only take the first url
         if '"' in github_url and not github_url.startswith('"'):
             github_url = github_url.split('"')[0] # only take the first url"""
+        skip_extensions = {"json", "pth", "bin", "ckpt", "pt", "h5", "onnx", "py", "pkl", "tar", "gz"}
+        accept_extensions = {"txt", "rst", "md", "markdown"}
+        last_segment = raw_url.split('/')[-1]
+        last_segment = re.split(r'[#\?]', last_segment)[0]
+
+        if '.' in last_segment:
+            ext = last_segment.rsplit('.', 1)[-1].lower()
+            if ext in skip_extensions:
+                print(f"Skipping link (extension in skip list): {raw_url}")
+                skipped_links.append((raw_url, f"extension .{ext} in skip list"))
+                return None
+            if ext not in accept_extensions:
+                if not is_text_file(raw_url):
+                    print(f"Skipping link (not text file): {raw_url}")
+                    skipped_links.append((raw_url, "not text file"))
+                    return None
+
+        raw_url = '/'.join(raw_url.split('/')[:-1] + [last_segment])
         # get raw url for downloading resources
-        if raw_url.endswith(':'):
-            raw_url = raw_url[:-1]
         if 'gist.github.com' not in raw_url and 'github.com' in raw_url:
             raw_url = raw_url.replace('github.com', 'raw.githubusercontent.com').replace('blob/', '').replace('tree/', '').rstrip("/")
         if raw_url.endswith(('.md', '.rst', '.txt', '.markdown')) or 'gist.github.com' in raw_url:
@@ -187,13 +223,7 @@ def download_readme(github_url, output_path):
             return None
         #if re.search(r'/[^/]+\.(?!txt|md|rst|markdown)[^/]+$', raw_url):
         #    return None
-        # Directly use the URL if it points to a README file
         
-        # Handle cases where URL is a directory
-        if raw_url.endswith('.git'):
-            raw_url = raw_url[:-4]
-        if '#' in raw_url:
-            raw_url = raw_url.split('#')[0]
         # Define possible README filename variants in priority order
         readme_variants = [
             'README.md', 'README.rst','README.txt', 'README.markdown', 'README', 'Readme.md', 'readme.md','Readme.rst',
@@ -203,9 +233,12 @@ def download_readme(github_url, output_path):
         if any(sub in raw_url for sub in ['master', 'main']):
             base_url = raw_url.rstrip('/')
         else:
-            base_url = f"{raw_url.rstrip('/')}/master"
+            #base_url = f"{raw_url.rstrip('/')}/master"
+            base_url = raw_url
+            pass
         # Generate all possible README URLs
-        readme_urls = [f"{base_url}/{variant}" for variant in readme_variants]
+        #readme_urls = [f"{base_url}/{variant}" for variant in readme_variants]
+        readme_urls = [f"{base_url}/{variant}" for variant in readme_variants] + [f"{base_url}/master/{variant}" for variant in readme_variants] + [f"{base_url}/main/{variant}" for variant in readme_variants]
         # Attempt to download one variant from readme
         for readme_url in readme_urls:
             try:
@@ -227,10 +260,12 @@ def download_readme(github_url, output_path):
                 f.write(md_text)
             return output_path
         else:
-            print(f"Error: HTML fallback failed for {github_url} - Status code: {html_response.status_code}")
+            print(f"Error: HTML fallback failed for github_url {github_url}, raw_url {raw_url} - Status code: {html_response.status_code}")
+            skipped_links.append((github_url, "HTML fallback failed"))
         return None
     except Exception as e:
-        print(f"Error: Exception occurred while downloading {raw_url} - {e}")
+        print(f"Error: Exception occurred while downloading github_url {github_url}, raw_url {raw_url} - {e}")
+        skipped_links.append((raw_url, "exception occurred"))
         return None
 
 if __name__ == "__main__":
@@ -247,12 +282,10 @@ if __name__ == "__main__":
     #print(download_info_df.head())
 
 """
-
 Exampled output:
 
 Found 664011 GitHub links before deduplication.
 Found 28293 unique GitHub URLs after deduplication.
 Speedup ratio: 23.47x reduction in requests.
 Step1 time cost: 3.16 seconds.
-
 """
