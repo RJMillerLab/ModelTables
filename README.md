@@ -32,8 +32,9 @@ python -m src.data_preprocess.step1 # Split readme and tags, parse urls, parse b
 # get:  ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
 python -m src.data_preprocess.step1_down_giturl # Download github URL README & HTMLs. Input: modelcard_step1.parquet, Output: data/processed/giturl_info.parquet
 #python -m src.data_preprocess.step1_down_giturl_fake # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
+find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' # some readme files are too large, we fix this issue
+python -m src.data_preprocess.step1_query_giturl load --query data/downloaded_github_readmes/7166b2cb378b3740c3b212bc0657dd11.md # Input: local path, Output: URL
 ```
-
 
 2. Download and build database for faster querying:
 ```bash
@@ -49,23 +50,20 @@ python -m src.data_localindexing.build_mini_s2orc query --title "estimating the 
 # python -m src.data_preprocess.step1_citationAPI # get citations through bibtex only by API. TODO: Update for bibtex + url, not bibtex only. TODO: Update for all bibtex, not the first bibtex
 ```
 
-
 3. Extract tables to local folder:
 ```bash
 python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
-python -m src.data_preprocess.step2_se_url_tab # extract table from semantic scholar
+python -m src.data_preprocess.step2_se_url_tab # extract table from semantic scholar from bibtex and PDF url
 # TODO: get title
 # TODO: get table from whole text in semantic scholar
-python -m src.data_preprocess.step1_CitationInfo #  get citations relation from .db |, parse tables from citations
+python -m src.data_preprocess.step1_CitationInfo #  get citations relation from .db
 # TODO: get tags arxiv id
 ```
-
 
 4. Label groundtruth for unionable search baselines:
 ```bash
 python -m src.data_preprocess.step4 # process groundtruth
 ```
-
 
 5. Analyze some statistics
 ```bash

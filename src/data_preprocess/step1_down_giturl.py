@@ -112,9 +112,9 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
     download_info_df.to_parquet(to_path, index=False)
     # save the cache as parquet
     cache_df = pd.DataFrame(list(cache.items()), columns=['raw_url', 'downloaded_path'])
-    cache_df.to_parquet(os.path.join(config.get('base_path'), "github_readme_cache.parquet"), index=False)
+    cache_df.to_parquet(os.path.join(config.get('base_path'), "processed", "github_readme_cache.parquet"), index=False)
     skipped_df = pd.DataFrame(skipped_links, columns=['raw_url', 'reason'])
-    skipped_df.to_parquet(os.path.join(config.get('base_path'), "skipped_urls.parquet"), index=False)
+    skipped_df.to_parquet(os.path.join(config.get('base_path'), "processed", "github_skipped_urls.parquet"), index=False)
     print(f"Downloaded {len([d for d in download_info if d['readme_path']])} READMEs.")
     print(f"Skipped {len([d for d in download_info if not d['readme_path']])} READMEs.")
     print(f"Step3 time cost: {time.time() - start_time:.2f} seconds.")
@@ -174,7 +174,7 @@ skipped_links = []
 
 def download_readme(github_url, output_path):
     # special domain
-    EXCLUDED_TERMS = ['/issues', '/assets', '/sponsor', '/discussions', '/pull', '/tag']
+    EXCLUDED_TERMS = ['/issues', '/assets', '/sponsor', '/discussions', '/pull', '/tag', '/releases'] # github official tags
     EXCLUDED_SUFFIXES = ['LICENSE']
     if any(term in github_url for term in EXCLUDED_TERMS) or any(github_url.endswith(suffix) for suffix in EXCLUDED_SUFFIXES):
         print(f"Skipping link (excluded pattern): {github_url}")
@@ -191,7 +191,7 @@ def download_readme(github_url, output_path):
             github_url = github_url.split('](')[0] # only take the first url
         if '"' in github_url and not github_url.startswith('"'):
             github_url = github_url.split('"')[0] # only take the first url"""
-        skip_extensions = {"json", "pth", "bin", "ckpt", "pt", "h5", "onnx", "py", "pkl", "tar", "gz"}
+        skip_extensions = {"json", "pth", "bin", "ckpt", "pt", "h5", "onnx", "py", "pkl", "tar", "gz", "gif", "png", "jpg", "jpeg", "csv", "ipynb", "mp4", "mov"}
         accept_extensions = {"txt", "rst", "md", "markdown"}
         last_segment = raw_url.split('/')[-1]
         last_segment = re.split(r'[#\?]', last_segment)[0]
@@ -238,7 +238,7 @@ def download_readme(github_url, output_path):
             pass
         # Generate all possible README URLs
         #readme_urls = [f"{base_url}/{variant}" for variant in readme_variants]
-        readme_urls = [f"{base_url}/{variant}" for variant in readme_variants] + [f"{base_url}/master/{variant}" for variant in readme_variants] + [f"{base_url}/main/{variant}" for variant in readme_variants]
+        readme_urls = [github_url] + [f"{base_url}/{variant}" for variant in readme_variants] + [f"{base_url}/master/{variant}" for variant in readme_variants] + [f"{base_url}/main/{variant}" for variant in readme_variants]
         # Attempt to download one variant from readme
         for readme_url in readme_urls:
             try:
