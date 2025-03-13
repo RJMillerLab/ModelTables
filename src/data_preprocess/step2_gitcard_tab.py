@@ -89,8 +89,8 @@ def save_markdown_to_csv_from_content(model_id, content, source, file_idx, outpu
         MarkdownHandler.markdown_to_csv(table, csv_path)
         saved_paths.append(csv_path)
     return saved_paths
-########
 
+########
 def generate_csv_path(model_id, source, identifier, folder):
     """
     Generate a unique CSV file path using modelId, source (e.g., hugging or github),
@@ -98,6 +98,15 @@ def generate_csv_path(model_id, source, identifier, folder):
     """
     model_id = model_id.replace('/', '_') # Bug here: notice if not replaced, it will cause saving error without any warning
     filename = f"{model_id}_{source}_{identifier}.csv"
+    return os.path.join(folder, filename)
+
+def generate_csv_path_for_dedup(hash_str, table_idx, folder):
+    """
+    Generate a unique CSV file path based on the readme_hash and table index.
+    Example: /path/to/deduped_hugging_csvs/<hash>_table1.csv
+    """
+    short_hash = hash_str[:10]
+    filename = f"{short_hash}_table{table_idx}.csv"
     return os.path.join(folder, filename)
 
 ########
@@ -111,7 +120,6 @@ def process_github_readmes(row, output_folder, config):
     model_id = row["modelId"]
     readme_paths = row["readme_path"]
     readme_paths = [os.path.join(config.get('base_path'), csv_path.split("data", 1)[-1].lstrip("/\\")) for csv_path in readme_paths]
-    
     #print('readme_paths: ', readme_paths)
     #print('type:', type(readme_paths))
     csv_files = []
@@ -211,77 +219,72 @@ def main():
     df_merged['readme_hash'] = df_merged['card_readme'].apply(
         lambda x: hashlib.sha256(x.encode('utf-8')).hexdigest() if isinstance(x, str) else None
     )
+    print('...adding readme_hash')
     # 2) Identify the unique readme rows to parse exactly once
     df_unique = df_merged.drop_duplicates(subset=['readme_hash'], keep='first').copy()
-    print(f"   Found {len(df_unique)} unique readme content out of {len(df_merged)} rows.")
+    df_unique = df_unique[df_unique['readme_hash'].notnull()]
+    print(f"...Found {len(df_unique)} unique readme content out of {len(df_merged)} rows.")
     # 3) Extract markdown tables for each *unique* readme
-    row_index_to_result = extract_markdown_tables_in_parallel(df_unique, col_name='card_readme', n_jobs=4)
+    row_index_to_result = extract_markdown_tables_in_parallel(df_unique, col_name='card_readme', n_jobs=-1)
     # 4) Store the extraction results back in df_unique (two columns: 'found', 'extracted_tables')
-    df_unique['found_tables'] = df_unique.index.map(lambda idx: row_index_to_result[idx][0])
-    df_unique['extracted_markdown_table_hugging'] = df_unique.index.map(lambda idx: row_index_to_result[idx][1])
+    df_unique['found_tables_modelcard'] = df_unique.index.map(lambda idx: row_index_to_result[idx][0])
+    df_unique['extracted_tables_modelcard'] = df_unique.index.map(lambda idx: row_index_to_result[idx][1])
+
+    #df_unique['extracted_markdown_table_hugging'] = df_unique.index.map(lambda idx: row_index_to_result[idx][1])
     # We'll store these results in a dict: readme_hash -> list_of_tables
-    hash_to_tables_map = {}
-    for idx, row in df_unique.iterrows():
+    print('Start creating dictionary for {readme_path: list_of_tables}...')
+    dedup_folder_hugging = os.path.join(processed_base_path, "deduped_hugging_csvs")  ########
+    os.makedirs(dedup_folder_hugging, exist_ok=True)  ########
+    hash_to_csv_map = {}  # readme_hash -> [list_of_csv_paths (absolute paths)]  ########
+    for idx, row in tqdm(df_unique.iterrows(), total=len(df_unique), desc="Storing deduped CSVs"):
         hval = row['readme_hash']
-        hash_to_tables_map[hval] = row['extracted_markdown_table_hugging']
+        tables = row['extracted_tables_modelcard']
+        csv_list = []
+        if not tables:
+            hash_to_csv_map[hval] = []
+            continue
+        for j, table_content in enumerate(tables, start=1):
+            out_csv_path = generate_csv_path_for_dedup(hval, j, dedup_folder_hugging)  ########
+            if os.path.lexists(out_csv_path):
+                os.remove(out_csv_path)
+            MarkdownHandler.markdown_to_csv(table_content, out_csv_path)
+            csv_list.append(os.path.abspath(out_csv_path))  ########
+        hash_to_csv_map[hval] = csv_list
+    hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping.json")  ########
+    with open(hugging_map_json_path, 'w', encoding='utf-8') as jf:
+        json.dump(hash_to_csv_map, jf, indent=2)
+    print(f"✅ Deduped CSV mapping saved to: {hugging_map_json_path}")
+
     # 5) We need to store the CSV for the *first* row (the "master row") that has each readme,
     #    then for subsequent rows that share the same readme, we only create symlinks
     output_folder_hugging = os.path.join(processed_base_path, "cleaned_markdown_csvs_hugging")
     os.makedirs(output_folder_hugging, exist_ok=True)
     # We'll track readme_hash -> list of "master" CSV paths
-    hash_to_master_csv_paths = {}
-    # Prepare a placeholder to fill final CSV paths for each row
     df_merged['hugging_csv_files'] = [[] for _ in range(len(df_merged))]
-    # 6) For each unique readme row (master), create CSV files
-    for hval, subdf_indices in df_merged.groupby('readme_hash').groups.items():
-        # subdf_indices is a list of all rows that share the same readme_hash
-        # the "master index" is the FIRST one in that group, i.e. the first row in that group
-        # since we used drop_duplicates(keep='first'), that first row in df_merged
-        # should match the row in df_unique as well
-        master_idx = sorted(subdf_indices)[0]  # pick the smallest index or in any order
-        master_model_id = df_merged.at[master_idx, 'modelId']
-        # Get the extracted tables from hash_to_tables_map
-        tables = hash_to_tables_map.get(hval, [])
-        master_csv_paths = []
-        # If we found tables for this readme, save them under the master model's name
-        for j, table_content in enumerate(tables, start=1):
-            csv_path = generate_csv_path(master_model_id, "hugging", f"table{j}", output_folder_hugging)
-            # Remove old file/symlink if it exists
-            if os.path.lexists(csv_path):
-                os.remove(csv_path)
-            MarkdownHandler.markdown_to_csv(table_content, csv_path)
-            master_csv_paths.append(csv_path)
-        # Save these "master" CSV paths to the dictionary
-        hash_to_master_csv_paths[hval] = master_csv_paths
-        # Update the master row's hugging_csv_files in df_merged
-        df_merged.at[master_idx, 'hugging_csv_files'] = master_csv_paths
-    # 7) Create symlinks for subsequent rows that share the same readme_hash
-    for hval, master_csv_paths in hash_to_master_csv_paths.items():
-        # For all rows that share this hval, after the first, create symlinks
-        subdf_indices = df_merged.groupby('readme_hash').groups[hval]
-        sorted_indices = sorted(subdf_indices)
-        # skip index 0 in sorted_indices if that was the master
-        if len(sorted_indices) <= 1:
-            continue  # nothing else to symlink
 
-        master_idx = sorted_indices[0]  # the first row that "owns" these CSV files
-        master_model_id = df_merged.at[master_idx, 'modelId']
-
-        # For subsequent rows in the group
-        for row_idx in sorted_indices[1:]:
-            row_model_id = df_merged.at[row_idx, 'modelId']
-            symlink_paths = []
-            # We'll create a symlink for each table in master_csv_paths
-            for j, master_csv_path in enumerate(master_csv_paths, start=1):
-                row_csv_path = generate_csv_path(row_model_id, "hugging", f"table{j}", output_folder_hugging)
-                if os.path.lexists(row_csv_path):
-                    os.remove(row_csv_path)
+    print("⚠️Step 2.2: Creating symlinks to 'cleaned_markdown_csvs_hugging' ...")  ########
+    for i, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Linking CSVs"):
+        hval = row['readme_hash']
+        if not isinstance(hval, str):
+            continue
+        deduped_csv_list = hash_to_csv_map.get(hval, [])
+        symlink_paths = []
+        if deduped_csv_list:
+            model_id = row['modelId']
+            for idx_table, csv_real_path in enumerate(deduped_csv_list, start=1):
+                # e.g.: <processed_base_path>/cleaned_markdown_csvs_hugging/<modelId>_hugging_table{idx_table}.csv
+                model_id_sanitized = model_id.replace('/', '_')
+                link_filename = f"{model_id_sanitized}_hugging_table{idx_table}.csv"  ########
+                link_path = os.path.join(output_folder_hugging, link_filename)
+                if os.path.lexists(link_path):
+                    os.remove(link_path)
                 try:
-                    os.symlink(os.path.abspath(master_csv_path), row_csv_path)
+                    os.symlink(csv_real_path, link_path)  ########
                 except Exception as e:
-                    print(f"❌ Error creating symlink: {row_csv_path} -> {master_csv_path}: {e}")
-                symlink_paths.append(row_csv_path)
-            df_merged.at[row_idx, 'hugging_csv_files'] = symlink_paths
+                    print(f"❌ Error creating symlink: {link_path} -> {csv_real_path}: {e}")
+                symlink_paths.append(link_path)
+        df_merged.at[i, 'hugging_csv_files'] = symlink_paths
+    print("End of HuggingFace part.\n")
     ########
     # ---------- End of HuggingFace part ----------
     
@@ -328,13 +331,40 @@ if __name__ == "__main__":
 """
 Exampled Output
 
-⚠️Step 1: Loading modelcard_step1 data...
+⚠️⚠️Step 1: Loading modelcard_step1 data...
 ✅ After merge: 1108759 rows.
 ⚠️Step 2: Extracting markdown tables from 'card_readme' (HuggingFace)...
-100%|████████████████| 1108759/1108759 [02:49<00:00, 6554.99it/s]
-Saving HuggingFace CSVs: 100%|█| 1108759/1108759 [17:01<00:00, 10
-⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...
-Processing Markdown files:   3%| | 512/18121 [01:37<1:22:4
+...adding readme_hash
+...Found 387883 unique readme content out of 1108759 rows.
+100%|███████████████████████████████████████████████████| 387883/387883 [01:20<00:00, 4793.16it/s]
+Start creating dictionary for {readme_path: list_of_tables}...
+Storing deduped CSVs: 100%|██████████████████████████████| 387883/387883 [13:59<00:00, 461.85it/s]
+✅ Deduped CSV mapping saved to: /Users/doradong/Repo/CitationLake/data/processed/hugging_deduped_mapping.json
+⚠️Step 2.2: Creating symlinks to 'cleaned_markdown_csvs_hugging' ...
+Linking CSVs: 100%|███████████████████████████████████| 1108759/1108759 [04:25<00:00, 4178.61it/s]
+End of HuggingFace part.
 
+⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...
+Processing Markdown files:   7%|█▉                           | 1304/19916 [00:19<04:15, 72.82it/s]⚠️ Skipping 8d77428a41be7b07877aed1208e7106a.md (File too large: 14.38 MB)
+Processing Markdown files:  11%|███▏                         | 2156/19916 [00:30<03:20, 88.65it/s]⚠️ Skipping 3769fd2d562ed5bfb1412b4be4ea91f4.md (File too large: 49.72 MB)
+Processing Markdown files:  11%|███▏                         | 2199/19916 [00:33<09:34, 30.81it/s]⚠️ Skipping 57e6cbf06af2077ad39f6dc022f448a0.md (File too large: 8.64 MB)
+Processing Markdown files:  12%|███▌                         | 2457/19916 [00:36<03:11, 91.12it/s]⚠️ Skipping 88f0e7f02c674aa25e628a3d79e9bbdb.md (File too large: 12.53 MB)
+Processing Markdown files:  38%|███████████                  | 7616/19916 [01:49<06:46, 30.29it/s]⚠️ Skipping 6880c06f052a3e6d52e5f6da9258bb1a.md (File too large: 7.17 MB)
+Processing Markdown files:  45%|████████████▉                | 8903/19916 [02:06<02:11, 83.58it/s]⚠️ Skipping fc2193033fac642fbc50a27e31291ca7.md (File too large: 12.78 MB)
+Processing Markdown files:  50%|██████████████▍              | 9900/19916 [02:36<02:39, 62.71it/s]⚠️ Skipping 665b970b8e4c4aeead66dd542331c37e.md (File too large: 5.95 MB)
+Processing Markdown files:  62%|█████████████████▍          | 12394/19916 [11:46<01:23, 90.36it/s]⚠️ Skipping 44a0008dcc96aad0da0c0ac00fdc4d09.md (File too large: 8.12 MB)
+Processing Markdown files:  66%|██████████████████▍         | 13093/19916 [11:55<01:15, 90.02it/s]⚠️ Skipping b7c00a7974825548053cb4a8501f1440.md (File too large: 22.23 MB)
+Processing Markdown files:  67%|██████████████████▊         | 13350/19916 [11:59<01:56, 56.30it/s]⚠️ Skipping de3a438afd20c4649d2b2fbe800e71e4.md (File too large: 10.60 MB)
+Processing Markdown files:  67%|██████████████████▊         | 13365/19916 [11:59<02:01, 53.93it/s]⚠️ Skipping b6c76f03d949332d18f77b4030d3493d.md (File too large: 6.07 MB)
+Processing Markdown files:  69%|███████████████████▎        | 13772/19916 [12:05<01:27, 70.34it/s]⚠️ Skipping fc856ed1392888cab683eed4deb8e61b.md (File too large: 14.79 MB)
+Processing Markdown files:  71%|███████████████████▊        | 14106/19916 [12:10<01:12, 80.65it/s]⚠️ Skipping bbb830ff97cb048d9dbd1fd0523f28b4.md (File too large: 29.72 MB)
+Processing Markdown files:  71%|████████████████████        | 14231/19916 [12:11<01:08, 83.58it/s]⚠️ Skipping ca9977191569120dcb613632526bede5.md (File too large: 11.89 MB)
+Processing Markdown files:  78%|█████████████████████▉      | 15633/19916 [12:31<01:03, 67.55it/s]⚠️ Skipping d288d0c1b17b6c35cb56533d4b75c3b8.md (File too large: 34.09 MB)
+Processing Markdown files:  85%|███████████████████████▉    | 16989/19916 [12:51<00:38, 75.88it/s]⚠️ Skipping 874f2976b310e16e87d24db0eee0e440.md (File too large: 24.67 MB)
+Processing Markdown files:  88%|████████████████████████▌   | 17452/19916 [12:59<00:56, 43.41it/s]⚠️ Skipping 3803c3116946fc9c859c576a724b0a47.md (File too large: 12.10 MB)
+Processing Markdown files:  94%|██████████████████████████▎ | 18744/19916 [13:18<00:13, 84.76it/s]⚠️ Skipping 50acb0cbbf98479df6ed5323953efc13.md (File too large: 14.31 MB)
+Processing Markdown files: 100%|████████████████████████████| 19916/19916 [13:54<00:00, 23.87it/s]
+Processing GitHub readmes: 100%|█████████████████████| 1108759/1108759 [01:42<00:00, 10784.97it/s]
 ⚠️Step 4: Saving integrated DataFrame to Parquet file...
+✅ All done. Results saved to: /Users/doradong/Repo/CitationLake/data/processed/modelcard_step2.parquet
 """
