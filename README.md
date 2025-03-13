@@ -53,6 +53,8 @@ python -m src.data_localindexing.build_mini_s2orc query --title "estimating the 
 3. Extract tables to local folder:
 ```bash
 python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
+python -m src.data_preprocess.step2_recreate_symlinks # re-create the symbolic link
+
 python -m src.data_preprocess.step2_se_url_tab # extract table from semantic scholar from bibtex and PDF url
 # TODO: get title
 # TODO: get table from whole text in semantic scholar
