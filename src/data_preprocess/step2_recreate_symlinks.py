@@ -63,11 +63,7 @@ def recreate_symlinks_hugging(config_path="config.yaml"):
     print("✅ HuggingFace symlinks recreated and DataFrame updated.")
 
 def recreate_symlinks_github(config_path="config.yaml"):
-    """
-    Recreate symlinks for GitHub CSV files.
-    1. 从 cleaned_markdown_csvs_github 文件夹中加载 md_to_csv_mapping.json（由原始 GitHub 处理生成）。
-    2. 根据映射中的 CSV 文件名，在 symlinked_github_csvs 文件夹下创建符号链接。
-    """
+
     config = load_config(config_path)
     processed_base_path = os.path.join(config.get('base_path'), 'processed')
 
