@@ -1,8 +1,12 @@
 config.yaml
 data/
 cleaned_markdown_csvs/
+github_readme_output_2/
+github_readme_output/
 downloaded_pdfs_by_model/
 downloaded_pdfs/
+pdf_downloads/
+github_html/
 github_readmes/
 tmp/
 *.json
