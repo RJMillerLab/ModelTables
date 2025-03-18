@@ -28,13 +28,13 @@ from src.utils import load_config
 import html2text
 import hashlib
 from src.data_ingestion.readme_parser import BibTeXExtractor
-
+from joblib import parallel_backend ########
 from PyPDF2 import PdfReader
 class PdfReadError(Exception):
     pass
 
-ARXIV_CACHE_PATH = "arxiv_titles_cache.json"
-RXIV_CACHE_PATH = "rxiv_titles_cache.json"
+ARXIV_CACHE_PATH = "data/processed/arxiv_titles_cache.json"
+RXIV_CACHE_PATH = "data/processed/rxiv_titles_cache.json"
 
 def load_cache(file_path):
     try:
@@ -103,7 +103,7 @@ def extract_domain(url):
         if m:
             return m.group(1).lower()
     except Exception as e:
-        logging.error(f"Error extracting domain from {url}: {e}")
+        print(f"Error extracting domain from {url}: {e}")
     return None
 
 def is_invalid_extension(url):
@@ -126,10 +126,11 @@ def extract_links_from_columns(df, cols):
             return cleaned_links
         else:
             return []
-    results = Parallel(n_jobs=-1)(
-        delayed(lambda col: df[col].apply(process_cell).tolist())(col)
-        for col in tqdm(cols, desc="Processing columns")
-    )
+    with parallel_backend('loky', n_jobs=4, temp_folder="./joblib_tmp"): ########
+        results = Parallel(n_jobs=4)(
+            delayed(lambda col: df[col].apply(process_cell).tolist())(col)
+            for col in tqdm(cols, desc="Processing columns")
+        )
     combined_links = [link for col in results for cell in col for link in cell]
     return list(set(combined_links))
 
@@ -145,6 +146,8 @@ def pdf_title_partial_fetch(url, max_bytes=2048):
             metadata = pdf_reader.metadata
             title = metadata.get('/Title') if metadata else None
             if title:
+                if not isinstance(title, str): ########
+                    title = str(title) ########
                 return title.strip()
             else:
                 return pdf_title_full_fetch(url)
@@ -155,28 +158,48 @@ def pdf_title_partial_fetch(url, max_bytes=2048):
 
 def pdf_title_full_fetch(url):
     try:
-        resp = requests.get(url, timeout=TIMEOUT)
-        resp.raise_for_status()
         file_basename = os.path.basename(url)
         local_pdf_path = os.path.join(PDF_DOWNLOAD_FOLDER, file_basename)
-        with open(local_pdf_path, 'wb') as f:
-            f.write(resp.content)
-        pdf_reader = PdfReader(io.BytesIO(resp.content))
+        if os.path.isfile(local_pdf_path) and os.path.getsize(local_pdf_path) > 0:
+            with open(local_pdf_path, 'rb') as f: ########
+                pdf_bytes = f.read() ########
+        else:
+            resp = requests.get(url, timeout=TIMEOUT)
+            resp.raise_for_status()
+            with open(local_pdf_path, 'wb') as f:
+                f.write(resp.content)
+            pdf_bytes = resp.content
+        pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
         metadata = pdf_reader.metadata
         title = metadata.get('/Title') if metadata else None
-        return title.strip() if title else None
+        if title:
+            if isinstance(title, str):
+                return title.strip()
+            else:
+                return str(title).strip()
+        else:
+            return None
+        #return title.strip() if title else None
     except Exception as e:
-        logging.error(f"Failed to fetch or parse PDF {url}: {e}")
+        print(f"Failed to fetch or parse PDF {url}: {e}")
         return None
 
 def extract_arxiv_id(url):
     if "biorxiv" in url.lower():
         return None
-    pattern = r'arxiv\.org/(?:pdf|abs|src|ops)/([\w\.-]+)'
+    if "arxiv" not in url.lower():
+        return None
+    """pattern = r'arxiv\.org/(?:pdf|abs|src|ops)/([\w\.-]+)'
     m = re.search(pattern, url)
     if m:
         full_id = m.group(1)
+        if '.pdf' in full_id:
+            full_id.replace(".pdf", "")
         return full_id.split("v")[0]
+    return None"""
+    m = re.search(r'(\d{4}\.\d{5})', url)
+    if m:
+        return m.group(1)
     return None
 
 def extract_biorxiv_id(url):
@@ -237,16 +260,18 @@ def fetch_medrxiv_title_via_api(url):
         print(f"[biorxiv/medrxiv debug] medrxiv API exception: {e}") ########
         return ""
 
-def batch_fetch_arxiv_titles(arxiv_ids, chunk_size=29999, delay_between_chunks=3):
+def batch_fetch_arxiv_titles(arxiv_ids, chunk_size=20, delay_between_chunks=1):
     results = {}
     total = len(arxiv_ids)
     if total == 0:
-        return results
-    print(f"Batch fetching {total} arXiv IDs with chunk_size={chunk_size}")
+        print("[DEBUG] No arXiv IDs provided, returning empty results")  ########
+        return results  ########
+    print(f"[DEBUG] Batch fetching {total} arXiv IDs with chunk_size={chunk_size}")  ########
     for i in range(0, total, chunk_size):
         chunk_ids = arxiv_ids[i:i+chunk_size]
         id_list_str = ",".join(chunk_ids)
-        url = f'http://export.arxiv.org/api/query?id_list={id_list_str}'
+        url = f'http://export.arxiv.org/api/query?id_list={id_list_str}&max_results={chunk_size}'
+        print(f"[DEBUG] Processing chunk starting at index {i}")  ########
         try:
             resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
             resp.raise_for_status()
@@ -255,18 +280,27 @@ def batch_fetch_arxiv_titles(arxiv_ids, chunk_size=29999, delay_between_chunks=3
                 title_element = entry.find('{http://www.w3.org/2005/Atom}title')
                 id_element = entry.find('{http://www.w3.org/2005/Atom}id')
                 if title_element is not None and id_element is not None:
-                    full_id = id_element.text.strip()
-                    if full_id.startswith("http://arxiv.org/abs/"):
-                        bare_id = full_id[len("http://arxiv.org/abs/"):]
-                        bare_id = bare_id.split("v")[0]
-                    else:
-                        bare_id = full_id
-                    results[bare_id] = title_element.text.strip()
+                    full_id = id_element
+                    title = title_element.text.strip().replace('\n', '').replace('  ', ' ')
+                    raw_id = full_id.text.strip().split('/')[-1].rstrip('v').split('v')[0]
+                    results[raw_id] = title
+                    print(f"[DEBUG] Extracted ID: {raw_id} with Title: {title}")  ########
+                else:
+                    #pass
+                    print("[DEBUG] Missing title or id element in an entry")  ########
         except Exception as e:
-            logging.error(f"Failed arXiv batch fetch chunk at i={i}: {e}")
+            print(f"[ERROR] Failed arXiv batch fetch chunk at index {i}: {e}")  ########
         if i + chunk_size < total:
+            print(f"[DEBUG] Sleeping for {delay_between_chunks} seconds before processing next chunk")  ########
             time.sleep(delay_between_chunks)
+    print("[DEBUG] Finished processing all chunks")  ########
     return results
+
+def update_downloaded_path(df):
+    df["downloaded_path"] = df["downloaded_path"].apply(
+        lambda x: x.replace("downloaded_github_readmes", "downloaded_github_readmes_processed") if isinstance(x, str) else x
+    )
+    return df
 
 # GitHub utilities from first script (in English comments now)
 def clean_github_link(github_link):
@@ -476,6 +510,7 @@ def process_github_url_debug(github_url, GITHUB_CONTENT_CACHE): ########
     cached_content = GITHUB_CONTENT_CACHE.get(cleaned_url)
     local_path = create_local_filename_2(GITHUB_README_FOLDER_2, cleaned_url)
     if not cached_content and os.path.exists(local_path):
+        print('--------reading local github path--------')
         with open(local_path, 'r', encoding='utf-8') as f:
             cached_content = f.read()
         GITHUB_CONTENT_CACHE[cleaned_url] = cached_content
@@ -531,9 +566,10 @@ def process_github_url_debug(github_url, GITHUB_CONTENT_CACHE): ########
 
 def parallel_fetch_github_info(links, GITHUB_CONTENT_CACHE, n_jobs=4): ########
     """Fetch GitHub info in parallel using joblib."""
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(process_github_url_debug)(lk, GITHUB_CONTENT_CACHE) for lk in tqdm(links, desc="Parallel GitHub Info") ########
-    )
+    with parallel_backend('loky', n_jobs=n_jobs, temp_folder="./joblib_tmp"): ########
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(process_github_url_debug)(lk, GITHUB_CONTENT_CACHE) for lk in tqdm(links, desc="Parallel GitHub Info")
+        )
     return dict(results)
 
 def postprocess_github_title(title):
@@ -576,7 +612,7 @@ def fetch_github_title_raw(url):
             with open(local_file, 'w', encoding='utf-8') as f:
                 f.write(html_text)
         except Exception as e:
-            logging.error(f"Error fetching GitHub URL {url}: {e}")
+            print(f"Error fetching GitHub URL {url}: {e}")
             return "SkippedURL"
     bibtex = extract_bibtex_from_html(html_text)
     if bibtex:
@@ -596,9 +632,10 @@ def process_other_title(lk):
     return (lk, title)
 
 def parallel_fetch_other_titles(links, n_jobs=4):
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(process_other_title)(lk) for lk in tqdm(links, desc="Fetch other Titles")
-    )
+    with parallel_backend('loky', n_jobs=n_jobs, temp_folder="./joblib_tmp"): ########
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(process_other_title)(lk) for lk in tqdm(links, desc="Fetch other Titles")
+        )
     return {lk: title for lk, title in results}
 
 def fetch_url_title(url):
@@ -623,7 +660,7 @@ def fetch_url_title(url):
                 return postprocess_github_title(soup.title.string.strip())
             return ""
     except Exception as e:
-        logging.error(f"Error in fetch_url_title({url}): {e}")
+        print(f"Error in fetch_url_title({url}): {e}")
         return ""
 
 def load_github_cache(config):
@@ -633,6 +670,7 @@ def load_github_cache(config):
     if os.path.exists(mapping_path):
         try:
             mapping_df = pd.read_parquet(mapping_path)
+            mapping_df = update_downloaded_path(mapping_df)
             url_to_hash = {
                 str(k): str(v)
                 for k, v in zip(mapping_df.get('raw_url', []), mapping_df.get('downloaded_path', []))
@@ -641,11 +679,9 @@ def load_github_cache(config):
             print(f"Loaded {len(url_to_hash)} valid URL mappings")
         except Exception as e:
             print(f"Mapping file load error: {e}")
-
-    readme_folder = os.path.join(config.get('base_path'), "github_readme_output")
+    readme_folder = os.path.join(config.get('base_path'), "downloaded_github_readmes_processed")
     if not os.path.exists(readme_folder):
         return cache
-
     for fname in os.listdir(readme_folder):
         if not fname.endswith('.md'):
             continue
@@ -724,44 +760,26 @@ def main():
 
     print("Step 4A: arXiv batch fetch")
     # extract arxiv ids
-    """arxiv_ids = []
-    for lk in arxiv_df["link"]:
-        aid = extract_arxiv_id(lk)
-        if aid:
-            arxiv_ids.append(aid)
-    arxiv_ids = list(set(arxiv_ids))
-    print(f"Found {len(arxiv_ids)} unique arXiv IDs")
-    arxiv_titles = {}
-    if arxiv_ids:
-        arxiv_titles = batch_fetch_arxiv_titles(arxiv_ids)
-        for i, (a_id, a_tt) in enumerate(arxiv_titles.items()):
-            print(f"arXiv ID={a_id}, title={a_tt}")
-            if i > 3:
-                break"""
-    
-    """arxiv_cache = load_cache(ARXIV_CACHE_PATH)
-    new_arxiv_links = [lk for lk in arxiv_df["link"] if lk not in arxiv_cache]
-    if new_arxiv_links:
-        new_arxiv_ids = list(set(extract_arxiv_id(lk) for lk in new_arxiv_links))
-        new_titles = batch_fetch_arxiv_titles(new_arxiv_ids)
-        new_cache = {lk: new_titles.get(extract_arxiv_id(lk), "") for lk in new_arxiv_links}
-        save_cache(new_cache, ARXIV_CACHE_PATH, mode="update")
-        arxiv_cache.update(new_cache)"""
-    
     arxiv_cache = load_cache(ARXIV_CACHE_PATH)
     new_arxiv_links = [
         lk for lk in arxiv_df["link"] 
         if (lk not in arxiv_cache) or 
         (arxiv_cache.get(lk) is None) or 
-        (isinstance(arxiv_cache.get(lk), str) and arxiv_cache.get(lk).strip().lower() == "just a moment") or 
+        (isinstance(arxiv_cache.get(lk), str) and arxiv_cache.get(lk).strip().lower() == "just a moment...") or 
         (isinstance(arxiv_cache.get(lk), str) and arxiv_cache.get(lk).strip() == "")
     ]
     if new_arxiv_links:
+        print('===============new_arxiv_links:', len(new_arxiv_links))
         new_arxiv_ids = list(set(extract_arxiv_id(lk) for lk in new_arxiv_links if extract_arxiv_id(lk)))
         new_titles = batch_fetch_arxiv_titles(new_arxiv_ids)
+        non_empty_count = sum(1 for v in new_titles.values() if v not in [None, "", [], {}, ()])
+        print('get non empty arxiv id batch query:', non_empty_count)
+        # save new_titles
+        #save_cache(new_titles, "arxivid_cache.json")
         new_cache = {lk: new_titles.get(extract_arxiv_id(lk), "") for lk in new_arxiv_links}
         save_cache(new_cache, ARXIV_CACHE_PATH, mode="update")
         arxiv_cache.update(new_cache)
+    arxiv_titles = arxiv_cache
 
     print("Step 4B: biorxiv/medrxiv fetch")
     """rxiv_title_map = {}
@@ -787,7 +805,7 @@ def main():
         lk for lk in rxiv_df["link"]
         if (lk not in rxiv_cache) or 
         (rxiv_cache.get(lk) is None) or 
-        (isinstance(rxiv_cache.get(lk), str) and rxiv_cache.get(lk).strip().lower() == "just a moment") or 
+        (isinstance(rxiv_cache.get(lk), str) and rxiv_cache.get(lk).strip().lower() == "just a moment...") or 
         (isinstance(rxiv_cache.get(lk), str) and rxiv_cache.get(lk).strip() == "")
     ]
     if new_rxiv_links:
@@ -805,6 +823,7 @@ def main():
                 new_rxiv_titles[lk] = title
         save_cache(new_rxiv_titles, RXIV_CACHE_PATH, mode="update")
         rxiv_cache.update(new_rxiv_titles)
+    rxiv_title_map = rxiv_cache
 
     print("Step 4C: GitHub fetch => updated logic with README extraction and BibTeX")
     github_links_raw = github_df["link"].tolist()
@@ -853,7 +872,7 @@ def main():
         axis=1
     )
 
-    out_path = os.path.join(processed_base_path, f"{data_type}_with_extracted_titles.parquet")
+    out_path = os.path.join(processed_base_path, f"{data_type}_ext_title.parquet")
     df.to_parquet(out_path, index=False)
     print(f"Done. Updated DataFrame with extracted titles saved to {out_path}")
 

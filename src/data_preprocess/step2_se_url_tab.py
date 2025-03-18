@@ -180,7 +180,7 @@ def batch_query_extract(data_directory, output_json, db_path=DATABASE_FILE):
     processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
     df = pd.read_parquet(
-        os.path.join(processed_base_path, f"{data_type}_with_extracted_titles.parquet"),
+        os.path.join(processed_base_path, f"{data_type}_ext_title.parquet"),
         columns=['modelId', 'card_tags', 'github_link', 'pdf_link']
     )
     
