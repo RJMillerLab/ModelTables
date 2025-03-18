@@ -53,7 +53,8 @@ python -m src.data_localindexing.build_mini_s2orc query --title "estimating the 
 3. Extract tables to local folder:
 ```bash
 python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
-# (Optional) python -m src.data_preprocess.step2_recreate_symlinks # re-create the symbolic link
+# (Optional) python -m src.data_preprocess.step2_recreate_symlinks # re-create the symbolic link | I found zipping files would make symlink file into real files
+python -m src.data_preprocess.step2_md2text # process downloaded github html (if any) to markdown
 python -m src.data_preprocess.step2_se_url_title # extract title from bibtex and PDF url
 
 python -m src.data_preprocess.step2_se_url_tab # extract table from semantic scholar from url above
