@@ -529,8 +529,11 @@ def process_github_url_debug(github_url, GITHUB_PATH_CACHE): ########
         readme_title = extract_title_from_readme(local_content)
     else:
         #if re.search(r'<(html|head|title)', cached_content, re.IGNORECASE): # not readme_title and 
-        html_title = parse_html_title(local_content)
-        html_title = process_html_title(html_title)
+        try:
+            html_title = parse_html_title(local_content)
+            html_title = process_html_title(html_title)
+        except Exception as e:
+            print('Error in process_github_url_debug: ', e)
     # Debug prints for extracted info ########
     print(f"[GitHub debug] URL={github_url}") ########
     print(f"[GitHub debug]  - Local MD path: {local_path if os.path.exists(local_path) else 'None'}") ########
@@ -566,7 +569,11 @@ def url_to_filename(url):
     return h + ".html"
 
 def process_other_title(lk):
-    title = fetch_url_title(lk)
+    try:
+        title = fetch_url_title(lk)
+    except Exception as e:
+        print(f"Error processing {lk}: {e}")
+        title = ""
     print(f"extracted: {lk} -> {title}")
     return (lk, title)
 
@@ -736,8 +743,26 @@ def main():
     print("Step 4C: GitHub fetch => updated logic with README extraction and BibTeX")
     github_links_raw = github_df["link"].tolist()
     unique_github_links = list({clean_github_link(x) for x in github_links_raw})
+
+    GITHUB_EXTRA_CACHE_PATH = os.path.join(config.get('base_path'), "processed", "github_extraction_cache.json")  #########
+    github_extraction_cache = load_cache(GITHUB_EXTRA_CACHE_PATH)  #########
+    urls_to_process = []
+    for url in unique_github_links:
+        if url not in github_extraction_cache:
+            urls_to_process.append(url)
+    print(f"GitHub extraction cache has {len(github_extraction_cache)} entries; processing {len(urls_to_process)} new URLs")
+    
+    new_github_results = {}
+    if urls_to_process:
+        new_github_results = parallel_fetch_github_info(urls_to_process, GITHUB_PATH_CACHE, n_jobs=4)  #########
+        github_extraction_cache.update(new_github_results)  #########
+        with open(GITHUB_EXTRA_CACHE_PATH, 'w', encoding='utf-8') as f:  #########
+            json.dump(github_extraction_cache, f)  #########
+
     # Parallel fetch for GitHub ########
-    github_results = parallel_fetch_github_info(unique_github_links, GITHUB_PATH_CACHE, n_jobs=4) ########
+    #github_results = parallel_fetch_github_info(unique_github_links, GITHUB_PATH_CACHE, n_jobs=4) ########
+    github_results = {url: github_extraction_cache.get(url) for url in unique_github_links}  #########
+    
     new_mapping_df = pd.DataFrame({
         'raw_url': list(GITHUB_PATH_CACHE.keys()),
         'downloaded_path': list(GITHUB_PATH_CACHE.values())

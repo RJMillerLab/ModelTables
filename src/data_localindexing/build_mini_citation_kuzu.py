@@ -155,9 +155,9 @@ def load_json_to_graph(directory):
             # Extract unique node IDs from batch
             node_ids = set()
             for rec in batch_records:
-                if "citingcorpusid" in rec:
+                if "citingcorpusid" in rec and rec["citingcorpusid"] is not None:
                     node_ids.add(int(rec["citingcorpusid"]))
-                if "citedcorpusid" in rec:
+                if "citedcorpusid" in rec and rec["citedcorpusid"] is not None:
                     node_ids.add(int(rec["citedcorpusid"]))
             node_batch = [{"id": nid} for nid in node_ids]
 

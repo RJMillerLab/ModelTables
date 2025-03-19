@@ -48,6 +48,9 @@ python -m src.data_localindexing.build_mini_s2orc query --title "estimating the 
 # python -m src.data_localindexing.build_complete_citation query --citationid 169 --directory ./
 # (Optional) if you don't have key, use public API for querying citations instead
 # python -m src.data_preprocess.step1_citationAPI # get citations through bibtex only by API. TODO: Update for bibtex + url, not bibtex only. TODO: Update for all bibtex, not the first bibtex
+
+# Optional solution: we use kuzu database to store node and edge
+python -m src.data_localindexing.build_mini_citation_kuzu --mode build --directory /u4/z6dong/shared_data/se_citations_250218/
 ```
 
 3. Extract tables to local folder:
