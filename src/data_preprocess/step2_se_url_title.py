@@ -72,10 +72,8 @@ PDF_DOWNLOAD_FOLDER = "pdf_downloads"
 if not os.path.exists(PDF_DOWNLOAD_FOLDER):
     os.makedirs(PDF_DOWNLOAD_FOLDER)
 
-# Old logic folder for GitHub HTML
-GITHUB_HTML_FOLDER = "github_html"
-if not os.path.exists(GITHUB_HTML_FOLDER):
-    os.makedirs(GITHUB_HTML_FOLDER)
+GITHUB_README_FOLDER = "data/downloaded_github_readmes_processed"
+assert os.path.exists(GITHUB_README_FOLDER)
 
 # Separate folder for this script's GitHub downloads
 GITHUB_README_FOLDER_2 = "github_readme_output_2"  ########
@@ -189,14 +187,6 @@ def extract_arxiv_id(url):
         return None
     if "arxiv" not in url.lower():
         return None
-    """pattern = r'arxiv\.org/(?:pdf|abs|src|ops)/([\w\.-]+)'
-    m = re.search(pattern, url)
-    if m:
-        full_id = m.group(1)
-        if '.pdf' in full_id:
-            full_id.replace(".pdf", "")
-        return full_id.split("v")[0]
-    return None"""
     m = re.search(r'(\d{4}\.\d{5})', url)
     if m:
         return m.group(1)
@@ -318,17 +308,6 @@ def is_text_file(url):
     except:
         return False
 
-def create_local_filename_2(base_output_dir, github_url):
-    url_hash = hashlib.md5(github_url.encode('utf-8')).hexdigest()
-    filename = f"{url_hash}.md"
-    return os.path.join(base_output_dir, filename)
-
-"""def extract_bibtex_from_html(html_text):
-    m = re.search(r'@[\w]+\{[\s\S]+?\}\s', html_text)
-    if m:
-        return m.group(0).strip()
-    return None"""
-
 """def extract_bibtex_from_html(html_text):
     # Robust BibTeX extraction: process line by line to capture complete BibTeX entries
     bibtex_entries = []
@@ -355,7 +334,7 @@ def create_local_filename_2(base_output_dir, github_url):
         return bibtex_entries[0]  # Return the first valid BibTeX entry
     return None"""
 
-def extract_title_from_readme(content):
+def extract_title_from_readme(content): # important func!
     """
     Extract title from a markdown file using the following rules:
     1. Find the marker "repository files navigation" (case-insensitive).
@@ -500,61 +479,64 @@ readme_cache = {}
 def make_upper(content): ########
     return content.upper() if content is not None else "" ########
 
-def process_github_url_debug(github_url, GITHUB_CONTENT_CACHE): ########
+def process_github_url_debug(github_url, GITHUB_PATH_CACHE): ########
     """Process a single GitHub URL with debug prints."""
     cleaned_url = clean_github_link(github_url)
     if not cleaned_url.strip():
         print(f"[GitHub debug] Empty or invalid cleaned URL from: {github_url}") ########
         return (github_url, {"bibtex": None, "readme_title": None, "html_title": None})
-
-    cached_content = GITHUB_CONTENT_CACHE.get(cleaned_url)
-    local_path = create_local_filename_2(GITHUB_README_FOLDER_2, cleaned_url)
-    if not cached_content and os.path.exists(local_path):
-        print('--------reading local github path--------')
-        with open(local_path, 'r', encoding='utf-8') as f:
-            cached_content = f.read()
-        GITHUB_CONTENT_CACHE[cleaned_url] = cached_content
-    
+    url_hash = hashlib.md5(cleaned_url.encode('utf-8')).hexdigest()
+    url_name = f"{url_hash}.md"
+    local_path = None
+    local_path_cached = GITHUB_PATH_CACHE.get(github_url)
+    local_path_2 = os.path.join(GITHUB_README_FOLDER_2, url_name)
+    if local_path_cached and os.path.exists(local_path_cached):
+        with open(local_path_cached, 'r', encoding='utf-8') as f:
+            local_content = f.read()
+        local_path = local_path_cached
+    elif os.path.exists(local_path_2):
+        with open(local_path_2, 'r', encoding='utf-8') as f:
+            local_content = f.read()
+        local_path = local_path_2
+    else:
+        local_content = None
+        local_path = None
     #content_upper = cached_content.upper() if cached_content else ""
-    if "<!DOCTYPE" in make_upper(cached_content):
-        # print(f"[GitHub debug] Detected raw HTML in cached content for: {github_url}. Reprocessing with html2text.")
-        #cached_content = html2text.html2text(cached_content)
-        pass
-        # Save the reprocessed markdown back to file
-        #with open(local_path, 'w', encoding='utf-8') as f:
-        #    f.write(cached_content)
-
-    if not cached_content:
-        outpath = download_github_readme_2(cleaned_url, local_path)
+    #if "<!DOCTYPE" in make_upper(local_content):
+    #    #local_content = html2text.html2text(local_content)
+    #    #with open(local_path, 'w', encoding='utf-8') as f:
+    #    #    f.write(cached_content)
+    if not local_content:
+        outpath = download_github_readme_2(cleaned_url, local_path_2)
         if outpath and os.path.exists(outpath):
             with open(outpath, 'r', encoding='utf-8') as f:
-                cached_content = f.read()
-            if "<!DOCTYPE" in make_upper(cached_content):
+                local_content = f.read()
+            if "<!DOCTYPE" in make_upper(local_content):
                 # print(f"[GitHub debug] Detected raw HTML in cached content for: {github_url}. Reprocessing with html2text.")
-                cached_content = html2text.html2text(cached_content)
-            GITHUB_CONTENT_CACHE[cleaned_url] = cached_content
-
-    if not cached_content:
-        print(f"[GitHub debug] No content found for: {github_url}") ########
-        return (github_url, {"bibtex": None, "readme_title": None, "html_title": None})
-
-    bibtex_block = BibTeXExtractor().extract(cached_content)
+                local_content = html2text.html2text(local_content)
+                with open(outpath, 'w', encoding='utf-8') as f:
+                    f.write(local_content)
+            GITHUB_PATH_CACHE[cleaned_url] = outpath
+            local_path = outpath
+        else:
+            print(f"[GitHub debug] No content found for: {github_url}") ########
+            local_path = None
+            return (github_url, {"bibtex": None, "readme_title": None, "html_title": None})
+    bibtex_block = BibTeXExtractor().extract(local_content)
     html_title = None
     readme_title = None
-    if "<!DOCTYPE" not in make_upper(cached_content):
-        readme_title = extract_title_from_readme(cached_content)
+    if "<!DOCTYPE" not in make_upper(local_content):
+        readme_title = extract_title_from_readme(local_content)
     else:
         #if re.search(r'<(html|head|title)', cached_content, re.IGNORECASE): # not readme_title and 
-        html_title = parse_html_title(cached_content)
+        html_title = parse_html_title(local_content)
         html_title = process_html_title(html_title)
-
     # Debug prints for extracted info ########
     print(f"[GitHub debug] URL={github_url}") ########
     print(f"[GitHub debug]  - Local MD path: {local_path if os.path.exists(local_path) else 'None'}") ########
     print(f"[GitHub debug]  - BibTeX: {bibtex_block if bibtex_block else 'N/A'}") ########
     print(f"[GitHub debug]  - README title: {readme_title if readme_title else 'N/A'}") ########
     print(f"[GitHub debug]  - HTML title: {html_title if html_title else 'N/A'}") ########
-
     return (
         github_url,
         {
@@ -564,11 +546,11 @@ def process_github_url_debug(github_url, GITHUB_CONTENT_CACHE): ########
         }
     )
 
-def parallel_fetch_github_info(links, GITHUB_CONTENT_CACHE, n_jobs=4): ########
+def parallel_fetch_github_info(links, GITHUB_PATH_CACHE, n_jobs=4): ########
     """Fetch GitHub info in parallel using joblib."""
     with parallel_backend('loky', n_jobs=n_jobs, temp_folder="./joblib_tmp"): ########
         results = Parallel(n_jobs=n_jobs)(
-            delayed(process_github_url_debug)(lk, GITHUB_CONTENT_CACHE) for lk in tqdm(links, desc="Parallel GitHub Info")
+            delayed(process_github_url_debug)(lk, GITHUB_PATH_CACHE) for lk in tqdm(links, desc="Parallel GitHub Info")
         )
     return dict(results)
 
@@ -582,49 +564,6 @@ def postprocess_github_title(title):
 def url_to_filename(url):
     h = hashlib.sha256(url.encode('utf-8')).hexdigest()
     return h + ".html"
-
-def fetch_github_title_raw(url):
-    EXCLUDED_TERMS = ['/issues', '/assets', '/sponsor', '/discussions', '/pull', '/tag', '/releases']
-    EXCLUDED_SUFFIXES = ['LICENSE']
-    for term in EXCLUDED_TERMS:
-        if term in url:
-            return "SkippedURL"
-    for suffix in EXCLUDED_SUFFIXES:
-        if url.endswith(suffix):
-            return "SkippedURL"
-    if url.endswith('.git'):
-        url = url[:-4]
-    if url.endswith(':'):
-        url = url[:-1]
-    raw_url = url
-    if 'github.com' in raw_url and 'gist.github.com' not in raw_url:
-        raw_url = raw_url.replace('github.com', 'raw.githubusercontent.com')
-        raw_url = raw_url.replace('blob/', '').replace('tree/', '')
-        raw_url = raw_url.rstrip("/")
-    local_file = os.path.join(GITHUB_HTML_FOLDER, url_to_filename(url))
-    if os.path.exists(local_file):
-        with open(local_file, 'r', encoding='utf-8') as f:
-            html_text = f.read()
-    else:
-        try:
-            resp = requests.get(raw_url, headers=HEADERS, timeout=TIMEOUT)
-            html_text = resp.text
-            with open(local_file, 'w', encoding='utf-8') as f:
-                f.write(html_text)
-        except Exception as e:
-            print(f"Error fetching GitHub URL {url}: {e}")
-            return "SkippedURL"
-    bibtex = extract_bibtex_from_html(html_text)
-    if bibtex:
-        return bibtex
-    md_text = html2text.html2text(html_text)
-    m = re.search(r'^# (.+)$', md_text, re.MULTILINE)
-    if m:
-        return m.group(1).strip()
-    soup = BeautifulSoup(html_text, "html.parser")
-    if soup.title and soup.title.string:
-        return postprocess_github_title(soup.title.string.strip())
-    return ""
 
 def process_other_title(lk):
     title = fetch_url_title(lk)
@@ -664,63 +603,32 @@ def fetch_url_title(url):
         return ""
 
 def load_github_cache(config):
-    cache = {}
     mapping_path = os.path.join(config.get('base_path'), "processed", "github_readme_cache.parquet")
-    url_to_hash = {}
-    if os.path.exists(mapping_path):
-        try:
-            mapping_df = pd.read_parquet(mapping_path)
-            mapping_df = update_downloaded_path(mapping_df)
-            url_to_hash = {
-                str(k): str(v)
-                for k, v in zip(mapping_df.get('raw_url', []), mapping_df.get('downloaded_path', []))
-                if pd.notnull(k) and pd.notnull(v)
-            }
-            print(f"Loaded {len(url_to_hash)} valid URL mappings")
-        except Exception as e:
-            print(f"Mapping file load error: {e}")
-    readme_folder = os.path.join(config.get('base_path'), "downloaded_github_readmes_processed")
-    if not os.path.exists(readme_folder):
-        return cache
-    for fname in os.listdir(readme_folder):
-        if not fname.endswith('.md'):
-            continue
-        try:
-            file_hash, _ = os.path.splitext(fname)
-            matched_urls = []
-            if url_to_hash:
-                matched_urls = [
-                    k for k, v in url_to_hash.items()
-                    if isinstance(v, str) and v.endswith(fname)
-                ]
-            if not matched_urls:
-                for possible_url in url_to_hash.keys():
-                    if hashlib.md5(possible_url.encode()).hexdigest() == file_hash:
-                        matched_urls.append(possible_url)
-                        break
-            with open(os.path.join(readme_folder, fname), 'r', encoding='utf-8') as f:
-                content = f.read()
-            if matched_urls:
-                cache[matched_urls[0]] = content
-            else:
-                cache[file_hash] = content
-        except Exception as e:
-            print(f"Error processing {fname}: {str(e)[:50]}...")
-    print(f"Total cached entries: {len(cache)}")
-    return cache
+    updated_mapping_path = os.path.join(config.get('base_path'), "processed", "github_readme_cache_update.parquet")
+    if os.path.exists(updated_mapping_path):
+        mapping_path = updated_mapping_path
+    else:
+        pass
+    assert os.path.exists(mapping_path)
+    mapping_df = pd.read_parquet(mapping_path)
+    mapping_df = update_downloaded_path(mapping_df) # fix path for new folder
+    url_to_hash = {
+        str(k): str(v)
+        for k, v in zip(mapping_df.get('raw_url', []), mapping_df.get('downloaded_path', []))
+        if pd.notnull(k) and pd.notnull(v)
+    }
+    print(f"Loaded {len(url_to_hash)} valid URL mappings")
+    return url_to_hash
 
 def main():
     config = load_config('config.yaml')
     processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
-    GITHUB_CONTENT_CACHE = load_github_cache(config)
-    print(f"Loaded {len(GITHUB_CONTENT_CACHE)} GitHub cache entries.")
+    GITHUB_PATH_CACHE = load_github_cache(config)
+    print(f"Loaded {len(GITHUB_PATH_CACHE)} GitHub cache entries.")
 
     print("Step 1: Loading data from parquet (modelcard_step1)...")
-    df = pd.read_parquet(
-        os.path.join(processed_base_path, f"{data_type}_step1.parquet"),
-        columns=['modelId', 'card_tags', 'github_link', 'pdf_link']
-    )
+    df = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'card_tags', 'github_link', 'pdf_link'])
 
     print("Step 2: Extracting links from columns (pdf_link, github_link)")
     all_links = extract_links_from_columns(df, ["pdf_link", "github_link"])
@@ -829,7 +737,14 @@ def main():
     github_links_raw = github_df["link"].tolist()
     unique_github_links = list({clean_github_link(x) for x in github_links_raw})
     # Parallel fetch for GitHub ########
-    github_results = parallel_fetch_github_info(unique_github_links, GITHUB_CONTENT_CACHE, n_jobs=4) ########
+    github_results = parallel_fetch_github_info(unique_github_links, GITHUB_PATH_CACHE, n_jobs=4) ########
+    new_mapping_df = pd.DataFrame({
+        'raw_url': list(GITHUB_PATH_CACHE.keys()),
+        'downloaded_path': list(GITHUB_PATH_CACHE.values())
+    })
+    new_mapping_path = os.path.join(config.get('base_path'), "processed", "github_readme_cache_update.parquet")
+    new_mapping_df.to_parquet(new_mapping_path, index=False)
+    print(f"Saved updated GitHub cache to {new_mapping_path}")
 
     print("Step 4D: other => HTML or PDF partial fetch (Parallel)")
     other_links = other_df["link"].tolist()
