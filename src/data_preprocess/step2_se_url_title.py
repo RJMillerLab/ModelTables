@@ -30,6 +30,9 @@ import hashlib
 from src.data_ingestion.readme_parser import BibTeXExtractor
 from joblib import parallel_backend ########
 from PyPDF2 import PdfReader
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 class PdfReadError(Exception):
     pass
 
@@ -307,32 +310,6 @@ def is_text_file(url):
         return mime_type.startswith("text/")
     except:
         return False
-
-"""def extract_bibtex_from_html(html_text):
-    # Robust BibTeX extraction: process line by line to capture complete BibTeX entries
-    bibtex_entries = []
-    bibtex_pattern = r"@(\w+)\{"
-    current_entry = ""
-    open_braces = 0
-    inside_entry = False
-    for line in html_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if not inside_entry and re.match(bibtex_pattern, line):
-            inside_entry = True
-            current_entry = line
-            open_braces = line.count("{") - line.count("}")
-        elif inside_entry:
-            current_entry += " " + line
-            open_braces += line.count("{") - line.count("}")
-        if inside_entry and open_braces == 0:
-            bibtex_entries.append(current_entry.strip())
-            inside_entry = False
-            current_entry = ""
-    if bibtex_entries:
-        return bibtex_entries[0]  # Return the first valid BibTeX entry
-    return None"""
 
 def extract_title_from_readme(content): # important func!
     """
@@ -697,24 +674,6 @@ def main():
     arxiv_titles = arxiv_cache
 
     print("Step 4B: biorxiv/medrxiv fetch")
-    """rxiv_title_map = {}
-    for lk in tqdm(rxiv_df["link"], desc="Fetch biorxiv/medrxiv"):
-        if "biorxiv" in lk.lower():
-            t = fetch_biorxiv_title_via_api(lk)
-            if not t:
-                t = fetch_url_title(lk)
-            rxiv_title_map[lk] = t
-        else:
-            t = fetch_medrxiv_title_via_api(lk)
-            if not t:
-                t = fetch_url_title(lk)
-            rxiv_title_map[lk] = t
-    
-    print("Samples from biorxiv/medrxiv cache (first 5 entries):")
-    for i, (lk, title) in enumerate(rxiv_title_map.items()):
-        print(f"{lk} => {title}")
-        if i >= 4:
-            break"""
     rxiv_cache = load_cache(RXIV_CACHE_PATH)
     new_rxiv_links = [
         lk for lk in rxiv_df["link"]
@@ -762,7 +721,7 @@ def main():
     # Parallel fetch for GitHub ########
     #github_results = parallel_fetch_github_info(unique_github_links, GITHUB_PATH_CACHE, n_jobs=4) ########
     github_results = {url: github_extraction_cache.get(url) for url in unique_github_links}  #########
-    
+
     new_mapping_df = pd.DataFrame({
         'raw_url': list(GITHUB_PATH_CACHE.keys()),
         'downloaded_path': list(GITHUB_PATH_CACHE.values())
@@ -772,11 +731,12 @@ def main():
     print(f"Saved updated GitHub cache to {new_mapping_path}")
 
     print("Step 4D: other => HTML or PDF partial fetch (Parallel)")
-    other_links = other_df["link"].tolist()
+    other_title_map = {}
+    """other_links = other_df["link"].tolist()
     other_results = parallel_fetch_other_titles(other_links, n_jobs=4)
-    other_title_map = {lk: title for lk, title in other_results.items()}
+    other_title_map = {lk: title for lk, title in other_results.items()}"""
 
-    def get_extracted_title(row):
+    def get_title_by_category(row):
         lk = row["link"]
         cat = row["category"]
         if cat == "arxiv":
@@ -785,14 +745,15 @@ def main():
         elif cat == "biorxiv_or_medrxiv":
             return rxiv_title_map.get(lk, "")
         elif cat == "github":
-            # The dictionary is stored under the raw URL key
             return github_results.get(lk, {})
         elif cat == "other":
             return other_title_map.get(lk, "")
         else:
             return ""
 
-    df_links["extracted_title"] = df_links.apply(get_extracted_title, axis=1)
+    print('extracting title...')
+    #df_links["extracted_title"] = df_links.apply(get_extracted_title, axis=1)
+    df_links["extracted_title"] = df_links.progress_apply(get_title_by_category, axis=1) ########
     url_title_dict = pd.Series(df_links["extracted_title"].values, index=df_links["link"]).to_dict()
 
     def update_cell(cell):
@@ -804,7 +765,7 @@ def main():
         else:
             return {}
 
-    df["extracted_titles"] = df.apply(
+    df["extracted_titles"] = df.progress_apply( ########
         lambda row: {
             "pdf_link": update_cell(row["pdf_link"]),
             "github_link": update_cell(row["github_link"])
@@ -812,9 +773,55 @@ def main():
         axis=1
     )
 
+    def extract_pdf_titles(flat_dict):
+        pdf_dict = flat_dict.get("pdf_link", {})
+        arxiv_title = None
+        biorxiv_title = None
+        for link, title in pdf_dict.items():
+            link_lower = link.lower()
+            if "arxiv" in link_lower and "biorxiv" not in link_lower:
+                arxiv_title = title
+            elif ("biorxiv" in link_lower) or ("medrxiv" in link_lower):
+                biorxiv_title = title
+        return pd.Series({"arxiv_title": arxiv_title, "biorxiv_title": biorxiv_title})
+    
+    def extract_github_titles(flat_dict):
+        github_dict = flat_dict.get("github_link", {})
+        if github_dict:
+            first_key = next(iter(github_dict))
+            title_obj = github_dict[first_key]
+            ########
+            if isinstance(title_obj, dict):
+                bibtex = title_obj.get("bibtex", [])
+                readme = title_obj.get("readme_title", "")
+                html = title_obj.get("html_title", "")
+            else:
+                bibtex = []
+                readme = ""
+                html = ""
+            ########
+            return pd.Series({
+                "github_title_bibtex": bibtex,
+                "github_title_readme": readme,
+                "github_title_html": html
+            })
+        else:
+            return pd.Series({
+                "github_title_bibtex": [],
+                "github_title_readme": "",
+                "github_title_html": ""
+            })
+    
+    pdf_titles_df = df["extracted_titles"].apply(extract_pdf_titles)  ########
+    github_titles_df = df["extracted_titles"].apply(extract_github_titles)  ########
+    
+    df_final = pd.concat([df[["modelId"]], pdf_titles_df, github_titles_df], axis=1)  ########
     out_path = os.path.join(processed_base_path, f"{data_type}_ext_title.parquet")
-    df.to_parquet(out_path, index=False)
-    print(f"Done. Updated DataFrame with extracted titles saved to {out_path}")
+    print("Final columns: ", df_final.columns)  ########
+    print(df_final.head())
+    pq.write_table(pa.Table.from_pandas(df_final), out_path)
+    #df_final.to_parquet(out_path, index=False)  ########
+    print(f"Done. Updated DataFrame with flattened titles saved to {out_path}")  ########
 
 if __name__ == "__main__":
     main()
