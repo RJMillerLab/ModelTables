@@ -7,7 +7,7 @@ Description:
   The script retains corpusid, modelid, title, and file position information.
   Finally, all results are saved to an output JSON file.
 Usage:
-  python step2_se_url_tab.py --directory /u4/z6dong/shared_data/se_s2orc_250218 --output_json extracted_results.json
+  python step2_se_url_tab.py --directory /u4/z6dong/shared_data/se_s2orc_250218 --output_json data/processed/extracted_results.json
 """
 
 import os
