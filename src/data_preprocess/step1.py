@@ -181,23 +181,23 @@ def process_bibtex_tuple(entry):
             success_count += 1
     return parsed_results, success_count
 
-def parse_bibtex_entries(df):
+def parse_bibtex_entries(df, key="extracted_bibtex_tuple", output_key="parsed_bibtex_tuple_list", count_key = "successful_parse_count"):
     """Process BibTeX entries in the DataFrame and return results."""
-    non_null_entries = df[df["extracted_bibtex_tuple"].notnull()]
+    non_null_entries = df[df[key].notnull()]
     # Initialize tqdm progress bar
     results = []
     with tqdm(total=len(non_null_entries), desc="Processing BibTeX tuples") as pbar:
         results = Parallel(n_jobs=-1)(
-            delayed(process_bibtex_tuple)(entry) for entry in non_null_entries["extracted_bibtex_tuple"]
+            delayed(process_bibtex_tuple)(entry) for entry in non_null_entries[key]
         )
         pbar.update(len(non_null_entries))  # Update progress bar after processing
     # Create new columns for parsed results
-    non_null_entries["parsed_bibtex_tuple_list"] = [result[0] for result in results]
-    non_null_entries["successful_parse_count"] = [result[1] for result in results]
-    df.loc[non_null_entries.index, 'parsed_bibtex_tuple_list'] = non_null_entries["parsed_bibtex_tuple_list"]
-    df.loc[non_null_entries.index, 'successful_parse_count'] = non_null_entries["successful_parse_count"]
-    print("New attributes added: 'parsed_bibtex_tuple_list', 'successful_parse_count'.")
-    return non_null_entries
+    non_null_entries[output_key] = [result[0] for result in results]
+    non_null_entries[count_key] = [result[1] for result in results]
+    df.loc[non_null_entries.index, output_key] = non_null_entries[output_key]
+    df.loc[non_null_entries.index, count_key] = non_null_entries[count_key]
+    print(f"New attributes added: '{output_key}', '{count_key}'.")
+    return df
 
 def ensure_string(entry):
     """Ensure the input is a string."""

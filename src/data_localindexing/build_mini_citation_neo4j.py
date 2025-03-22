@@ -2,8 +2,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-03-09
-Last Modified: 2025-03-14 (Added test mode, enhanced query, minimal fields option, clean mode)
-Updated: 2025-03-XX (Skip records where citingcorpusid or citedcorpusid is None, line-count-based tqdm)
+Last Modified: 2025-03-20 (Added test mode, enhanced query, minimal fields option, clean mode) (Skip records where citingcorpusid or citedcorpusid is None, line-count-based tqdm)
 
 Usage:
     Build the graph database (store full fields):
@@ -62,7 +61,7 @@ NEO4J_USER = "neo4j"
 NEO4J_PASSWORD = "11111111"
 
 CHECKPOINT_FILE = "checkpoint.json"
-BATCH_SIZE = 1000000
+BATCH_SIZE = 500000
 
 def load_checkpoint():
     """Load checkpoint file; return empty dict if not exists."""
