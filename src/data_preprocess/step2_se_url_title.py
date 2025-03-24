@@ -34,6 +34,7 @@ from joblib import parallel_backend
 from PyPDF2 import PdfReader
 import pyarrow as pa
 import pyarrow.parquet as pq
+import ast
 
 class PdfReadError(Exception):
     pass
@@ -745,63 +746,132 @@ def main():
         link2title[lk] = arxiv_cache.get(lk, "")
     for lk in rxiv_df["link"]:
         link2title[lk] = rxiv_cache.get(lk, "")
-    for lk in github_df["link"]:
-        link2title[lk] = github_results.get(lk, {"bibex": [], "readme_title": None, "html_title": None})
+    #for lk in github_df["link"]:
+    #    link2title[lk] = github_results.get(lk, {"bibex": [], "readme_title": None, "html_title": None})
     for lk in other_df["link"]:
         link2title[lk] = other_title_map.get(lk, "")
+    for lk in github_df["link"]:
+        c_lk = clean_github_link(lk)
+        link2title[c_lk] = github_results.get(c_lk, {"bibtex": [], "readme_title": None, "html_title": None})
+    # save link2title
+    #save_cache(link2title, "link2title_cache.json")
+    #print("!Saved link2title_cache.json")
 
     def convert_title(val):
         if isinstance(val, dict):
             return val.get("readme_title") or val.get("html_title") or ""
         return val
 
-    def map_links_to_titles(cell):
-        if cell is None or (hasattr(cell, '__len__') and len(cell) == 0):
-            return []
-        if isinstance(cell, str):
-            splitted = [u.strip() for u in cell.split(",")]
-            return [convert_title(link2title.get(u, "")) for u in splitted if u]
-        elif isinstance(cell, (list, tuple, np.ndarray)):
-            return [convert_title(link2title.get(u, "")) for u in cell if u]
-        else:
-            return []
-    
-    print('extracting title...')
-    df["pdf_titles"] = df["pdf_link"].apply(map_links_to_titles)      
-    df["github_titles"] = df["github_link"].apply(map_links_to_titles)
-    def extract_github_fields(github_titles):
-        bibtex_list = []
-        readme_titles = []
-        html_titles = []
-        combined_titles = []
-        for item in github_titles:
-            if isinstance(item, dict):
-                bib = item.get("bibtex")
-                if bib:
-                    bibtex_list.append(bib)
-                readme = item.get("readme_title")
-                html = item.get("html_title")
-                if readme:
-                    readme_titles.append(readme)
-                    combined_titles.append(readme)
-                elif html:
-                    html_titles.append(html)
-                    combined_titles.append(html)
+    def map_links_to_new_title_columns(row):
+        links = []
+        pdf_link_val = row.get("pdf_link")
+        if isinstance(pdf_link_val, str) and pdf_link_val.strip():
+            links.extend([x.strip() for x in pdf_link_val.split(",") if x.strip()])
+        elif isinstance(pdf_link_val, (list, tuple, np.ndarray)) and len(pdf_link_val) > 0:
+            links.extend(pdf_link_val)
+            
+        github_link_val = row.get("github_link")
+        if isinstance(github_link_val, str) and github_link_val.strip():
+            links.extend([x.strip() for x in github_link_val.split(",") if x.strip()])
+        elif isinstance(github_link_val, (list, tuple, np.ndarray)) and len(github_link_val) > 0:
+            links.extend(github_link_val)
+            
+        title_arxiv = []
+        title_rxiv = []
+        title_github_readme = []
+        title_github_html = []
+        title_github_bibtex = []
+        title_pdf = []
+        title_other = []
+        
+        for link in links:
+            link_lower = link.lower()
+            if is_invalid_extension(link):
+                continue
+            if "arxiv" in link_lower and "biorxiv" not in link_lower:
+                title = arxiv_cache.get(link, "")
+                if title and title.strip():
+                    title_arxiv.append(title.strip())
+            elif "biorxiv" in link_lower or "medrxiv" in link_lower:
+                title = rxiv_cache.get(link, "")
+                if title and title.strip():
+                    title_rxiv.append(title.strip())
+            elif "github.com" in link_lower:
+                cleaned = clean_github_link(link)
+                github_info = github_results.get(cleaned, {"bibtex": None, "readme_title": None, "html_title": None})
+                if github_info.get("readme_title") and str(github_info.get("readme_title")).strip():
+                    title_github_readme.append(str(github_info.get("readme_title")).strip())
+                if github_info.get("html_title") and str(github_info.get("html_title")).strip():
+                    title_github_html.append(str(github_info.get("html_title")).strip())
+                if github_info.get("bibtex") and str(github_info.get("bibtex")).strip():
+                    bibtex_str = str(github_info.get("bibtex")).strip()
+                    if bibtex_str.startswith('[') and bibtex_str.endswith(']'):
+                        try:
+                            bibtex_list = ast.literal_eval(bibtex_str)
+                        except Exception as e:
+                            print("Error evaluating bibtex string:", e)
+                            bibtex_list = [bibtex_str]
+                    else:
+                        bibtex_list = [bibtex_str]
+                    title_github_bibtex.extend(bibtex_list)
+            elif link_lower.endswith(".pdf"):
+                pass
+            else:
+                title = other_title_map.get(link, "")
+                if title and title.strip():
+                    title_other.append(title.strip())
+        
         return pd.Series({
-            "github_bibtex_tuple": bibtex_list,
-            "github_readme_title": readme_titles,
-            "github_html_title": html_titles,
-            "github_combined_title": combined_titles
+            "title_arxiv": title_arxiv if title_arxiv else None,
+            "title_rxiv": title_rxiv if title_rxiv else None,
+            "title_github_readme": title_github_readme if title_github_readme else None,
+            "title_github_html": title_github_html if title_github_html else None,
+            "title_github_bibtex": title_github_bibtex if title_github_bibtex else None,
+            "title_pdf": title_pdf if title_pdf else None,
+            "title_other": title_other if title_other else None,
         })
-    df_github_fields = df["github_titles"].apply(extract_github_fields)
-    df = pd.concat([df, df_github_fields], axis=1)
-    #df["github_bibtex_tuple"] = df["github_titles"].apply(extract_bibtex_from_github_titles)
-    parse_bibtex_entries(df, key="github_bibtex_tuple", output_key="parsed_bibtex_tuple_list_github", count_key = "successful_parse_count_github")
     
-    out_path = os.path.join(processed_base_path, f"{data_type}_ext_title.parquet")
+    def merge_bibtex_titles(row):
+        list1 = row["parsed_bibtex_tuple_list"]
+        list2 = row["parsed_bibtex_tuple_list_github"]
+        titles_1 = extract_titles(list1)
+        titles_2 = extract_titles(list2)
+        merged = list(set(list(titles_1) + list(titles_2)))
+        return merged
+    
+    def merge_all_titles(row):
+        bibtex_titles = row['all_bibtex_titles']
+        additional_titles = []
+        for col, val in row.items():
+            if isinstance(col, str) and col.startswith("title_"):
+                if isinstance(val, str):
+                    if val.strip():
+                        additional_titles.append(
+                            val.replace("{", "").replace("}", "").lower().strip()
+                        )
+                elif isinstance(val, (list, np.ndarray, tuple)):
+                    for item in val:
+                        if isinstance(item, str) and item.strip():
+                            additional_titles.append(
+                                item.replace("{", "").replace("}", "").lower().strip()
+                            )
+        all_titles = list(set(bibtex_titles + additional_titles))
+        return all_titles
+
+    df_new_titles = df.apply(map_links_to_new_title_columns, axis=1)
+    df = pd.concat([df, df_new_titles], axis=1)
+    #df["github_bibtex_tuple"] = df["github_titles"].apply(extract_bibtex_from_github_titles)
+    parse_bibtex_entries(df, key="title_github_bibtex", output_key="parsed_bibtex_tuple_list_github", count_key = "successful_parse_count_github")
     print("\n-- Final df --")
-    pq.write_table(pa.Table.from_pandas(df), out_path)  
-    print(f"Done. Updated DataFrame with pdf_titles/github_titles and bibtex info saved to {out_path}")  
+    #pq.write_table(pa.Table.from_pandas(df), os.path.join(processed_base_path, f"{data_type}_ext_title.parquet"))
+    #print(f"Done. Updated DataFrame with pdf_titles/github_titles and bibtex info saved to {out_path}")  
+    df_step1 = load_data(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'parsed_bibtex_tuple_list'])
+    df_final = pd.merge(df_step1, df, on="modelId", how="left")
+    df_final["all_bibtex_titles"] = df_final.apply(merge_bibtex_titles, axis=1)
+    df_final["all_title_list"] = df_final.apply(merge_all_titles, axis=1)
+    #df_final.to_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
+    pq.write_table(pa.Table.from_pandas(df_final), os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
+    print("✅ Merged BibTeX columns into 'all_bibtex_titles'")
 
 
 if __name__ == "__main__":

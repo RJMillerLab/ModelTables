@@ -168,14 +168,11 @@ def search_and_fetch_info(doi=None, title=None, api_priority=["semantic_scholar"
     best_paper = None
     best_api = None
     paper_id = None
-    
     if doi and doi.startswith("10."):
         doi = f"DOI:{doi}"
-
     # Try all APIs in the given priority (e.g., semantic_scholar -> openalex)
     for api_name in api_priority:
         api = AcademicAPIFactory.get_api(api_name)
-
         # Try searching by DOI first
         if doi:
             # print(f"[DEBUG] Searching by DOI: {doi} using {api_name}")
@@ -191,7 +188,6 @@ def search_and_fetch_info(doi=None, title=None, api_priority=["semantic_scholar"
                 else:
                     paper_id = paper.get("id")
                 break  # Found a match by DOI; stop searching
-
         # If no match by DOI, try searching by title (if provided)
         if not best_paper and title:
             # print(f"[DEBUG] Searching by Title: {title} using {api_name}")
@@ -203,31 +199,25 @@ def search_and_fetch_info(doi=None, title=None, api_priority=["semantic_scholar"
                     paper_id = paper.get("externalIds", {}).get("DOI") or paper.get("paperId")
                 else:
                     paper_id = paper.get("id")
-
         # If we've found a best_paper, we don't continue to the next API
         if best_paper:
             break
-
     if not best_paper:
-        print("No results found.\n")
+        print(f"title: {title}. No results found.\n")
         return None
-
     # We have a match; now fetch info, references, citations
     if not paper_id:
-        print("Warning: Found paper, but no valid ID to retrieve details.\n")
+        print(f"title: {title}. Warning: Found paper, but no valid ID to retrieve details.\n")
         return None
-
     info = best_api.get_info(paper_id)
     references = best_api.get_references(paper_id)
     citations = best_api.get_citations(paper_id)
-
     return {
         "paper_id": paper_id,
         "info": info,
         "references": references,
         "citations": citations
     }
-
 
 # ------------------------------
 # BATCH PROCESSING LOGIC
