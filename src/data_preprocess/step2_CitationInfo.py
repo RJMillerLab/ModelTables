@@ -14,19 +14,6 @@ tqdm.pandas()
 
 CITATION_CACHE_PATH = "data/processed/citation_cache.json"
 
-def extract_titles(bibtex_list):
-    if not isinstance(bibtex_list, (list, tuple, np.ndarray)):
-        return []
-    return [
-        d.get("title", "")
-         .replace("{", "")
-         .replace("}", "")
-         .lower()
-         .strip()
-        for d in bibtex_list
-        if isinstance(d, dict) and d.get("title")
-    ]
-
 def extract_json_titles(json_input):
     if isinstance(json_input, str):
         try:

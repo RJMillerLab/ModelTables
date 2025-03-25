@@ -42,6 +42,20 @@ class PdfReadError(Exception):
 ARXIV_CACHE_PATH = "data/processed/arxiv_titles_cache.json"
 RXIV_CACHE_PATH = "data/processed/rxiv_titles_cache.json"
 
+
+def extract_titles(bibtex_list):
+    if not isinstance(bibtex_list, (list, tuple, np.ndarray)):
+        return []
+    return [
+        d.get("title", "")
+         .replace("{", "")
+         .replace("}", "")
+         .lower()
+         .strip()
+        for d in bibtex_list
+        if isinstance(d, dict) and d.get("title")
+    ]
+
 def load_cache(file_path):
     try:
         with open(file_path, 'r') as f:
