@@ -29,7 +29,7 @@ from elasticsearch import Elasticsearch, helpers
 warnings.filterwarnings("ignore")
 
 # Elasticsearch connection parameters – adjust if needed.
-ES_HOST = "https://localhost:9200"
+ES_HOST = "http://localhost:9200"
 ES_USER = "elastic"
 ES_PASSWORD = "6KdUGb=SifNeWOy__lEz"
 
@@ -95,10 +95,19 @@ def build_citations_index(es, directory, index_name, fields_mode):
     """
     Process all NDJSON files in the specified directory and import data into Elasticsearch.
     """
+    checkpoint_file = "checkpoint_es.json"
+    if os.path.exists(checkpoint_file):
+        with open(checkpoint_file, "r", encoding="utf-8") as f:
+            checkpoint = json.load(f)
+    else:
+        checkpoint = {"processed_files": []}
     create_citations_index(es, index_name)
     files = glob.glob(os.path.join(directory, "step*_file"))
     total_docs = 0
     for file_path in files:
+        if file_path in checkpoint["processed_files"]:
+            print(f"Skipping already processed file: {file_path}")
+            continue
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 file_line_count = sum(1 for _ in f)
@@ -131,6 +140,9 @@ def build_citations_index(es, directory, index_name, fields_mode):
             total_docs += len(batch)
             pbar.update(len(batch))
         pbar.close()
+        checkpoint["processed_files"].append(file_path)
+        with open(checkpoint_file, "w", encoding="utf-8") as f:
+            json.dump(checkpoint, f)
     print(f"Bulk import completed. Total citation documents imported: {total_docs}")
 
 def fuzzy_search_paper(es, paper_index, title):
@@ -247,6 +259,7 @@ def main():
         basic_auth=(ES_USER, ES_PASSWORD),
         verify_certs=False
     )
+    #es = Elasticsearch(["http://{}:9200".format(ES_HOST)], verify_certs=False)
 
     if args.mode == "build":
         if not args.directory:
@@ -263,4 +276,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
