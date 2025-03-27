@@ -1,13 +1,19 @@
+#!/usr/bin/env python
 """
 Author: Zhengyuan Dong
 Created: 2025-03-17
+Last updated: 2025-03-27
 Description:
-  Batch query papers by title from a pre-built SQLite index, then extract table, figure,
-  figure caption, and figure reference annotations from the corresponding NDJSON files.
-  The script retains corpusid, modelid, title, and file position information.
-  Finally, all results are saved to an output JSON file.
+  Demonstration of how to batch extract from Parquet-based ES query cache,
+  then for each top-K retrieved title (or corpusid), query the SQLite index
+  and NDJSON to extract table/figure data.
+
 Usage:
-  python step2_se_url_tab.py --directory /u4/z6dong/shared_data/se_s2orc_250218 --output_json data/processed/extracted_results.json
+  python step2_se_url_tab.py \
+    --directory /u4/z6dong/shared_data/se_s2orc_250218 \
+    --output_json data/processed/extracted_results.json \
+    --db_path /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db \
+    --parquet_cache query_cache.parquet
 """
 
 import os
@@ -17,13 +23,12 @@ import argparse
 import pandas as pd
 from tqdm import tqdm
 
-DATABASE_FILE = "paper_index_mini.db"  # Database file, consistent with build_mini_s2orc.py
+DATABASE_FILE = "paper_index_mini.db"
 
 def query_paper_info(title, data_directory, db_path=DATABASE_FILE):
     """
-    Query the database for a paper using its title.
+    Query the database for a paper using its title (matching in lower-case).
     Returns a dictionary with corpusid, filename, line_index, and full filepath.
-    The title is matched in lower-case.
     """
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -68,7 +73,6 @@ def extract_annotations_from_paper(paper):
       - "figure"             -> extracted_figures
       - "figurecaption"      -> extracted_figure_captions
       - "figureref"          -> extracted_figurerefs
-    The text is extracted from paper["content"]["text"] using the provided start and end positions.
     """
     content = paper.get("content", {})
     text = content.get("text", "")
@@ -142,13 +146,13 @@ def extract_annotations_from_paper(paper):
 
 def extract_full_paper_data(title, data_directory, db_path=DATABASE_FILE):
     """
-    For a given title, query the database to get the file location,
+    For a given EXACT 'title', query the database to get the file location,
     load the corresponding NDJSON line as JSON, and extract all annotations.
-    Retains corpusid, modelid, title, and file position information.
+    Returns a dict with corpusid, modelid, title, filename, line_index, and extracted data.
     """
     info = query_paper_info(title, data_directory, db_path=db_path)
     if info is None:
-        print(f"❌ Paper with title '{title}' not found in the database!")
+        print(f"❌ Paper with title='{title}' not found in the database!")
         return None
 
     paper = load_paper_json(info["filepath"], info["line_index"])
@@ -169,40 +173,87 @@ def extract_full_paper_data(title, data_directory, db_path=DATABASE_FILE):
     }
     return result
 
+def batch_extract_from_es_cache(parquet_cache, data_directory, db_path, output_json):
+    if not os.path.exists(parquet_cache):
+        print(f"❌ Parquet cache file '{parquet_cache}' does not exist!")
+        return
+
+    df_es = pd.read_parquet(parquet_cache)
+    print(f"Loaded {len(df_es)} rows from '{parquet_cache}'")
+
+    results = []
+    df_es_unique = df_es.drop_duplicates(subset=["query", "retrieved_title"]).reset_index(drop=True)
+
+    for idx, row in tqdm(df_es_unique.iterrows(), total=len(df_es_unique),
+                         desc="Batch Extract from ES Cache"):
+        retrieved_title = row["retrieved_title"]
+        score = row["score"]
+        rank = row["rank"]
+        query_str = row["query"]
+
+        if not retrieved_title or not isinstance(retrieved_title, str):
+            continue
+
+        paper_data = extract_full_paper_data(
+            title=retrieved_title,
+            data_directory=data_directory,
+            db_path=db_path
+        )
+        if paper_data is not None:
+            paper_data["rank"] = rank
+            paper_data["score"] = score
+            paper_data["query"] = query_str
+            results.append(paper_data)
+
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=4, ensure_ascii=False)
+    print(f"✅ Extraction from ES cache complete. Processed {len(results)} items. Saved to '{output_json}'")
+
+def main():
+    parser = argparse.ArgumentParser(description="Batch query papers and extract table/figure annotations")
+    parser.add_argument("--directory", type=str, required=True,
+                        help="Directory containing NDJSON (stepXX_file) files")
+    parser.add_argument("--output_json", type=str, required=True,
+                        help="Output JSON file to save extraction results")
+    parser.add_argument("--db_path", type=str, default=DATABASE_FILE,
+                        help="Path to the SQLite database file")
+
+    parser.add_argument("--parquet_cache", type=str, default=None,
+                        help="Path to Parquet file from ES batch query (e.g. 'query_cache.parquet')")
+
+    parser.add_argument("--legacy_mode", action="store_true",
+                        help="Use the old CSV->DB approach if set, otherwise use the ES-based approach")
+
+    args = parser.parse_args()
+
+    if args.legacy_mode:
+        batch_query_extract(args.directory, args.output_json, db_path=args.db_path)
+    else:
+        if not args.parquet_cache:
+            print("❌ Must provide --parquet_cache unless using legacy mode.")
+            return
+        batch_extract_from_es_cache(
+            parquet_cache=args.parquet_cache,
+            data_directory=args.directory,
+            db_path=args.db_path,
+            output_json=args.output_json
+        )
+
 def batch_query_extract(data_directory, output_json, db_path=DATABASE_FILE):
-    """
-    Load a CSV file containing paper titles, batch query the database for each paper,
-    and extract the corresponding paper data (annotations and metadata).
-    The final results are saved to an output JSON file.
-    The CSV must have at least a column "title".
-    """
-    config = load_config('config.yaml')
-    processed_base_path = os.path.join(config.get('base_path'), 'processed')
-    data_type = 'modelcard'
-    df = pd.read_parquet(
-        os.path.join(processed_base_path, f"{data_type}_ext_title.parquet"),
-        columns=['modelId', 'card_tags', 'github_link', 'pdf_link']
-    )
+    with open("modelcard_dedup_titles.json", "r", encoding="utf-8") as f:
+        titles_data = json.load(f)
     
     results = []
-    # Iterate over each title in the DataFrame
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Batch Query & Extraction"):
-        title = row.get("title")
+    for title in tqdm(titles_data, desc="Legacy Mode: DB Query"):
         if not title or not isinstance(title, str):
             continue
         paper_data = extract_full_paper_data(title, data_directory, db_path=db_path)
         if paper_data is not None:
             results.append(paper_data)
-    # Save all results to the output JSON file
+    
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=4, ensure_ascii=False)
-    print(f"✅ Extraction complete. Processed {len(results)} items. Results saved to {output_json}")
+    print(f"✅ Legacy extraction complete. Found {len(results)} papers. Saved to {output_json}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Batch query papers and extract table/figure annotations")
-    parser.add_argument("--directory", type=str, required=True, help="Directory containing NDJSON (stepXX_file) files")
-    parser.add_argument("--output_json", type=str, required=True, help="Output JSON file to save extraction results")
-    parser.add_argument("--db_path", type=str, default=DATABASE_FILE, help="Path to the SQLite database file")
-    args = parser.parse_args()
-    
-    batch_query_extract(args.directory, args.output_json, db_path=args.db_path)
+    main()
