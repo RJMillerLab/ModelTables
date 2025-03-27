@@ -40,8 +40,8 @@ python -m src.data_preprocess.step1_query_giturl load --query data/downloaded_gi
 ```bash
 # TODO: add command from privatecommonscript to here, for downloading the semantic scholar here
 # Requirement: cd to the path of downloaded dataset, e.g.: cd ~/shared_data/se_s2orc_250218
-python -m src.data_localindexing.build_mini_s2orc build --directory ./ # After downloading semantic scholar dataset, build database based on it.
-python -m src.data_localindexing.build_mini_s2orc query --title "estimating the resilience to natural disasters by using call detail records" --directory ./ # After building up database, query title based on db file.
+python -m src.data_localindexing.build_mini_s2orc build --directory /u4/z6dong/shared_data/se_s2orc_250218/ # After downloading semantic scholar dataset, build database based on it.
+python -m src.data_localindexing.build_mini_s2orc query --title "BioMANIA: Simplifying bioinformatics data analysis through conversation" --directory /u4/z6dong/shared_data/se_s2orc_250218/ # After building up database, query title based on db file.
 
 # issue: citation edge is hard to store, it is too much ... Solution: I think we better using the API to query citation relationship? Or use cypher to query over graph condensely
 # python -m src.data_localindexing.build_complete_citation build --directory ./ # build db for citation dataset
@@ -50,7 +50,30 @@ python -m src.data_localindexing.build_mini_s2orc query --title "estimating the 
 # python -m src.data_preprocess.step1_citationAPI # get citations through bibtex only by API. TODO: Update for bibtex + url, not bibtex only. TODO: Update for all bibtex, not the first bibtex
 
 # Optional solution: we use kuzu database to store node and edge
-python -m src.data_localindexing.build_mini_citation_kuzu --mode build --directory /u4/z6dong/shared_data/se_citations_250218/
+#python -m src.data_localindexing.build_mini_citation_kuzu --mode build --directory /u4/z6dong/shared_data/se_citations_250218/
+#python -m src.data_localindexing.test_node_edge_db # test how many nodes and edges are in built database
+# issue: slow for our 300G ndjson files, not suitable for this stage
+
+# Optional solution: we use neo4j database to store and query
+#python src.data_localindexing.build_mini_citation_neo4j --mode build --directory ./ --fields minimal
+#python src.data_localindexing.build_mini_citation_neo4j --mode query --citationid 248811336
+# for slurm run this script to keep neo4j open in another terminal
+# sbatch src.data_localindexing.neo4j_slurm
+
+# fuzzy matching: elastic search for s2orc
+python -m src.data_localindexing.build_mini_s2orc_es --mode build --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
+python -m src.data_localindexing.build_mini_s2orc_es --mode query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --query "BioMANIA: Simplifying bioinformatics data analysis through conversation"
+python -m src.data_localindexing.build_mini_s2orc_es --mode test --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
+# batch querying papers_index
+python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file titles.json --cache_file query_cache.json
+# getting full tables
+
+# fuzzy matching: elastic search for citation
+# buildup citation_index database
+bash src/data_localindexing/build_mini_citation_es.sh
+# batch querying citation_index
+
+
 ```
 
 3. Extract tables to local folder:
@@ -58,12 +81,18 @@ python -m src.data_localindexing.build_mini_citation_kuzu --mode build --directo
 python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
 # (Optional) python -m src.data_preprocess.step2_recreate_symlinks # re-create the symbolic link | I found zipping files would make symlink file into real files
 python -m src.data_preprocess.step2_md2text # process downloaded github html (if any) to markdown
-python -m src.data_preprocess.step2_se_url_title # extract title from bibtex and PDF url
+python -m src.data_preprocess.step2_se_url_title # fetching title from bibtex, PDF url.
+python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
 
-python -m src.data_preprocess.step2_se_url_tab # extract table from semantic scholar from url above
-
-python -m src.data_preprocess.step1_CitationInfo #  get citations relation from .db
-# TODO: get tags arxiv id
+bash src/data_localindexing/build_mini_s2orc_es.sh # (batch query command) # build up s2orc and batch querying. Input: modelcard_dedup_titles.json, Output: query_cache.parquet
+python -m src.data_preprocess.step2_se_url_tab # extract title | use title to fetch table from semantic scholar dataset
+# TODO: table2csv
+# TODO: finetune
+# TODO: tricks
+# Evaluation:
+bash src/data_localindexing/build_mini_citation_es.sh
+#python -m src.data_preprocess.step2_CitationInfo #  get citations relation from graph edge .db
+# TODO: get tags arxiv id, seems nothing in tags... only shows on web...
 ```
 
 4. Label groundtruth for unionable search baselines:
