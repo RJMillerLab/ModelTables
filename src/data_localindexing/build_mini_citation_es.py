@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """
 Usage:
-  # Build mode: Import citation NDJSON data into Elasticsearch.
-  python run_citations_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --fields minimal
-
-  # Query mode: Given a paper title, first fuzzy-match in papers_index to get the paper id,
-  # then query citations_index for any citations where this id appears as citing or cited.
-  python run_citations_es.py --mode query --paper_index /u4/z6dong/shared_data/se_s2orc_250218/papers_index --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --title "BioMANIA: Simplifying bioinformatics data analysis through conversation"
-
-  # Test mode: Display index stats and sample documents from citations_index.
-  python run_citations_es.py --mode test --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index
+  python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --fields minimal
+  python build_mini_citation_es.py --mode query --paper_index /u4/z6dong/shared_data/se_s2orc_250218/papers_index --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --title "BioMANIA: Simplifying bioinformatics data analysis through conversation"
+  python build_mini_citation_es.py --mode test --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index
 
 Notes:
   - In build mode, all NDJSON files (*.ndjson) in the specified directory will be processed.
@@ -60,9 +54,6 @@ def create_citations_index(es, index_name):
             }
         }
     }
-    if es.indices.exists(index=index_name):
-        es.indices.delete(index=index_name)
-        print(f"Deleted existing index: {index_name}")
     es.indices.create(index=index_name, body=index_body)
     print(f"Index {index_name} created.")
 
@@ -101,7 +92,10 @@ def build_citations_index(es, directory, index_name, fields_mode):
             checkpoint = json.load(f)
     else:
         checkpoint = {"processed_files": []}
-    create_citations_index(es, index_name)
+        if es.indices.exists(index=index_name):
+            es.indices.delete(index=index_name)
+        print(f"Deleted existing index: {index_name}")
+        create_citations_index(es, index_name)
     files = glob.glob(os.path.join(directory, "step*_file"))
     total_docs = 0
     for file_path in files:
