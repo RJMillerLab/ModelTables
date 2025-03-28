@@ -83,7 +83,6 @@ python -m src.data_preprocess.step2_gitcard_tab # extract table from git + model
 python -m src.data_preprocess.step2_md2text # process downloaded github html (if any) to markdown
 python -m src.data_preprocess.step2_se_url_title # fetching title from bibtex, PDF url.
 python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
-
 bash src/data_localindexing/build_mini_s2orc_es.sh # (batch query command) # build up s2orc and batch querying. Input: modelcard_dedup_titles.json, Output: query_cache.parquet
 python -m src.data_preprocess.step2_se_url_tab # extract title | use title to fetch table from semantic scholar dataset
 # TODO: table2csv

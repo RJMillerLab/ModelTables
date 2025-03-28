@@ -35,7 +35,7 @@ def fetch_db_entries(parquet_cache, db_path):
         (df_es['query'].str.lower().str.strip('" ') == df_es['retrieved_title'].str.lower().str.strip('" '))
     ]
     min_score = exact_matches['score'].min()
-    eligible_matches = df_es[df_es['score'] >= min_score].copy()
+    eligible_matches = df_es[(df_es['score'] >= min_score) & (df_es['rank']==1)].copy()
     titles = eligible_matches['retrieved_title'].str.lower().str.strip().unique()
     placeholders = ','.join(['?'] * len(titles))
     with sqlite3.connect(db_path) as conn:
@@ -43,13 +43,20 @@ def fetch_db_entries(parquet_cache, db_path):
         db_df = pd.read_sql(query, conn, params=titles.tolist())
     merged_df = eligible_matches.merge(
         db_df,
-        left_on=eligible_matches['retrieved_title'].str.lower().str.strip(),
-        right_on='title',
-        how='inner'
+        left_on=['retrieved_title', 'corpusid'],
+        right_on=['title', 'corpusid'],
+        how='left'
     )
+    #merged_df = merged_df.drop(columns=['rank', 'title_clean'])  ########
     return merged_df
 
 def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
+    import os
+    import subprocess
+    import pandas as pd
+    from joblib import Parallel, delayed
+    from tqdm import tqdm
+
     def extract_lines(filename, indices):
         filepath = os.path.join(data_directory, filename)
         if not os.path.exists(filepath):
@@ -62,19 +69,20 @@ def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
         except subprocess.CalledProcessError:
             return []
 
-    file_groups = merged_df.groupby('filename')['line_index'].apply(list).reset_index()
-
+    dedup_df = merged_df.drop_duplicates(subset=['filename', 'line_index'], keep='first')
+    grouped = list(dedup_df.groupby('filename'))
     results = Parallel(n_jobs=n_jobs)(
-        delayed(extract_lines)(row.filename, row.line_index)
-        for _, row in tqdm(file_groups.iterrows(), total=len(file_groups), desc="Extracting lines")
+        delayed(lambda filename, group: (filename, group, extract_lines(filename, group['line_index'].tolist())))(
+            filename, group
+        ) for filename, group in tqdm(grouped, total=len(grouped), desc="Extracting lines")
     )
-
-    lines_expanded = [
-        {'filename': row.filename, 'line_index': idx, 'raw_json': line}
-        for (idx_list, row), lines in zip(file_groups.iterrows(), results)
-        for idx, line in zip(row.line_index, lines)
-    ]
-
+    lines_expanded = []
+    for filename, group, lines in results:
+        group_sorted = group.sort_values('line_index')
+        for (_, row), line in zip(group_sorted.iterrows(), lines):
+            row_dict = row.to_dict()
+            row_dict['raw_json'] = line
+            lines_expanded.append(row_dict)
     pd.DataFrame(lines_expanded).to_parquet(temp_parquet, index=False)
 
 def parse_annotations(row):
@@ -82,29 +90,24 @@ def parse_annotations(row):
         paper_json = json.loads(row['raw_json'])
         content_text = paper_json.get("content", {}).get("text", "")
         extracted = extract_references(paper_json, content_text)
-
-        return {
-            "corpusid": row.get('corpusid'),
-            "modelid": paper_json.get("modelid", "unknown"),
-            "filename": row['filename'],
-            "line_index": row['line_index'],
+        new_row = dict(row)
+        new_row.update({
             "extracted_tables": extracted.get("extracted_tables", []),
             "extracted_tablerefs": extracted.get("extracted_tablerefs", []),
             "extracted_figures": extracted.get("extracted_figures", []),
             "extracted_figure_captions": extracted.get("extracted_figure_captions", []),
             "extracted_figurerefs": extracted.get("extracted_figurerefs", [])
-        }
-    except:
+        })
+        return new_row
+    except Exception as e:
         return None
 
 def final_annotation_extraction(temp_parquet, output_parquet, n_jobs):
     df_temp = pd.read_parquet(temp_parquet)
-
     parsed_data = Parallel(n_jobs=n_jobs)(
         delayed(parse_annotations)(row)
         for _, row in tqdm(df_temp.iterrows(), total=len(df_temp), desc="Parsing annotations")
     )
-
     parsed_data_clean = [item for item in parsed_data if item]
     pd.DataFrame(parsed_data_clean).to_parquet(output_parquet, index=False)
 
@@ -120,6 +123,7 @@ def main():
     args = parser.parse_args()
 
     merged_df = fetch_db_entries(args.parquet_cache, args.db_path)
+    merged_df.to_parquet("merged_df.parquet", index=False)
     extract_lines_to_parquet(merged_df, args.directory, args.temp_parquet, args.n_jobs)
     final_annotation_extraction(args.temp_parquet, args.output_parquet, args.n_jobs)
 
