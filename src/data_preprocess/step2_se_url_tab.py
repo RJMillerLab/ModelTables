@@ -92,6 +92,7 @@ def parse_annotations(row):
         extracted = extract_references(paper_json, content_text)
         new_row = dict(row)
         new_row.update({
+            "extracted_openaccessurl": paper_json.get("content", {}).get("source", {}).get("oainfo", {}).get("openaccessurl", ""),
             "extracted_tables": extracted.get("extracted_tables", []),
             "extracted_tablerefs": extracted.get("extracted_tablerefs", []),
             "extracted_figures": extracted.get("extracted_figures", []),
