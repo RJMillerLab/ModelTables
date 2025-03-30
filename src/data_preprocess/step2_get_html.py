@@ -5,7 +5,7 @@ Created: 2025-03-28
 Last Modified: 2025-03-29 
 Description: This script is used to get the arXiv ID for the title extracted from the PDF file.
 """
-import os
+import os, re
 import json
 import time
 import pandas as pd
@@ -16,14 +16,15 @@ from urllib.parse import quote
 import requests
 import xml.etree.ElementTree as ET
 
-######## Normalization helper function ########
+HTML_CACHE_FILE = "arxiv_html_cache.json"  ########
+HTML_FOLDER = "arxiv_fulltext_html"  ########
+
 def normalize_title(title):
     """
     Normalize the title by converting to lower-case and reducing whitespace.
     """
     return " ".join(title.lower().split())
 
-######## JSON cache load/save for new mapping ########
 def load_json_cache(file_path):
     """
     Load a JSON file (expected format: {key: value}) in UTF-8.
@@ -45,34 +46,35 @@ def save_json_cache(data, file_path):
     Save a dict to a JSON file, using UTF-8 encoding.
     """
     try:
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, 'w', encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
-        print(f"[INFO] Saved JSON cache to {file_path} with {len(data)} entries.")
+        #print(f"[INFO] Saved JSON cache to {file_path} with {len(data)} entries.")
     except Exception as e:
         print(f"[ERROR] Could not save JSON cache: {e}")
 
-######## Searching arXiv using the Atom API ########
+def preprocess_title(title):
+    title = re.sub(r"[-:_*@&'\"]+", " ", title)
+    return " ".join(title.split())
+
 def search_arxiv_title(title_query, max_results=5):
-    """
-    Query the arXiv Atom API using a broad query with the 'all' field.
-    Uses URL encoding for safety.
-    Returns the raw XML text from the feed.
-    """
     base_url = "http://export.arxiv.org/api/query"
-    # URL encode the query string
-    encoded_query = quote(title_query)
-    # Use 'all:' to search more broadly
-    query = f"all:{encoded_query}"
+    title_query = preprocess_title(title_query)
+    encoded_query = quote(f'"{title_query}"')  
     params = {
-        "search_query": query,
+        "search_query": f"ti:{encoded_query}", 
         "start": 0,
-        "max_results": max_results
+        "max_results": max_results,
+        "sortBy": "relevance",
+        "sortOrder": "descending"
     }
-    print(f"[DEBUG] Querying arXiv with: {params['search_query']}")
-    resp = requests.get(base_url, params=params, timeout=15)
-    print(f"[DEBUG] Request URL: {resp.url}")
-    resp.raise_for_status()
-    return resp.text
+    print(f"[DEBUG] Final arXiv API URL: {base_url}?{'&'.join(f'{k}={v}' for k,v in params.items())}")
+    try:
+        resp = requests.get(base_url, params=params, timeout=15)
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        print(f"[ERROR] arXiv API request failed: {e}")
+        return None
 
 def parse_arxiv_atom(xml_text):
     """
@@ -97,48 +99,118 @@ def parse_arxiv_atom(xml_text):
                 "published": entry_published.text.strip() if (entry_published is not None and entry_published.text) else ""
             }
             entries_info.append(info)
-    print(f"[DEBUG] Parsed {len(entries_info)} entries from the Atom feed.")
     return entries_info
 
-######## Real batch function that queries arXiv with retries ########
-def real_batch_title_to_arxiv_id(titles, max_results=2, sleep_time=3, retries=3):
+def fetch_ar5iv_html(arxiv_id):
     """
-    For each title in 'titles', query arXiv using the Atom API (with retries)
-    and return a DataFrame with columns ["title", "arxiv_id"].
-    For each title, a single summary line is printed with the following format:
-    ------------ Title: '...'  |  Answer: ...  |  Comment: ...  ------------
+    Fetch HTML from ar5iv (ar5iv.labs.arxiv.org) given an arXiv ID.
+    Save the HTML to a local file in folder HTML_FOLDER with filename '{arxiv_id}.html'
+    and return the file path, or None on failure.
     """
+    file_path = os.path.join(HTML_FOLDER, f"{arxiv_id}.html")  ########
+    if os.path.exists(file_path):
+        return file_path
+    url = f"https://ar5iv.labs.arxiv.org/html/{arxiv_id}"
+    try:
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            html_text = resp.text
+            os.makedirs(HTML_FOLDER, exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(html_text)
+            return file_path
+        elif resp.status_code == 404:
+            print(f"[WARN] HTML not exist: {arxiv_id}")
+            return None
+        else:
+            print(f"[WARN] ar5iv HTML not found for {arxiv_id}, status={resp.status_code}")
+            return None
+    except Exception as e:
+        print(f"[ERROR] ar5iv HTML fetch error for {arxiv_id}: {e}")
+        return None
+
+######## NEW: Single function that (1) searches by title, (2) picks ID, (3) fetches HTML ########
+def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
+    """
+    Given a title, query arXiv, parse the Atom feed, pick the first result's ID,
+    and then fetch HTML from ar5iv.
+    Immediately update the provided html_cache dict with the result (arxiv_id -> local HTML file path).
+    Returns (arxiv_id, html_file_path) or (None, None) if not found.
+    """
+    # 1) Search
+    try:
+        xml_text = search_arxiv_title(title, max_results=max_results)
+        entries = parse_arxiv_atom(xml_text)
+        if not entries:
+            print(f"[INFO] No Atom entries found for title: {title}")
+            return None, None
+    except Exception as e:
+        print(f"[ERROR] Atom feed error for '{title}': {e}")
+        return None, None
+
+    # 2) Take the first entry as best guess
+    arxiv_url = entries[0]["id"]  # e.g., "http://arxiv.org/abs/2101.12345"
+    arxiv_id = arxiv_url.split('/')[-1] if arxiv_url else None
+    if not arxiv_id:
+        print(f"[INFO] Could not parse ID from feed for title: {title}")
+        return None, None
+
+    # 3) Fetch HTML from ar5iv
+    if arxiv_id in html_cache:
+        html_file_path = html_cache[arxiv_id]
+        if html_file_path and os.path.isfile(html_file_path):
+            print(f"[INFO] HTML already cached for {arxiv_id}: {cached_path}")
+            return arxiv_id, cached_path
+            #file_size = os.path.getsize(html_file_path)
+            #else:
+            #file_size = 0
+        else:
+            # Path is invalid or empty, attempt to re-fetch
+            print(f"[INFO] Cached HTML missing for {arxiv_id}, re-fetching...")
+            html_file_path = fetch_ar5iv_html(arxiv_id)
+            if html_file_path:
+                html_cache[arxiv_id] = html_file_path
+            else:
+                html_cache[arxiv_id] = ""  # Mark as failed
+            return arxiv_id, html_file_path
+        print(f"[INFO] Already in HTML cache: {arxiv_id} (file: {html_file_path})")
+    else:
+        html_file_path = fetch_ar5iv_html(arxiv_id)
+        if html_file_path:
+            html_cache[arxiv_id] = html_file_path
+            #file_size = os.path.getsize(html_file_path)
+            #print(f"[INFO] Fetched HTML for {arxiv_id}, saved to {html_file_path}.")
+        else:
+            html_cache[arxiv_id] = ""
+            print(f"[INFO] No valid HTML for {arxiv_id}. Marked empty in cache.")
+    return arxiv_id, html_file_path
+
+def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
+    """
+    For each title in 'titles':
+      1) Query arXiv for the ID.
+      2) Fetch HTML from ar5iv for that ID and save to local file.
+      3) Save ID to DataFrame row, and update HTML cache with file path.
+    Returns a DataFrame with columns ["title", "arxiv_id"].
+    """
+    html_cache = load_json_cache(html_cache_path)
+
     new_rows = []
     for t in titles:
         t_stripped = t.strip()
-        success = False
-        attempt = 0
-        aid = None
-        comment = ""
-        while attempt < retries and not success:
-            try:
-                xml_text = search_arxiv_title(t_stripped, max_results=max_results)
-                entries = parse_arxiv_atom(xml_text)
-                if entries:
-                    # Take the first entry as the best match
-                    aid = entries[0]["id"].split('/')[-1]
-                    comment = "Success"
-                    success = True
-                else:
-                    comment = "No results"
-            except Exception as e:
-                comment = f"Error: {e}"
-            attempt += 1
-            if not success and attempt < retries:
-                time.sleep(sleep_time)
-        if not success:
-            comment = f"Failed after {retries} attempts"
-        # Print a single summary line per title using separators
-        print("------------ Title: '{}'  |  Answer: {}  |  Comment: {} ------------".format(t_stripped, aid, comment))
-        new_rows.append((t_stripped, aid))
+        arxiv_id, html_file_path = fetch_id_and_html_for_title(t_stripped, max_results=3, html_cache=html_cache)
+        new_rows.append((t_stripped, arxiv_id))
+        ######## Save HTML cache after each fetch to avoid losing progress ########
+        save_json_cache(html_cache, html_cache_path)
+
+        ######## Log with file size if available ########
+        if html_file_path and os.path.isfile(html_file_path):
+            size_info = os.path.getsize(html_file_path)
+        else:
+            size_info = 0
+        print(f"[INFO] Title='{t_stripped}' -> ID='{arxiv_id}', HTML file='{html_file_path}', size='{size_info}'")
     return pd.DataFrame(new_rows, columns=["title", "arxiv_id"])
 
-######## Main Script ########
 def main():
     ######## 1) Load a local Parquet file with "retrieved_title" column ########
     parquet_path = "extracted_annotations.parquet"
@@ -167,10 +239,13 @@ def main():
     ######## 4) Load the new JSON-based cache for {title -> arxiv_id} ########
     new_cache_path = "title2arxiv_new_cache.json"
     new_cache = load_json_cache(new_cache_path)  # This is your new cache file
+
+    def _norm_equals(a, b):
+        return normalize_title(a) == normalize_title(b)
     
     ######## 5) Combine the two caches (old converted + new) using normalization ########
-    combined_dict = dict(new_cache)  # start with new cache if exists
-    for title, aid in old_title_id_dict.items():
+    combined_dict = dict(old_title_id_dict)  # start with new cache if exists
+    for title, aid in new_cache.items():
         norm_title = normalize_title(title)
         if not any(normalize_title(k) == norm_title for k in combined_dict.keys()):
             combined_dict[title] = aid
@@ -186,9 +261,9 @@ def main():
             in_cache.add(t)
         else:
             missing.add(t)
-    print(f"[INFO] Titles in Parquet:       {len(all_titles)}")
+    print(f"[INFO] Titles in Parquet: {len(all_titles)}")
     print(f"[INFO] Already in combined cache: {len(in_cache)}")
-    print(f"[INFO] Missing (need fetch):     {len(missing)}")
+    print(f"[INFO] Missing (need fetch): {len(missing)}")
     
     ######## 7) Save missing titles to a temporary file for manual inspection ########
     tmp_missing_file = "missing_titles_tmp.txt"
@@ -197,19 +272,37 @@ def main():
             f.write(title + "\n")
     print(f"[INFO] Saved {len(missing)} missing titles to {tmp_missing_file}")
 
-    ######## 8) For missing titles, run real_batch_title_to_arxiv_id with a 3s delay per title ########
+    ######## 8) For missing titles, run our updated real_batch_title_to_arxiv_id with NO retry ########
+    
+    html_cache = load_json_cache(HTML_CACHE_FILE)  ########
+    all_known_ids = {aid for aid in combined_dict.values() if aid}
+    print(f"[INFO] Checking HTML for {len(all_known_ids)} arXiv IDs...")
+    for aid in all_known_ids:
+        cached_path = html_cache.get(aid, "")
+        if cached_path and os.path.isfile(cached_path):
+            print(f"[INFO] HTML exists: {aid} -> {cached_path}")
+            continue
+        # Attempt to fetch HTML
+        html_file_path = fetch_ar5iv_html(aid)
+        if html_file_path:
+            html_cache[aid] = html_file_path
+            print(f"[INFO] Downloaded HTML for {aid} to {html_file_path}")
+        else:
+            html_cache[aid] = ""  # Mark failure
+            print(f"[WARN] Failed to fetch HTML for {aid}")
+    save_json_cache(html_cache, HTML_CACHE_FILE)
+
     if missing:
-        print(f"[INFO] Fetching IDs for {len(missing)} missing titles, 3s delay per title...")
-        df_new = real_batch_title_to_arxiv_id(missing, max_results=2, sleep_time=3, retries=3)
+        print(f"[INFO] Fetching IDs + HTML for {len(missing)} missing titles...")
+        df_new = real_batch_title_to_arxiv_id(missing)  ########
         print(f"[INFO] real_batch_title_to_arxiv_id returned {len(df_new)} rows.")
         new_fetched = dict(zip(df_new["title"], df_new["arxiv_id"]))
         for t, aid in new_fetched.items():
             norm_t = normalize_title(t)
-            if not any(normalize_title(k) == norm_t for k in combined_dict.keys()):
+            if aid and not any(normalize_title(k) == norm_t for k in combined_dict.keys()):
                 combined_dict[t] = aid
     else:
         print("[INFO] No missing titles; no additional fetch needed.")
-
     ######## 9) Finally, save the combined dictionary to the new JSON-based cache ########
     save_json_cache(combined_dict, new_cache_path)
     print(f"[INFO] New cache now contains {len(combined_dict)} entries total.")
