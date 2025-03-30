@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 
 HTML_CACHE_FILE = "arxiv_html_cache.json"  ########
 HTML_FOLDER = "arxiv_fulltext_html"  ########
+NEW_CACHE_PATH = "title2arxiv_new_cache.json"
 
 def normalize_title(title):
     """
@@ -47,7 +48,7 @@ def save_json_cache(data, file_path):
     """
     try:
         with open(file_path, 'w', encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+            json.dump(data, f, ensure_ascii=False, indent=4)
         #print(f"[INFO] Saved JSON cache to {file_path} with {len(data)} entries.")
     except Exception as e:
         print(f"[ERROR] Could not save JSON cache: {e}")
@@ -159,8 +160,8 @@ def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
     if arxiv_id in html_cache:
         html_file_path = html_cache[arxiv_id]
         if html_file_path and os.path.isfile(html_file_path):
-            print(f"[INFO] HTML already cached for {arxiv_id}: {cached_path}")
-            return arxiv_id, cached_path
+            print(f"[INFO] HTML already cached for {arxiv_id}: {html_file_path}")
+            return arxiv_id, html_file_path
             #file_size = os.path.getsize(html_file_path)
             #else:
             #file_size = 0
@@ -209,48 +210,40 @@ def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
         else:
             size_info = 0
         print(f"[INFO] Title='{t_stripped}' -> ID='{arxiv_id}', HTML file='{html_file_path}', size='{size_info}'")
+        time.sleep(2)
     return pd.DataFrame(new_rows, columns=["title", "arxiv_id"])
 
 def main():
     ######## 1) Load a local Parquet file with "retrieved_title" column ########
     parquet_path = "extracted_annotations.parquet"
-    if not os.path.isfile(parquet_path):
-        print(f"[ERROR] Parquet file not found: {parquet_path}")
-        return
     df_parquet = pd.read_parquet(parquet_path)
-    if "retrieved_title" not in df_parquet.columns:
-        print("[ERROR] 'retrieved_title' column not found in the parquet file.")
-        return
     all_titles = set(df_parquet["retrieved_title"].dropna().unique())
     print(f"[INFO] Loaded {len(df_parquet)} rows from {parquet_path}, found {len(all_titles)} unique 'retrieved_title'.")
-
-    ######## 2) Load the original old JSON cache {url -> extracted_title} ########
-    json_cache_path = "data/processed/arxiv_titles_cache.json"
-    old_cache = load_json_cache(json_cache_path)  # Format: {url: title}
-    
-    ######## 3) Convert old cache to {title -> arxiv_id} using extract_arxiv_id ########
-    old_title_id_dict = {}
-    for url, extracted_title in old_cache.items():
-        aid = extract_arxiv_id(url)  # e.g., '2101.12345'
-        if aid and extracted_title:
-            old_title_id_dict[extracted_title] = aid
-    print(f"[INFO] Converted old cache into {len(old_title_id_dict)} (title -> arxiv_id) pairs.")
-
-    ######## 4) Load the new JSON-based cache for {title -> arxiv_id} ########
-    new_cache_path = "title2arxiv_new_cache.json"
-    new_cache = load_json_cache(new_cache_path)  # This is your new cache file
-
-    def _norm_equals(a, b):
-        return normalize_title(a) == normalize_title(b)
-    
-    ######## 5) Combine the two caches (old converted + new) using normalization ########
-    combined_dict = dict(old_title_id_dict)  # start with new cache if exists
-    for title, aid in new_cache.items():
-        norm_title = normalize_title(title)
-        if not any(normalize_title(k) == norm_title for k in combined_dict.keys()):
-            combined_dict[title] = aid
-    print(f"[INFO] Combined old and new caches, now have {len(combined_dict)} (title -> arxiv_id) pairs in memory.")
-
+    ######## 2) Load the new JSON-based cache for {title -> arxiv_id} ########
+    new_cache = load_json_cache(NEW_CACHE_PATH)
+    if new_cache:
+        print('Use the new cache instead of old parquet')
+        combined_dict = new_cache
+        pass
+    else:
+        print('No new cache found, use the old parquet')
+        ######## 3) Load the original old JSON cache {url -> extracted_title} ########
+        json_cache_path = "data/processed/arxiv_titles_cache.json"
+        old_cache = load_json_cache(json_cache_path)  # Format: {url: title}
+        ######## 4) Convert old cache to {title -> arxiv_id} using extract_arxiv_id ########
+        old_title_id_dict = {}
+        for url, extracted_title in old_cache.items():
+            aid = extract_arxiv_id(url)  # e.g., '2101.12345'
+            if aid and extracted_title:
+                old_title_id_dict[extracted_title] = aid
+        print(f"[INFO] Converted old cache into {len(old_title_id_dict)} (title -> arxiv_id) pairs.")
+        ######## 5) Combine the two caches (old converted + new) using normalization ########
+        combined_dict = dict(old_title_id_dict)  # start with new cache if exists
+        for title, aid in new_cache.items():
+            norm_title = normalize_title(title)
+            if not any(normalize_title(k) == norm_title for k in combined_dict.keys()):
+                combined_dict[title] = aid
+        print(f"[INFO] Combined old and new caches, now have {len(combined_dict)} (title -> arxiv_id) pairs in memory.")
     ######## 6) Determine which titles from the Parquet are already in the combined cache ########
     in_cache = set()
     missing = set()
@@ -264,7 +257,7 @@ def main():
     print(f"[INFO] Titles in Parquet: {len(all_titles)}")
     print(f"[INFO] Already in combined cache: {len(in_cache)}")
     print(f"[INFO] Missing (need fetch): {len(missing)}")
-    
+    #pause
     ######## 7) Save missing titles to a temporary file for manual inspection ########
     tmp_missing_file = "missing_titles_tmp.txt"
     with open(tmp_missing_file, "w", encoding="utf-8") as f:
@@ -273,7 +266,6 @@ def main():
     print(f"[INFO] Saved {len(missing)} missing titles to {tmp_missing_file}")
 
     ######## 8) For missing titles, run our updated real_batch_title_to_arxiv_id with NO retry ########
-    
     html_cache = load_json_cache(HTML_CACHE_FILE)  ########
     all_known_ids = {aid for aid in combined_dict.values() if aid}
     print(f"[INFO] Checking HTML for {len(all_known_ids)} arXiv IDs...")
@@ -304,7 +296,7 @@ def main():
     else:
         print("[INFO] No missing titles; no additional fetch needed.")
     ######## 9) Finally, save the combined dictionary to the new JSON-based cache ########
-    save_json_cache(combined_dict, new_cache_path)
+    save_json_cache(combined_dict, NEW_CACHE_PATH)
     print(f"[INFO] New cache now contains {len(combined_dict)} entries total.")
 
 if __name__ == "__main__":
