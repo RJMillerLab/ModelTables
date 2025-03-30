@@ -1,8 +1,16 @@
-import fitz  # PyMuPDF
+"""
+Author: Zhengyuan Dong
+Created: 2025-03-29
+Description: Extract and crop images and tables from a PDF file.
+Usage: 
+python -m src.data_ingestion.tmp_pdf2tabimg --pdf_path downloaded_pdfs/fa97ff8f47026ee384587be81e379b77bfd357bd5c2cecbc646136e627805fe3.pdf --output_folder tmp
+"""
+import fitz
 import os
 import io
 import pdfplumber
 from PIL import Image, ImageOps, ImageChops
+import argparse
 
 def auto_crop_image(image, bg_color=(255, 255, 255)):
     """
@@ -88,8 +96,21 @@ def save_tables_as_images(pdf_path, output_folder, padding=0, dpi=150):
                 except Exception as e:
                     print(f"Error processing table on page {page_number}, table {table_index + 1}: {e}")
 
-# Specify paths and call functions
-pdf_path = "./input/2404.18021v1.pdf"  # Path to the PDF file
-extract_and_crop_images_from_pdf(pdf_path, "./tmp/extracted_images")
-save_tables_as_images(pdf_path, "./tmp/extracted_table", padding=0, dpi=150)
+def main():
+    parser = argparse.ArgumentParser(description="Extract and crop images and tables from a PDF file")
+    parser.add_argument("--pdf_path", help="Path to the input PDF file")
+    parser.add_argument("--output_folder", help="Output folder to save extracted images and tables")
+    parser.add_argument("--padding", type=int, default=0, help="Padding for table extraction (default: 0)")
+    parser.add_argument("--dpi", type=int, default=150, help="DPI for rendering tables (default: 150)")
+    args = parser.parse_args()
 
+    # Define output directories for images and tables
+    images_output = os.path.join(args.output_folder, "extracted_images")
+    tables_output = os.path.join(args.output_folder, "extracted_table")
+
+    # Process the PDF
+    extract_and_crop_images_from_pdf(args.pdf_path, images_output)
+    save_tables_as_images(args.pdf_path, tables_output, padding=args.padding, dpi=args.dpi)
+
+if __name__ == "__main__":
+    main()

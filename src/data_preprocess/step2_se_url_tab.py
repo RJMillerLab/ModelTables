@@ -88,11 +88,11 @@ def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
 def parse_annotations(row):
     try:
         paper_json = json.loads(row['raw_json'])
-        content_text = paper_json.get("content", {}).get("text", "")
+        content_text = (paper_json.get("content") or {}).get("text", "")
         extracted = extract_references(paper_json, content_text)
         new_row = dict(row)
         new_row.update({
-            "extracted_openaccessurl": paper_json.get("content", {}).get("source", {}).get("oainfo", {}).get("openaccessurl", ""),
+            "extracted_openaccessurl": (((paper_json.get("content") or {}).get("source", {}) or {}).get("oainfo", {}) or {}).get("openaccessurl", None),
             "extracted_tables": extracted.get("extracted_tables", []),
             "extracted_tablerefs": extracted.get("extracted_tablerefs", []),
             "extracted_figures": extracted.get("extracted_figures", []),
@@ -101,6 +101,7 @@ def parse_annotations(row):
         })
         return new_row
     except Exception as e:
+        print(f"Error: {e}")
         return None
 
 def final_annotation_extraction(temp_parquet, output_parquet, n_jobs):

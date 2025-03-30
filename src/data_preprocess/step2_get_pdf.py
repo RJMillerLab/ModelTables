@@ -13,17 +13,29 @@ Description: Batch-download PDFs from a Parquet file containing "openaccessurl".
 import os
 import time
 import json
-import hashlib  # 用于生成 URL 哈希
+import hashlib
 import requests
-import subprocess  # 用于 wget 模式
+import subprocess
 import pandas as pd
 import pyarrow.parquet as pq
-from urllib.parse import urlparse  # 用于域名提取
-from tqdm import tqdm  # 添加进度条
+from urllib.parse import urlparse
+from tqdm import tqdm
 
-DOWNLOAD_MODE = "wget"  # 默认下载模式 ("wget" 或 "request")
+DOWNLOAD_MODE = "wget"
 
-######## JSON cache load/save functions ########
+def is_valid_pdf(file_path):
+    """
+    Quickly check if a file is a valid PDF by reading its header.
+    Returns True if valid, False otherwise.
+    """
+    try: 
+        with open(file_path, "rb") as f:
+            header = f.read(5)
+            return header == b"%PDF-"
+    except Exception as e:
+        print(f"[ERROR] Checking PDF validity failed for {file_path}: {e}")
+        return False 
+
 def load_json_cache(file_path):
     if not os.path.isfile(file_path):
         print("⚠️  JSON cache file not found:", file_path)
@@ -44,7 +56,6 @@ def save_json_cache(data, file_path):
     except Exception as e:
         print("❌  Could not save JSON cache:", e)
 
-######## Utility: extract domain ########
 def extract_domain(url):
     try:
         parsed = urlparse(url)
@@ -53,20 +64,14 @@ def extract_domain(url):
         print("❌  Failed to extract domain from", url, ":", e)
         return "unknown"
 
-######## PDF download function ########
 def download_pdf(url, output_folder, mode=DOWNLOAD_MODE, max_retries=3, sleep_time=3, timeout=15):
-    """
-    下载 URL 对应的 PDF，返回本地路径；若文件已存在，则直接返回。
-    """
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder, exist_ok=True)
 
-    # 用 SHA256 生成唯一文件名
     url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()
     safe_filename = url_hash + ".pdf"
     local_path = os.path.join(output_folder, safe_filename)
 
-    # 已存在则直接返回
     if os.path.isfile(local_path):
         print("📂  Retrieved local file for", url)
         return local_path
@@ -75,7 +80,6 @@ def download_pdf(url, output_folder, mode=DOWNLOAD_MODE, max_retries=3, sleep_ti
     while attempts < max_retries:
         if mode == "wget":
             try:
-                # 使用 wget 下载
                 subprocess.run(["wget", "-q", "-O", local_path, url], timeout=timeout)
                 if os.path.isfile(local_path) and os.path.getsize(local_path) > 0:
                     print("✅  Downloaded (wget) for", url)
@@ -84,7 +88,7 @@ def download_pdf(url, output_folder, mode=DOWNLOAD_MODE, max_retries=3, sleep_ti
                     print("❌  Error downloading", url)
             except Exception as e:
                 print("❌  Error downloading", url, ":", e)
-        else:  # request 模式
+        else: 
             try:
                 headers = {
                     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.81 Safari/537.36"
@@ -106,13 +110,7 @@ def download_pdf(url, output_folder, mode=DOWNLOAD_MODE, max_retries=3, sleep_ti
     print("❌  Failed to download after", max_retries, "attempts:", url)
     return None
 
-######## Domain-based round-robin download function ########
 def domain_round_robin_download(urls, output_folder, pdf_cache, cache_path):
-    """
-    按域名分组后采用轮转方式下载，更新缓存并用 tqdm 显示进度。
-    返回一个 (downloaded_paths, failed_urls) 的元组。
-    """
-    # 分组
     domain_groups = {}
     for url in urls:
         domain = extract_domain(url)
@@ -122,7 +120,6 @@ def domain_round_robin_download(urls, output_folder, pdf_cache, cache_path):
     pbar = tqdm(total=total, desc="Downloading PDFs", unit="url")
     downloaded_paths = {}
     failed_urls = []
-    # 遍历各组
     while any(domain_groups.values()):
         for domain in list(domain_groups.keys()):
             if domain_groups[domain]:
@@ -134,13 +131,12 @@ def domain_round_robin_download(urls, output_folder, pdf_cache, cache_path):
                     downloaded_paths[url] = local_pdf_path
                 else:
                     failed_urls.append(url)
-                save_json_cache(pdf_cache, cache_path)  # 每次更新缓存
+                save_json_cache(pdf_cache, cache_path)
             if not domain_groups.get(domain):
                 del domain_groups[domain]
     pbar.close()
     return downloaded_paths, failed_urls
 
-######## Main Script ########
 def main():
     parquet_path = "extracted_annotations.parquet"
     if not os.path.isfile(parquet_path):
@@ -155,18 +151,41 @@ def main():
 
     pdf_cache_path = "pdf_download_cache.json"
     pdf_cache = load_json_cache(pdf_cache_path)
-    # 检查缓存中存在且本地文件存在的 URL
-    cached_urls = {url for url, path in pdf_cache.items() if path and os.path.isfile(path)}
-    missing_urls = all_urls - cached_urls
-    print("📊  Total URLs:", len(all_urls))
-    print("📂  Already cached:", len(cached_urls))
-    print("🆕  Missing (need fetch):", len(missing_urls))
 
+    ######## Detect invalid PDFs even if cached ########
+    valid_cache = {}
+    invalid_urls = set()
+    for url, pdf_path in pdf_cache.items():
+        if pdf_path and os.path.isfile(pdf_path):
+            if is_valid_pdf(pdf_path):
+                valid_cache[url] = pdf_path
+            else:
+                print(f"[WARN] Invalid PDF detected, deleting: {pdf_path}")
+                try:
+                    os.remove(pdf_path)
+                except Exception as e:
+                    print(f"[ERROR] Failed to delete {pdf_path}: {e}")
+                invalid_urls.add(url)
+                valid_cache[url] = None
+        else:
+            invalid_urls.add(url)
+            valid_cache[url] = None
+
+    ######## Update cache with filtered results ########
+    pdf_cache = valid_cache
+    save_json_cache(pdf_cache, pdf_cache_path)  ######## <-- optional: persist cleaned cache
+
+    ######## Compute missing URLs ########
+    already_cached_valid = {url for url, path in pdf_cache.items() if path}
+    missing = all_urls - already_cached_valid  ######## <-- only valid paths count
+    print("📊  Total URLs:", len(all_urls))
+    print(f"📂  Valid cached PDFs: {len(already_cached_valid)}")
+    print(f"🧹  Invalid or corrupt PDFs: {len(invalid_urls)}")
+    if invalid_urls:
+        print(f"🗑️  Removed {len(invalid_urls)} invalid PDF files.")
+    print(f"🆕  Missing (need fetch): {len(missing)}")
     output_folder = "downloaded_pdfs"
-    # 第一轮下载
-    downloaded_paths, failed_urls = domain_round_robin_download(missing_urls, output_folder, pdf_cache, pdf_cache_path)
-    
-    # 如果有失败的链接，重试一次
+    downloaded_paths, failed_urls = domain_round_robin_download(missing, output_folder, pdf_cache, pdf_cache_path)
     if failed_urls:
         print("🔄  Retrying failed downloads for", len(failed_urls), "URLs...")
         _, failed_urls = domain_round_robin_download(failed_urls, output_folder, pdf_cache, pdf_cache_path)
@@ -177,7 +196,33 @@ def main():
             print("   ", url)
     else:
         print("🎉  All downloads succeeded.")
-
+    ######## Final re-check: clean any newly corrupted PDFs ########  ########
+    final_valid_cache = {}
+    final_invalid_urls = set()
+    for url, path in pdf_cache.items():
+        if path and os.path.isfile(path):
+            if is_valid_pdf(path):
+                final_valid_cache[url] = path
+            else:
+                print(f"[FINAL WARN] Removing corrupted PDF: {path}")
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    print(f"[FINAL ERROR] Failed to delete corrupted file {path}: {e}")
+                final_invalid_urls.add(url)
+                final_valid_cache[url] = None
+        else:
+            final_invalid_urls.add(url)
+            final_valid_cache[url] = None
+    pdf_cache = final_valid_cache
+    save_json_cache(pdf_cache, pdf_cache_path)
+    if final_invalid_urls:
+        print(f"🧽  Final clean-up: removed {len(final_invalid_urls)} additional invalid PDFs.")
+        print("📄  You can manually download and save the PDFs to the following paths:")
+        for url in sorted(final_invalid_urls):
+            pdf_name = hashlib.sha256(url.encode('utf-8')).hexdigest() + ".pdf"
+            pdf_path = os.path.join("downloaded_pdfs", pdf_name)
+            print(f"🔗 {url}  ->  📁 {pdf_path}")
     print("🎉  PDF download process complete. Cache now has", len(pdf_cache), "entries.")
 
 if __name__ == "__main__":
