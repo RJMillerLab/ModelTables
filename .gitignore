@@ -1,5 +1,6 @@
 config.yaml
 data/
+arxiv_fulltext_html/
 cleaned_markdown_csvs/
 github_readme_output_2/
 github_readme_output/

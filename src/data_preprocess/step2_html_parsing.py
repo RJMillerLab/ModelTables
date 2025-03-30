@@ -95,17 +95,34 @@ def process_item(item):
 print('processing the html files')
 df = pd.DataFrame(data.items(), columns=['paper_id', 'html_path'])
 
-# Parallel processing of classification + table extraction
-results = Parallel(n_jobs=-1)(
-    delayed(process_item)(row) for row in tqdm(df.itertuples(index=False), total=len(df))
-)
-
-# Build a new DataFrame from the results
-df_processed = pd.DataFrame(results, columns=['paper_id', 'html_path', 'page_type', 'table_list'])
-
-# If columns did not match the dictionary keys directly, you can do:
-# df_processed = pd.DataFrame(results)
-
-# Save as Parquet
-df_processed.to_parquet("html_table.parquet", index=False)
-print("Done! Saved to html_table.parquet.")
+######## # 1) Check if parquet already exists; if yes, load it
+parquet_file = "html_table.parquet"
+if os.path.exists(parquet_file):
+    df_existing = pd.read_parquet(parquet_file)
+    print(f"Loaded existing {parquet_file}, found {len(df_existing)} records.")
+else:
+    # If no parquet file exists, create an empty one with the correct columns
+    df_existing = pd.DataFrame(columns=['paper_id', 'html_path', 'page_type', 'table_list'])
+    print("No existing parquet found. Starting fresh.")
+######## # 2) Identify new/unseen paper_ids by comparing to df_existing
+existing_ids = set(df_existing['paper_id'])
+df_new = df[~df['paper_id'].isin(existing_ids)]
+print(f"Found {len(df_new)} new items to process.")
+######## # 3) If df_new is empty, skip processing
+if len(df_new) > 0:
+    # Parallel processing for classification + table extraction only on new items
+    new_results = Parallel(n_jobs=-1)(
+        delayed(process_item)(row) for row in tqdm(df_new.itertuples(index=False), total=len(df_new))
+    )
+    # Convert new results to DataFrame
+    df_processed_new = pd.DataFrame(new_results, columns=['paper_id', 'html_path', 'page_type', 'table_list'])
+    # Concatenate old + new
+    df_final = pd.concat([df_existing, df_processed_new], ignore_index=True)
+    # Optional: remove duplicates in case of overlap
+    df_final.drop_duplicates(subset=['paper_id'], keep='last', inplace=True)
+else:
+    # If there is nothing new, just keep the old
+    df_final = df_existing
+######## # 4) Save final results back to the parquet file
+df_final.to_parquet(parquet_file, index=False)
+print(f"Done! Updated {parquet_file} with {len(df_final)} total records.")
