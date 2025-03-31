@@ -56,8 +56,8 @@ def extract_tables_and_save(html_path, paper_id, output_dir='tables_output'):
     tables = soup.find_all('table')
 
     # Create an output directory for this paper if it doesn't exist
-    paper_output_dir = os.path.join(output_dir, paper_id)
-    os.makedirs(paper_output_dir, exist_ok=True)
+    #paper_output_dir = os.path.join(output_dir, paper_id)
+    #os.makedirs(paper_output_dir, exist_ok=True)
 
     for idx, table in enumerate(tables):
         # Extract rows
@@ -67,14 +67,18 @@ def extract_tables_and_save(html_path, paper_id, output_dir='tables_output'):
             cols = row.find_all(['td', 'th'])
             cols_text = [col.get_text(strip=True) for col in cols]
             table_data.append(cols_text)
-
         # Convert to DataFrame
         if table_data:
-            df_table = pd.DataFrame(table_data)
-            csv_path = os.path.join(paper_output_dir, f"{paper_id}_table{idx}.csv")
+            #df_table = pd.DataFrame(table_data)
+            if len(table_data) > 1:
+                new_header = [str(item).strip() for item in table_data[0]]
+                data_rows = table_data[1:]
+                df_table = pd.DataFrame(data_rows, columns=new_header)
+            else:
+                df_table = pd.DataFrame(table_data)
+            csv_path = os.path.join(output_dir, f"{paper_id}_table{idx}.csv")
             df_table.to_csv(csv_path, index=False)
             table_paths.append(csv_path)
-
     return table_paths
 
 def process_item(item):
