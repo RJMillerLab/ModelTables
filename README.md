@@ -87,7 +87,8 @@ bash src/data_preprocess/step2_se_url_tab.sh # extract title & openaccessurl | u
 # TODO: table2csv based on processed data. However, the 
 python -m src.data_preprocess.step2_get_html # download html
 python -m src.data_preprocess.step2_html_parsing # extract tables from html
-python -m src.data_preprocess.step2_integration_order
+python -m src.data_preprocess.step2_integration_order # first html | then PDF? | finally llm polished table text
+python -m src.data_preprocess.step2_llm_save # save table into local csv
 
 
 python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_Tab and then test

@@ -5,7 +5,6 @@ Date: 2025-03-30
 Description: Integration code for combining HTML, PDF, and extracted annotations,
              labeling the source for each item (HTML, PDF, or extracted),
              and saving final results.
-             (Note: LLM call is not performed in this version.)
 """
 
 import os, re
@@ -14,12 +13,15 @@ import hashlib
 import pandas as pd
 from joblib import Parallel, delayed
 from tqdm import tqdm
-import asyncio                                           ########
-from typing import Tuple, List                            ########
+import asyncio             
+from typing import Tuple, List
 import numpy as np
-from src.llm.model import LLM_response             ########
+from src.llm.model import LLM_response
 
-# --------------- Fixed Path Constants --------------- ########
+import nest_asyncio
+nest_asyncio.apply()
+
+# --------------- Fixed Path Constants --------------- #
 TITLE2ARXIV_JSON = "title2arxiv_new_cache.json"       ######## # Mapping: title -> arxiv_id
 HTML_TABLE_PARQUET = "html_table.parquet"             ######## # Contains: paper_id, html_path, page_type, table_list
 ANNOTATIONS_PARQUET = "extracted_annotations.parquet" ######## # base
@@ -78,15 +80,6 @@ def safe_scalar(value):
             return value.iloc[0] if not value.empty else None
     return value
 
-def query_llm(tables_data, raw_text=""):
-    """
-    Simulate calling an LLM to convert table data to Markdown format.
-    (Not used in this version.)
-    """
-    prompt = f"Please convert the following table data to Markdown:\n{raw_text}\n"
-    markdown = "| Column1 | Column2 |\n| --- | --- |\n"
-    return markdown
-
 def non_empty(x):
     if isinstance(x, (list, pd.Series, np.ndarray)):
         return len(x) > 0
@@ -96,59 +89,26 @@ def non_empty(x):
         return len(x.strip()) > 0
     return False
 
-async def async_LLM_response(prompt: str, GPT_model: str, history: list = [], kwargs: dict = {}) -> Tuple[str, list]:
-    """
-    Asynchronously sends a prompt to a language model and awaits the response.
-
-    Parameters
-    ----------
-    prompt : str
-        The prompt to send to the language model.
-    GPT_model : str
-        The specific GPT model version to use.
-    history : list, optional
-        Previous interactions with the language model, if applicable.
-    kwargs : dict, optional
-        Additional keyword arguments for the language model interaction.
-
-    Returns
-    -------
-    Tuple[str, list]
-        A tuple containing the model's response and the interaction history.
-    """
+async def async_LLM_response(prompt: str, history: list = [], kwargs: dict = {}) -> Tuple[str, str, list]:
     model_version = "gpt-4o-mini"# if GPT_model == 'gpt4'# else "gpt-3.5-turbo-0125"
     loop = asyncio.get_event_loop()
-    print('-----------------'*10)
-    print(prompt)
     response, history = await loop.run_in_executor(None, LLM_response, prompt, model_version, history, kwargs)
-    print(response)
-    #print('-----------------'*10)
     return response, history
 
-def parse_json_response(response: str):
-    """
-    Very simple parser for demonstration.
-    Adjust to your real parsing logic.
-    """
+def parse_json_response(response: str) -> str:
     try:
-        return json.loads(response)
-    except:
-        return []
+        parsed = json.loads(response)
+        if isinstance(parsed, list) and len(parsed) > 0:
+            return "\n".join(str(item) for item in parsed)
+        else:
+            return ""
+    except Exception:
+        return ""
 
-########
-# We define the concurrency semaphore for controlling parallel requests:
-SEMAPHORE = asyncio.Semaphore(5)  ########
-
-########
-prompt_template = (
-    "Your task is to convert the extracted table text from s2orc "
-    "into a well-organized Markdown table that is easy to recognize. "  ######## Updated wording for clarity
-    "Return only a list containing the Markdown table, with no extra content. "  ######## Refined output instructions
-    "Here is the input table: {}\nNow, please provide your answer:"  ######## Streamlined prompt for input
-)
-
-async def process_table_with_llm(row) -> str:
-    # preprocessing
+def combine_table_and_figure_text(row) -> str:
+    """
+    Combine table texts and figure texts into a single string.
+    """
     table_entries = row.get("extracted_tables", [])
     table_texts = []
     if isinstance(table_entries, (list, tuple, np.ndarray)):
@@ -164,7 +124,7 @@ async def process_table_with_llm(row) -> str:
         text = str(table_entries)
         if text.strip():
             table_texts.append(text.strip())
-    # Extract figure texts from extracted_figures with id starting with 'tab'
+
     figure_entries = row.get("extracted_figures", [])
     figure_texts = []
     if isinstance(figure_entries, (list, tuple, np.ndarray)):
@@ -175,36 +135,66 @@ async def process_table_with_llm(row) -> str:
                     text = entry.get("extracted_text", "")
                     if isinstance(text, str) and text.strip():
                         figure_texts.append(text.strip())
-    # Combine texts from tables and figures
+
     combined_texts = table_texts + figure_texts
     if not combined_texts:
         return ""
-    combined_text = "\n".join(combined_texts)
+    return "\n".join(combined_texts)
 
-    prompt = prompt_template.format(combined_text)
+SEMAPHORE = asyncio.Semaphore(5)
 
-    async with SEMAPHORE:
-        response, _ = await async_LLM_response(prompt, GPT_model="gpt4")
-    parsed = parse_json_response(response)
-    # Suppose the LLM returns a JSON array containing the markdown table as a string
-    if isinstance(parsed, (list, tuple, np.ndarray)) and len(parsed) > 0:
-        return parsed[0]  # e.g. the first item is our table
-    else:
+prompt_template = (
+    "We may have multiple tables in the text below. "
+    "For each table, convert it into a separate Markdown code block. "
+    "Return only a JSON array of code blocks, each item like \"```markdown\\n| Header1 | Header2 |\\n| --- | --- |\\n| value1  | value2  |\\n```\". "
+    "Do not add any extra info. If there's missing spacing/format, do your best to make it readable. "
+    "Here is the input text:\n{}\nNow, please provide your answer:"
+)
+
+async def process_table_with_llm(row) -> str:
+    """
+    Use LLM to convert `row["combined_text"]` into markdown tables.
+    Return response_raw
+    """
+    combined_text = row.get("combined_text", "")
+    if not combined_text.strip():
         return ""
+    prompt = prompt_template.format(combined_text)
+    #async with SEMAPHORE:
+    #    ans_prompt, response, _ = await async_LLM_response(prompt)
+    response, _ = await async_LLM_response(prompt)
+    print('='*10, "special_annotation", '='*10)
+    print("Title:", row.get("retrieved_title", ""))
+    print("Prompt:", ans_prompt)
+    print("Response:", response)
+    print('='*10)
+    #parsed_result = parse_json_response(response)
+    return response
 
 ########
-async def run_parallel_llm(df: pd.DataFrame) -> pd.DataFrame:    ########
+async def run_parallel_llm(df: pd.DataFrame, test_mode: bool = False) -> pd.DataFrame:
     """
     Execute the LLM calls in parallel for each row in df.
     Returns a copy of df with an additional column 'llm_markdown_table'.
     """
-    rows = df.to_dict("records")
-    tasks = [process_table_with_llm(row) for row in rows]
+    if test_mode:
+        df = df.head(5)
+    prompts = df["llm_prompt"].tolist()
+
+    async def call_single(prompt: str):
+        async with SEMAPHORE:
+            response, _ = await async_LLM_response(prompt)
+            return response
+
+    tasks = [call_single(prompt) for prompt in prompts]
+
+    print("⚙️ Awaiting all LLM tasks...")
     results = await asyncio.gather(*tasks)
-    # Attach to DataFrame
-    new_df = df.copy()
-    new_df["llm_markdown_table"] = results
-    return new_df
+
+    df_result = df.copy()
+    df_result["llm_response_raw"] = [r for r in results]
+    #df_result["llm_markdown_table"] = [r["parsed_table"] for r in results]
+    return df_result
 
 # ---------------------- Main Process ---------------------- #
 
@@ -247,7 +237,6 @@ def main():
     print("📝 df_html_merged shape:", df_html_merged.shape)
     
     # --- Step 5: Merge annotations with the title-HTML mapping on retrieved_title --- 
-    # 先用原始 retrieved_title 对齐
     df_merged = pd.merge(
         df_anno,
         df_html_merged,
@@ -256,7 +245,6 @@ def main():
         suffixes=("", "_temp")
     )
 
-    # 对于 arxiv_id 为空的记录，尝试用 norm_title 对齐
     mask_missing = df_merged["arxiv_id"].isna() ########
     if mask_missing.any():
         df_missing = df_merged[mask_missing].copy() ########
@@ -269,7 +257,6 @@ def main():
         ) ########
         df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values ########
 
-    # 对于仍然 arxiv_id 为空的记录，尝试用 preproc_title 对齐
     mask_missing = df_merged["arxiv_id"].isna() ########
     if mask_missing.any():
         df_missing = df_merged[mask_missing].copy() ########
@@ -282,7 +269,6 @@ def main():
         ) ########
         df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values ########
 
-    # 删除辅助列，保持数据原有字段不变
     df_merged.drop(columns=["norm_title", "preproc_title"], inplace=True) ########
     print("📝 After merging title mapping, shape:", df_merged.shape)
     #print("📝 After merging HTML info, shape:", df_merged.shape) 
@@ -315,20 +301,23 @@ def main():
     df_final.to_parquet(FINAL_PARQUET, index=False)
     print(f"\n🎉 Integration done. Output saved to {FINAL_PARQUET}, total {len(df_final)} rows.\n")
 
-    # --- Step 9: 打印统计信息 ---
-    # 统计具有 HTML 信息且 html_page_type 为 fulltext 的记录
+    # --- Step 9: Stats ---
     df_html_items = df_final[(df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext")]
     print(f"Items with HTML (fulltext): {len(df_html_items)}")
 
-    # 剩下的记录
     df_remaining = df_final[~((df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext"))]
 
-    # 统计剩余记录中有本地 PDF 路径的记录
     df_pdf_items = df_remaining[(df_remaining["pdf_pdf_path"].notna()) & (df_remaining["pdf_pdf_path"] != "")]
     print(f"Remaining items with local PDF path: {len(df_pdf_items)}")
 
-    # 统计剩余记录中 extracted_tables 或 extracted_figures 不为空的记录
-    df_extracted = df_remaining[(df_remaining["extracted_tables"].apply(non_empty)) | (df_remaining["extracted_figures"].apply(non_empty))]
+    #df_extracted = df_remaining[(df_remaining["extracted_tables"].apply(non_empty)) | (df_remaining["extracted_figures"].apply(non_empty))]
+    #df_final["combined_text"] = df_final.apply(combine_table_and_figure_text, axis=1)  ########
+    df_final.loc[:, "combined_text"] = df_final.apply(combine_table_and_figure_text, axis=1) 
+    df_final["llm_prompt"] = df_final["combined_text"].apply(
+        lambda x: prompt_template.format(x) if isinstance(x, str) and x.strip() else ""
+    )
+    #df_extracted = df_final[df_final["llm_prompt"].str.strip().astype(bool)] ########
+    df_extracted = df_final[df_final["combined_text"].str.strip().astype(bool)]  ########
     print(f"Remaining items with non-empty extracted tables or figures: {len(df_extracted)}")
 
     def count_tokens(text):
@@ -355,27 +344,24 @@ def main():
     print(f"Total tokens from LLM queries for items with local PDF path: {total_tokens_pdf}")
 
     # -------------- Parallel querying LLM (example) --------------
+    
+    df_extracted.to_parquet("before_llm_output.parquet", index=False)
+    print("combined text finished, next step is to run LLM")
 
-    if not df_extracted.empty:                                                    
-        print("⚙️ Running parallel LLM queries for extracted tables...")         
-        # Convert df_extracted to a separate DataFrame so we don't re-query everything
-        df_extracted = df_extracted.copy()                                        
+    if not df_extracted.empty:
+        print("⚙️ Running parallel LLM queries for prepared prompts...")
+        loop = asyncio.get_event_loop()
+        # test_mode = True: only run on the first 5 rows for testing
+        test_mode = False
+        df_extracted_llm = loop.run_until_complete(run_parallel_llm(df_extracted, test_mode=test_mode))
 
-        # For demonstration, let's just do it for those that have 'extracted_tables'.
-        # Then store the results in a new DataFrame with an added column "llm_markdown_table".
-        loop = asyncio.get_event_loop()                                          
-        df_extracted_llm = loop.run_until_complete(run_parallel_llm(df_extracted))
+        df_final.loc[df_extracted_llm.index, "llm_response_raw"] = df_extracted_llm["llm_response_raw"]
+        #df_final.loc[df_extracted_llm.index, "llm_markdown_table"] = df_extracted_llm["llm_markdown_table"] ########
 
-        # You can now merge or join df_extracted_llm back into df_final on index, etc.
-        df_final.loc[df_extracted_llm.index, "llm_markdown_table"] = df_extracted_llm["llm_markdown_table"]
-        
-        # Optionally, save or examine the updated df_final.
-        # For example:
-        output_path = os.path.join(LLM_OUTPUT_FOLDER, "llm_markdown_table_results.csv") 
-        os.makedirs(LLM_OUTPUT_FOLDER, exist_ok=True)                                    
-        df_final.to_csv(output_path, index=False)                                        
-        print(f"✅ LLM results saved to {output_path}")                                   
-
+        output_path = os.path.join(LLM_OUTPUT_FOLDER, "llm_markdown_table_results.csv")
+        os.makedirs(LLM_OUTPUT_FOLDER, exist_ok=True)
+        df_final.to_csv(output_path, index=False)
+        print(f"✅ LLM results saved to {output_path}")
 
 if __name__ == "__main__":
     main()
