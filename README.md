@@ -72,8 +72,6 @@ python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_d
 # buildup citation_index database
 bash src/data_localindexing/build_mini_citation_es.sh
 # batch querying citation_index
-
-
 ```
 
 3. Extract tables to local folder:
@@ -84,10 +82,18 @@ python -m src.data_preprocess.step2_md2text # process downloaded github html (if
 python -m src.data_preprocess.step2_se_url_title # fetching title from bibtex, PDF url.
 python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
 bash src/data_localindexing/build_mini_s2orc_es.sh # (batch query command) # build up s2orc and batch querying. Input: modelcard_dedup_titles.json, Output: query_cache.parquet
-python -m src.data_preprocess.step2_se_url_tab # extract title | use title to fetch table from semantic scholar dataset
-# TODO: table2csv
-# TODO: finetune
-# TODO: tricks
+bash src/data_preprocess/step2_se_url_tab.sh # extract title & openaccessurl | use title to fetch table from semantic scholar dataset
+
+# TODO: table2csv based on processed data. However, the 
+python -m src.data_preprocess.step2_get_html # download html
+python -m src.data_preprocess.step2_html_parsing # extract tables from html
+python -m src.data_preprocess.step2_integration_order
+
+
+python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_Tab and then test
+python -m src.data_preprocess.step2_extract_pdf #TODO: write!
+# TODO: prepare folder for finetune
+# TODO: tricks, baseline, diff sources
 # Evaluation:
 bash src/data_localindexing/build_mini_citation_es.sh
 #python -m src.data_preprocess.step2_CitationInfo #  get citations relation from graph edge .db

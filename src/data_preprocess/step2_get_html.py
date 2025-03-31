@@ -26,6 +26,10 @@ def normalize_title(title):
     """
     return " ".join(title.lower().split())
 
+def preprocess_title(title):
+    title = re.sub(r"[-:_*@&'\"]+", " ", title)
+    return " ".join(title.split())
+
 def load_json_cache(file_path):
     """
     Load a JSON file (expected format: {key: value}) in UTF-8.
@@ -52,10 +56,6 @@ def save_json_cache(data, file_path):
         #print(f"[INFO] Saved JSON cache to {file_path} with {len(data)} entries.")
     except Exception as e:
         print(f"[ERROR] Could not save JSON cache: {e}")
-
-def preprocess_title(title):
-    title = re.sub(r"[-:_*@&'\"]+", " ", title)
-    return " ".join(title.split())
 
 def search_arxiv_title(title_query, max_results=5):
     base_url = "http://export.arxiv.org/api/query"
