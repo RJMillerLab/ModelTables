@@ -98,8 +98,6 @@ bash src/data_symlink/trick_str.sh # trick: str value in new folder
 bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
 
 TODO: # produce groundtruth
-featurize dataset download d9ed7c63-239d-4f4b-a412-1790eb1605ed
-
 
 python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_tab and then test
 python -m src.data_preprocess.step2_extract_pdf #TODO: write!
@@ -109,6 +107,15 @@ python -m src.data_preprocess.step2_extract_pdf #TODO: write!
 bash src/data_localindexing/build_mini_citation_es.sh
 #python -m src.data_preprocess.step2_CitationInfo #  get citations relation from graph edge .db
 # TODO: get tags arxiv id, seems nothing in tags... only shows on web...
+```
+
+```bash
+# how to run starmie
+bash prepare_sample.sh # sample 1000 samples from each resources folder
+bash check_empty.sh # filter out empty files (or low quality files later)
+bash scripts/step1_pretrain.sh # finetune contrastive learning
+bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake items
+bash scripts/step3_search_hnsw.sh # data lake search!
 ```
 
 4. Label groundtruth for unionable search baselines:
