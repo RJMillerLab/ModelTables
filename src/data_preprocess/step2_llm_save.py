@@ -3,11 +3,12 @@ Author: Zhengyuan Dong
 Created: 2025-03-31
 Description: This script save the polished markdown tables to CSV files.
 """
-import os
+import os, re
 import pandas as pd
 import numpy as np
 import json
 from src.data_ingestion.readme_parser import MarkdownHandler
+
 
 def clean_markdown_block(md_block: str) -> str:
     """
@@ -19,7 +20,7 @@ def clean_markdown_block(md_block: str) -> str:
         md_block = md_block[:-3].strip()
     return md_block
 
-def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_column: str = "arxiv_id", skip_if_html_fulltext: bool = True) -> pd.DataFrame:
+def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_column: str = "corpusid", skip_if_html_fulltext: bool = True) -> pd.DataFrame:
     """
     For each row in df, extract markdown tables from 'llm_response_raw',
     save them as individual CSV files, and collect their paths.
@@ -46,19 +47,24 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
             #if pd.notna(html_path) and str(html_path).strip() and html_type == "fulltext":
             #    continue  ######## skip processing if HTML fulltext exists
 
-        raw_response = row.get("llm_response_raw", "")
+        raw_response = row['llm_response_raw']
         if pd.isna(raw_response) or not raw_response.strip():
             continue
 
-        try:
+        """try:
             table_blocks = json.loads(raw_response)
             if not isinstance(table_blocks, (list, tuple, np.ndarray)):
                 continue
         except Exception as e:
             print(f"❌ Failed to parse JSON for row {idx}: {e}")
-            continue
+            continue"""
+        
+        pattern = re.compile(r"```markdown\s*(.*?)\s*```", re.DOTALL)  ########
+        table_blocks = pattern.findall(raw_response)  ########
+        if not table_blocks:  ########
+            table_blocks = [raw_response.strip()]  ########
 
-        key_value = row.get(key_column)
+        key_value = row[key_column]
         if pd.isna(key_value) or not str(key_value).strip():
             key_value = f"row_{idx}"  ######## fallback ID
         safe_key = str(key_value).strip().replace(" ", "_").replace("/", "_")
@@ -83,20 +89,17 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
     return df
 
 if __name__ == "__main__":
-    LLM_OUTPUT_FOLDER = "llm_outputs"
-    input_csv = os.path.join(LLM_OUTPUT_FOLDER, "llm_markdown_table_results.csv")
-    input_parquet = os.path.join(LLM_OUTPUT_FOLDER, "final_integration.parquet") ######## original parquet
+    input_csv = os.path.join("llm_outputs", "llm_markdown_table_results.csv")
+    df_parquet = pd.read_csv(input_csv)
+    print(df_parquet.head(5))
+    print(df_parquet.columns)
+
     output_dir =  "llm_tables"
     os.makedirs(output_dir, exist_ok=True)
-    # Load original dataframe (parquet) and updated csv result
-    df_parquet = pd.read_parquet(input_parquet)
-    df_llm = pd.read_csv(input_csv)
-    # Merge CSV back into original df by index
-    df_parquet.update(df_llm) ######## keep updated LLM responses
     # Process tables and write csvs
-    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="arxiv_id", skip_if_html_fulltext=True) ########
+    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=True) ########
     # Save updated parquet
-    updated_parquet_path = os.path.join(LLM_OUTPUT_FOLDER, "final_integration_with_paths.parquet") ########
+    updated_parquet_path = "final_integration_with_paths.parquet" ########
     df_parquet.to_parquet(updated_parquet_path, index=False)
     print(f"\n🎉 All markdown tables saved. Paths recorded in 'saved_csv_paths'.")
     print(f"📝 Updated parquet saved to: {updated_parquet_path}")

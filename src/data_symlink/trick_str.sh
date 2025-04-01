@@ -6,7 +6,7 @@ folders=(
     "CitationLake/data/processed/deduped_hugging_csvs"
     "CitationLake/data/processed/cleaned_markdown_csvs_github"
     "CitationLake/tables_output"
-    #"CitationLake/llm_tables"
+    "CitationLake/llm_tables"
 )
 
 for rel_folder in "${folders[@]}"; do

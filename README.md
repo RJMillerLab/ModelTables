@@ -84,19 +84,17 @@ python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
 bash src/data_localindexing/build_mini_s2orc_es.sh # (batch query command) # build up s2orc and batch querying. Input: modelcard_dedup_titles.json, Output: query_cache.parquet
 bash src/data_preprocess/step2_se_url_tab.sh # extract title & openaccessurl | use title to fetch table from semantic scholar dataset
 
-# TODO: table2csv based on processed data. However, the 
 python -m src.data_preprocess.step2_get_html # download html
 python -m src.data_preprocess.step2_html_parsing # extract tables from html
 python -m src.data_preprocess.step2_integration_order # first html | then PDF? | finally llm polished table text
-TODO: python -m src.data_preprocess.step2_llm_save # save table into local csv
+python -m src.data_preprocess.step2_llm_save # save table into local csv
 # go to starmie folder, and copy this sh file to run 
-TODO: bash src/data_symlink/ln_scilake_large.sh # symlink 4: cleaned_markdown_csvs_github|deduped_hugging_csvs|tables_output|llm_tables_filtered
-TODO: bash src/data_symlink/trick_transpose.sh # trick: transpose csv in new folder
-TODO: bash src/data_symlink/trick_str.sh # trick: str value in new folder
-TODO: bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
+bash src/data_symlink/ln_scilake_large.sh # symlink 4: cleaned_markdown_csvs_github|deduped_hugging_csvs|tables_output|llm_tables
+bash src/data_symlink/trick_transpose.sh # trick: transpose csv in new folder
+bash src/data_symlink/trick_str.sh # trick: str value in new folder
+bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
 
 TODO: # produce groundtruth
-TODO: 
 
 
 
@@ -112,7 +110,7 @@ bash src/data_localindexing/build_mini_citation_es.sh
 
 4. Label groundtruth for unionable search baselines:
 ```bash
-python -m src.data_preprocess.step4 # process groundtruth
+python -m src.data_preprocess.step4 # process groundtruth (work for API, not work for dump data)
 ```
 
 5. Analyze some statistics
