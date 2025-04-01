@@ -88,10 +88,19 @@ bash src/data_preprocess/step2_se_url_tab.sh # extract title & openaccessurl | u
 python -m src.data_preprocess.step2_get_html # download html
 python -m src.data_preprocess.step2_html_parsing # extract tables from html
 python -m src.data_preprocess.step2_integration_order # first html | then PDF? | finally llm polished table text
-python -m src.data_preprocess.step2_llm_save # save table into local csv
+TODO: python -m src.data_preprocess.step2_llm_save # save table into local csv
+# go to starmie folder, and copy this sh file to run 
+TODO: bash src/data_symlink/ln_scilake_large.sh # symlink 4: cleaned_markdown_csvs_github|deduped_hugging_csvs|tables_output|llm_tables_filtered
+TODO: bash src/data_symlink/trick_transpose.sh # trick: transpose csv in new folder
+TODO: bash src/data_symlink/trick_str.sh # trick: str value in new folder
+TODO: bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
+
+TODO: # produce groundtruth
+TODO: 
 
 
-python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_Tab and then test
+
+python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_tab and then test
 python -m src.data_preprocess.step2_extract_pdf #TODO: write!
 # TODO: prepare folder for finetune
 # TODO: tricks, baseline, diff sources

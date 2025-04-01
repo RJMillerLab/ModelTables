@@ -5,6 +5,7 @@ Description: This script save the polished markdown tables to CSV files.
 """
 import os
 import pandas as pd
+import numpy as np
 import json
 from src.data_ingestion.readme_parser import MarkdownHandler
 
@@ -18,7 +19,7 @@ def clean_markdown_block(md_block: str) -> str:
         md_block = md_block[:-3].strip()
     return md_block
 
-def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_column: str = "arxiv_id") -> pd.DataFrame:
+def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_column: str = "arxiv_id", skip_if_html_fulltext: bool = True) -> pd.DataFrame:
     """
     For each row in df, extract markdown tables from 'llm_response_raw',
     save them as individual CSV files, and collect their paths.
@@ -28,13 +29,30 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
     df["saved_csv_paths"] = [[] for _ in range(len(df))]  ######## initialize empty list
 
     for idx, row in df.iterrows():
+        # --- skip if HTML fulltext is available ---
+        if skip_if_html_fulltext:
+            html_path = row["html_html_path"]
+            html_type = row["html_page_type"]
+            html_tables = row["html_table_list"]
+
+            has_valid_html_path = pd.notna(html_path) and str(html_path).strip()
+            has_valid_table_list = (
+                isinstance(html_tables, (list, tuple, np.ndarray)) and len(html_tables) > 0
+            ) or (
+                isinstance(html_tables, str) and html_tables.strip() not in ["[]", ""]
+            )
+            if html_type == "fulltext" and has_valid_html_path and has_valid_table_list:
+                continue  ######## skip if HTML fulltext + valid tables exist
+            #if pd.notna(html_path) and str(html_path).strip() and html_type == "fulltext":
+            #    continue  ######## skip processing if HTML fulltext exists
+
         raw_response = row.get("llm_response_raw", "")
         if pd.isna(raw_response) or not raw_response.strip():
             continue
 
         try:
             table_blocks = json.loads(raw_response)
-            if not isinstance(table_blocks, list):
+            if not isinstance(table_blocks, (list, tuple, np.ndarray)):
                 continue
         except Exception as e:
             print(f"❌ Failed to parse JSON for row {idx}: {e}")
@@ -76,7 +94,7 @@ if __name__ == "__main__":
     # Merge CSV back into original df by index
     df_parquet.update(df_llm) ######## keep updated LLM responses
     # Process tables and write csvs
-    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="arxiv_id") ########
+    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="arxiv_id", skip_if_html_fulltext=True) ########
     # Save updated parquet
     updated_parquet_path = os.path.join(LLM_OUTPUT_FOLDER, "final_integration_with_paths.parquet") ########
     df_parquet.to_parquet(updated_parquet_path, index=False)

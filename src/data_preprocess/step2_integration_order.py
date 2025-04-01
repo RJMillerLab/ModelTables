@@ -17,6 +17,7 @@ import asyncio
 from typing import Tuple, List
 import numpy as np
 from src.llm.model import LLM_response
+from tqdm.asyncio import tqdm as tqdm_asyncio  # 放到顶部 imports
 
 import nest_asyncio
 nest_asyncio.apply()
@@ -141,7 +142,7 @@ def combine_table_and_figure_text(row) -> str:
         return ""
     return "\n".join(combined_texts)
 
-SEMAPHORE = asyncio.Semaphore(5)
+#SEMAPHORE = asyncio.Semaphore(5)
 
 prompt_template = (
     "We may have multiple tables in the text below. "
@@ -150,26 +151,6 @@ prompt_template = (
     "Do not add any extra info. If there's missing spacing/format, do your best to make it readable. "
     "Here is the input text:\n{}\nNow, please provide your answer:"
 )
-
-async def process_table_with_llm(row) -> str:
-    """
-    Use LLM to convert `row["combined_text"]` into markdown tables.
-    Return response_raw
-    """
-    combined_text = row.get("combined_text", "")
-    if not combined_text.strip():
-        return ""
-    prompt = prompt_template.format(combined_text)
-    #async with SEMAPHORE:
-    #    ans_prompt, response, _ = await async_LLM_response(prompt)
-    response, _ = await async_LLM_response(prompt)
-    print('='*10, "special_annotation", '='*10)
-    print("Title:", row.get("retrieved_title", ""))
-    print("Prompt:", ans_prompt)
-    print("Response:", response)
-    print('='*10)
-    #parsed_result = parse_json_response(response)
-    return response
 
 ########
 async def run_parallel_llm(df: pd.DataFrame, test_mode: bool = False) -> pd.DataFrame:
@@ -180,16 +161,26 @@ async def run_parallel_llm(df: pd.DataFrame, test_mode: bool = False) -> pd.Data
     if test_mode:
         df = df.head(5)
     prompts = df["llm_prompt"].tolist()
+    titles = df["retrieved_title"].tolist()
 
-    async def call_single(prompt: str):
-        async with SEMAPHORE:
-            response, _ = await async_LLM_response(prompt)
-            return response
-
-    tasks = [call_single(prompt) for prompt in prompts]
-
+    async def call_single(prompt: str, title: str):
+        #async with SEMAPHORE:
+        response, _ = await async_LLM_response(prompt)
+        print("\n" + "="*20 + " LLM RESULT " + "="*20)
+        print(f"📄 Title   : {title}")
+        print(f"🧠 Prompt  :\n{prompt}")
+        print(f"📝 Response:\n{response}")
+        print("="*54 + "\n")
+        return response
     print("⚙️ Awaiting all LLM tasks...")
-    results = await asyncio.gather(*tasks)
+    tasks = [call_single(p, t) for p, t in zip(prompts, titles)]
+
+    #results = await asyncio.gather(*tasks)
+
+    results = []
+    for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc="🔮 Running LLM"):
+        result = await coro
+        results.append(result)
 
     df_result = df.copy()
     df_result["llm_response_raw"] = [r for r in results]
