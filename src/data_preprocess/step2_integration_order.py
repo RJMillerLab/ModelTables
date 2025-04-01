@@ -176,11 +176,12 @@ async def run_parallel_llm(df: pd.DataFrame, test_mode: bool = False) -> pd.Data
     tasks = [call_single(p, t) for p, t in zip(prompts, titles)]
 
     #results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks) # to ensure the sequence of results is the same as the sequence of tasks
 
-    results = []
-    for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc="🔮 Running LLM"):
-        result = await coro
-        results.append(result)
+    #results = []
+    #for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc="🔮 Running LLM"):
+    #    result = await coro
+    #    results.append(result)
 
     df_result = df.copy()
     df_result["llm_response_raw"] = [r for r in results]

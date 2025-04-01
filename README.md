@@ -86,7 +86,10 @@ bash src/data_preprocess/step2_se_url_tab.sh # extract title & openaccessurl | u
 
 python -m src.data_preprocess.step2_get_html # download html
 python -m src.data_preprocess.step2_html_parsing # extract tables from html
-python -m src.data_preprocess.step2_integration_order # first html | then PDF? | finally llm polished table text
+python -m src.data_preprocess.step2_integration_order > step2_integration_order_3.log # first html | then PDF? | finally llm polished table text
+# (Optional) If the sequence is wrong, reproduce from the log...
+#python -m src.data_preprocess.quick_repro
+#cp -r llm_outputs/llm_markdown_table_results_aligned.csv llm_outputs/llm_markdown_table_results.csv
 python -m src.data_preprocess.step2_llm_save # save table into local csv
 # go to starmie folder, and copy this sh file to run 
 bash src/data_symlink/ln_scilake_large.sh # symlink 4: cleaned_markdown_csvs_github|deduped_hugging_csvs|tables_output|llm_tables
@@ -95,7 +98,7 @@ bash src/data_symlink/trick_str.sh # trick: str value in new folder
 bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
 
 TODO: # produce groundtruth
-
+featurize dataset download d9ed7c63-239d-4f4b-a412-1790eb1605ed
 
 
 python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_tab and then test
