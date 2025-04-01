@@ -5,12 +5,23 @@
 - Define and execute tasks such as model retrieving, table integration, and data lake operations.
 - User-friendly UI with pipeline visualization and task management.# CitationLake
 
+## Requirements
+
+```bash
+git clone https://github.com/DoraDong-2023/CitationLake.git
+cd CitationLake/
+pip install -r requirements.txt
+```
+
+```bash
+echo "OPENAI_API_KEY='your_api_key'" > .env
+```
+
+
 ## Download Data
 
 This project uses datasets hosted on Hugging Face. Use the following commands to download the necessary data:
 ```bash
-git clone https://github.com/DoraDong-2023/CitationLake.git
-cd CitationLake/
 mkdir data
 mkdir data/processed
 mkdir data/raw

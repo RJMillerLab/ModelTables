@@ -7,20 +7,15 @@ Description: Integration code for combining HTML, PDF, and extracted annotations
              and saving final results.
 """
 
-import os, re
-import json
+import os, re, json, tiktoken
 import hashlib
 import pandas as pd
+import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
-import asyncio             
 from typing import Tuple, List
-import numpy as np
 from src.llm.model import LLM_response
-from tqdm.asyncio import tqdm as tqdm_asyncio  # 放到顶部 imports
 
-import nest_asyncio
-nest_asyncio.apply()
 
 # --------------- Fixed Path Constants --------------- #
 TITLE2ARXIV_JSON = "title2arxiv_new_cache.json"       ######## # Mapping: title -> arxiv_id
@@ -30,6 +25,7 @@ PDF_CACHE_PATH = "pdf_download_cache.json"            ######## #
 LLM_OUTPUT_FOLDER = "llm_outputs"                     ######## # Folder for output CSV files (even if LLM is not called)
 FINAL_PARQUET = "final_integration.parquet"           ########
 
+from src.llm.batch import main_batch_query
 # ---------------------- Helper Functions ---------------------- #
 
 def normalize_title(title):
@@ -61,6 +57,10 @@ def is_valid_pdf(pdf_path):
     except:
         return False
 
+def count_tokens(text, model="gpt-4o-mini"):
+    encoding = tiktoken.encoding_for_model(model)
+    return len(encoding.encode(text, disallowed_special=()))
+
 def safe_list(value):
     """Convert value to a Python list if possible."""
     if value is None:
@@ -90,26 +90,7 @@ def non_empty(x):
         return len(x.strip()) > 0
     return False
 
-async def async_LLM_response(prompt: str, history: list = [], kwargs: dict = {}) -> Tuple[str, str, list]:
-    model_version = "gpt-4o-mini"# if GPT_model == 'gpt4'# else "gpt-3.5-turbo-0125"
-    loop = asyncio.get_event_loop()
-    response, history = await loop.run_in_executor(None, LLM_response, prompt, model_version, history, kwargs)
-    return response, history
-
-def parse_json_response(response: str) -> str:
-    try:
-        parsed = json.loads(response)
-        if isinstance(parsed, list) and len(parsed) > 0:
-            return "\n".join(str(item) for item in parsed)
-        else:
-            return ""
-    except Exception:
-        return ""
-
 def combine_table_and_figure_text(row) -> str:
-    """
-    Combine table texts and figure texts into a single string.
-    """
     table_entries = row.get("extracted_tables", [])
     table_texts = []
     if isinstance(table_entries, (list, tuple, np.ndarray)):
@@ -142,65 +123,29 @@ def combine_table_and_figure_text(row) -> str:
         return ""
     return "\n".join(combined_texts)
 
-#SEMAPHORE = asyncio.Semaphore(5)
-
 prompt_template = (
-    "We may have multiple tables in the text below. "
-    "For each table, convert it into a separate Markdown code block. "
-    "Return only a JSON array of code blocks, each item like \"```markdown\\n| Header1 | Header2 |\\n| --- | --- |\\n| value1  | value2  |\\n```\". "
-    "Do not add any extra info. If there's missing spacing/format, do your best to make it readable. "
+    "The following text may contain multiple tables, including descriptions, metadata captions, and body content. "
+    "Some tables may be poorly formatted (e.g., missing delimiters between columns). "
+    "Please identify and extract each table, and convert it into a separate Markdown code block. "
+    "For each, return only a JSON array of Markdown code blocks, formatted like: "
+    "\"```markdown\\n| Header1 | Header2 |\\n| --- | --- |\\n| value1 | value2 |\\n```\". "
+    "Ensure the output reflects the same information as the original, but with clearer structure and improved readability where possible. "
+    "Do not include any explanations or extra text.\n\n"
     "Here is the input text:\n{}\nNow, please provide your answer:"
 )
-
-########
-async def run_parallel_llm(df: pd.DataFrame, test_mode: bool = False) -> pd.DataFrame:
-    """
-    Execute the LLM calls in parallel for each row in df.
-    Returns a copy of df with an additional column 'llm_markdown_table'.
-    """
-    if test_mode:
-        df = df.head(5)
-    prompts = df["llm_prompt"].tolist()
-    titles = df["retrieved_title"].tolist()
-
-    async def call_single(prompt: str, title: str):
-        #async with SEMAPHORE:
-        response, _ = await async_LLM_response(prompt)
-        print("\n" + "="*20 + " LLM RESULT " + "="*20)
-        print(f"📄 Title   : {title}")
-        print(f"🧠 Prompt  :\n{prompt}")
-        print(f"📝 Response:\n{response}")
-        print("="*54 + "\n")
-        return response
-    print("⚙️ Awaiting all LLM tasks...")
-    tasks = [call_single(p, t) for p, t in zip(prompts, titles)]
-
-    #results = await asyncio.gather(*tasks)
-    results = await asyncio.gather(*tasks) # to ensure the sequence of results is the same as the sequence of tasks
-
-    #results = []
-    #for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc="🔮 Running LLM"):
-    #    result = await coro
-    #    results.append(result)
-
-    df_result = df.copy()
-    df_result["llm_response_raw"] = [r for r in results]
-    #df_result["llm_markdown_table"] = [r["parsed_table"] for r in results]
-    return df_result
 
 # ---------------------- Main Process ---------------------- #
 
 def main():
-    # --- Step 4: Load extracted annotations --- 
+    # --- Step 1: Load extracted annotations ---
     df_anno = pd.read_parquet(ANNOTATIONS_PARQUET)
     df_anno["norm_title"] = df_anno["retrieved_title"].apply(normalize_title) ########
     df_anno["preproc_title"] = df_anno["retrieved_title"].apply(preprocess_title) ########
     # Expected columns include: retrieved_title, extracted_openaccessurl, extracted_tables, extracted_figures, etc.
     print("📝 df_anno shape:", df_anno.shape)
 
-    # --- Step 1: Load title2arxiv mapping (title -> arxiv_id) --- 
-    title2arxiv_map = load_json_cache(TITLE2ARXIV_JSON)
-    # Example: { "Some paper title": "2301.12345v2", ... }
+    # --- Step 2: Load title2arxiv mapping (title -> arxiv_id) ---
+    title2arxiv_map = load_json_cache(TITLE2ARXIV_JSON) # Example: { "Some paper title": "2301.12345v2", ... }
     df_title2arxiv = pd.DataFrame(
         [(t, a) for t, a in title2arxiv_map.items()],
         columns=["retrieved_title", "arxiv_id"]
@@ -209,12 +154,11 @@ def main():
     df_title2arxiv["preproc_title"] = df_title2arxiv["retrieved_title"].apply(preprocess_title) ########
     print("📝 df_title2arxiv shape:", df_title2arxiv.shape)
 
-    # --- Step 2: Load html_table.parquet which contains HTML info including table_list --- 
-    df_html = pd.read_parquet(HTML_TABLE_PARQUET)
-    # Columns: [paper_id, html_path, page_type, table_list]
+    # --- Step 3: Load html_table.parquet which contains HTML info including table_list ---
+    df_html = pd.read_parquet(HTML_TABLE_PARQUET) # Columns: [paper_id, html_path, page_type, table_list]
     print("📝 df_html shape:", df_html.shape)
 
-    # --- Step 3: Merge title mapping with HTML table info on arxiv_id/paper_id --- 
+    # --- Step 4: Merge title mapping with HTML table info on arxiv_id/paper_id ---
     df_html_merged = pd.merge(
         df_title2arxiv, df_html,
         left_on="arxiv_id", right_on="paper_id",
@@ -227,8 +171,7 @@ def main():
         "paper_id": "html_paper_id" 
     }, inplace=True)
     print("📝 df_html_merged shape:", df_html_merged.shape)
-    
-    # --- Step 5: Merge annotations with the title-HTML mapping on retrieved_title --- 
+    # --- Step 5: Merge annotations with the title-HTML mapping on retrieved_title ---
     df_merged = pd.merge(
         df_anno,
         df_html_merged,
@@ -237,35 +180,35 @@ def main():
         suffixes=("", "_temp")
     )
 
-    mask_missing = df_merged["arxiv_id"].isna() ########
+    mask_missing = df_merged["arxiv_id"].isna()
     if mask_missing.any():
-        df_missing = df_merged[mask_missing].copy() ########
+        df_missing = df_merged[mask_missing].copy()
         df_missing2 = pd.merge(
             df_missing.drop(columns=["arxiv_id"]),
             df_title2arxiv[["norm_title", "arxiv_id"]],
             left_on="norm_title",
             right_on="norm_title",
             how="left"
-        ) ########
-        df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values ########
+        )
+        df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values
 
-    mask_missing = df_merged["arxiv_id"].isna() ########
+    mask_missing = df_merged["arxiv_id"].isna()
     if mask_missing.any():
-        df_missing = df_merged[mask_missing].copy() ########
+        df_missing = df_merged[mask_missing].copy()
         df_missing2 = pd.merge(
             df_missing.drop(columns=["arxiv_id"]),
             df_title2arxiv[["preproc_title", "arxiv_id"]],
             left_on="preproc_title",
             right_on="preproc_title",
             how="left"
-        ) ########
-        df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values ########
+        )
+        df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values
 
-    df_merged.drop(columns=["norm_title", "preproc_title"], inplace=True) ########
+    df_merged.drop(columns=["norm_title", "preproc_title"], inplace=True)
     print("📝 After merging title mapping, shape:", df_merged.shape)
     #print("📝 After merging HTML info, shape:", df_merged.shape) 
     
-    # --- Step 6: Load PDF cache (already downloaded PDFs) --- ########
+    # --- Step 6: Load PDF cache (already downloaded PDFs) ---
     pdf_cache = load_json_cache(PDF_CACHE_PATH)
     print("🔎 PDF cache loaded with", len(pdf_cache), "entries.")
     # Filter out invalid PDFs from cache
@@ -302,38 +245,21 @@ def main():
     df_pdf_items = df_remaining[(df_remaining["pdf_pdf_path"].notna()) & (df_remaining["pdf_pdf_path"] != "")]
     print(f"Remaining items with local PDF path: {len(df_pdf_items)}")
 
-    #df_extracted = df_remaining[(df_remaining["extracted_tables"].apply(non_empty)) | (df_remaining["extracted_figures"].apply(non_empty))]
-    #df_final["combined_text"] = df_final.apply(combine_table_and_figure_text, axis=1)  ########
     df_final.loc[:, "combined_text"] = df_final.apply(combine_table_and_figure_text, axis=1) 
     df_final["llm_prompt"] = df_final["combined_text"].apply(
         lambda x: prompt_template.format(x) if isinstance(x, str) and x.strip() else ""
     )
-    #df_extracted = df_final[df_final["llm_prompt"].str.strip().astype(bool)] ########
-    df_extracted = df_final[df_final["combined_text"].str.strip().astype(bool)]  ########
+    df_extracted = df_final[df_final["combined_text"].str.strip().astype(bool)]
     print(f"Remaining items with non-empty extracted tables or figures: {len(df_extracted)}")
 
-    def count_tokens(text):
-        return len(text.split())
-
     # count token for the extracted figures
-    total_tokens_pdf = 0
-    for idx, row in df_pdf_items.iterrows():
-        content = ""
-        if non_empty(row.get("extracted_tables")):
-            if isinstance(row.get("extracted_tables"), list):
-                content += " ".join(row.get("extracted_tables"))
-            else: 
-                content += str(row.get("extracted_tables"))
-        if non_empty(row.get("extracted_figures")):
-            if isinstance(row.get("extracted_figures"), list):
-                content += " ".join(row.get("extracted_figures"))
-            else: 
-                content += str(row.get("extracted_figures"))
-        if content:
-            llm_result = content
-            tokens = count_tokens(llm_result)
-            total_tokens_pdf += tokens
-    print(f"Total tokens from LLM queries for items with local PDF path: {total_tokens_pdf}")
+    df_final['token_count_combined_text'] = df_final['combined_text'].apply(count_tokens)
+    print(f"Total tokens from LLM queries for items with local PDF path: {df_final['token_count_combined_text'].sum()}")
+    print(f"Average tokens per item: {df_final['token_count_combined_text'].mean()}")
+    print(f"Max tokens in a single item: {df_final['token_count_combined_text'].max()}")
+    #print(f"Min tokens in a single item: {df_final['token_count_combined_text'].min()}")
+    print(f"Token count for prompt template: {count_tokens(prompt_template)}")
+    print(f"⚠️ Items with token count > 16000: {(df_final['token_count_combined_text'] > 16000).sum()}")  ########
 
     # -------------- Parallel querying LLM (example) --------------
     
@@ -341,19 +267,73 @@ def main():
     print("combined text finished, next step is to run LLM")
 
     if not df_extracted.empty:
-        print("⚙️ Running parallel LLM queries for prepared prompts...")
-        loop = asyncio.get_event_loop()
-        # test_mode = True: only run on the first 5 rows for testing
-        test_mode = False
-        df_extracted_llm = loop.run_until_complete(run_parallel_llm(df_extracted, test_mode=test_mode))
-
-        df_final.loc[df_extracted_llm.index, "llm_response_raw"] = df_extracted_llm["llm_response_raw"]
-        #df_final.loc[df_extracted_llm.index, "llm_markdown_table"] = df_extracted_llm["llm_markdown_table"] ########
-
-        output_path = os.path.join(LLM_OUTPUT_FOLDER, "llm_markdown_table_results.csv")
+        print("⚙️ Preparing batch_input.jsonl ...")
+        input_path = "data/processed/batch_input.jsonl"
+        max_context = 16384
+        token_buffer = 300
+        model_name = "gpt-4o-mini"
+        ######## Recompute prompt_token_count
+        df_final["adaptive_max_tokens"] = df_final["token_count_combined_text"].apply(lambda x: min(x + token_buffer, max_context))  ########
+        ######## Build list of (index, prompt, max_tokens)
+        batch_entries = df_final[["llm_prompt", "adaptive_max_tokens"]].to_dict(orient="index")
+        def build_jsonl_line(row_index, row_data):
+            prompt = row_data["llm_prompt"]
+            max_tok = row_data["adaptive_max_tokens"]
+            ########## ! or max_tok = max_context directly
+            if not isinstance(prompt, str) or not prompt.strip():
+                return None
+            return json.dumps({
+                "custom_id": str(row_index),
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_tok
+                }
+            }, ensure_ascii=False)
+        print("⚙️ Building JSONL lines in parallel...")
+        jsonl_lines = Parallel(n_jobs=-1)(
+            delayed(build_jsonl_line)(idx, data) for idx, data in tqdm(batch_entries.items())
+        )
+        jsonl_lines = [line for line in jsonl_lines if line]
+        with open(input_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(jsonl_lines) + "\n")
+        print(f"✅ Created {input_path} with {len(jsonl_lines)} entries (parallelized)")  ########
+        
+        output_file = "data/processed/batch_output.jsonl"
+        main_batch_query(input_path, output_file) # batch query and save
+        # 5) Parse the boutput_file to attach responses back to df_extracted
+        print(f"⚙️ Parsing {output_file} ...")
+        with open(output_file, "r", encoding="utf-8") as in_f:
+            for line in in_f:
+                obj = json.loads(line.strip())
+                c_id = obj.get("custom_id", "")
+                # e.g. "req-123" => index=123
+                if not c_id.startswith("req-"):
+                    continue
+                row_index = int(c_id.replace("req-", ""))
+                # Attempt to get the raw content
+                resp = obj.get("response", {})
+                body = resp.get("body", {})
+                choices = body.get("choices", [])
+                if choices:
+                    content = choices[0]["message"].get("content", "")
+                else:
+                    content = "No content or error."
+                df_extracted.loc[row_index, "llm_response_raw"] = content
+        
+        # 6) Merge results back into df_final
+        df_final["llm_response_raw"] = df_extracted["llm_response_raw"]
+        
+        # 7) Save final CSV with the new LLM responses
         os.makedirs(LLM_OUTPUT_FOLDER, exist_ok=True)
+        output_path = os.path.join(LLM_OUTPUT_FOLDER, "llm_markdown_table_results.csv")
         df_final.to_csv(output_path, index=False)
         print(f"✅ LLM results saved to {output_path}")
+    else:
+        print("No items require LLM batch processing. Skipping batch step.")
+
 
 if __name__ == "__main__":
     main()

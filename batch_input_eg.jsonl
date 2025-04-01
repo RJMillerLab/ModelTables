@@ -1,0 +1,2 @@
+{"custom_id": "0", "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "What is AI?"}], "max_tokens": 50}}
+{"custom_id": "2", "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Tell me a joke."}], "max_tokens": 16384}}
