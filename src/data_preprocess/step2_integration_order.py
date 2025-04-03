@@ -2,6 +2,7 @@
 """
 Author: Zhengyuan Dong
 Date: 2025-03-30
+Last edited: 2025-04-01
 Description: Integration code for combining HTML, PDF, and extracted annotations,
              labeling the source for each item (HTML, PDF, or extracted),
              and saving final results.
@@ -22,8 +23,11 @@ TITLE2ARXIV_JSON = "title2arxiv_new_cache.json"       ######## # Mapping: title 
 HTML_TABLE_PARQUET = "html_table.parquet"             ######## # Contains: paper_id, html_path, page_type, table_list
 ANNOTATIONS_PARQUET = "extracted_annotations.parquet" ######## # base
 PDF_CACHE_PATH = "pdf_download_cache.json"            ######## #
-LLM_OUTPUT_FOLDER = "llm_outputs"                     ######## # Folder for output CSV files (even if LLM is not called)
-FINAL_PARQUET = "final_integration.parquet"           ########
+#LLM_OUTPUT_FOLDER = "llm_outputs"                     ######## # Folder for output CSV files (even if LLM is not called)
+#FINAL_PARQUET = "final_integration.parquet"           ########
+FINAL_OUTPUT_CSV = "llm_markdown_table_results.csv"
+BATCH_OUTPUT_PATH = "data/processed/batch_output.jsonl"
+
 
 from src.llm.batch import main_batch_query
 # ---------------------- Helper Functions ---------------------- #
@@ -128,7 +132,8 @@ prompt_template = (
     "Some tables may be poorly formatted (e.g., missing delimiters between columns). "
     "Please identify and extract each table, and convert it into a separate Markdown code block. "
     "For each, return only a JSON array of Markdown code blocks, formatted like: "
-    "\"```markdown\\n| Header1 | Header2 |\\n| --- | --- |\\n| value1 | value2 |\\n```\". "
+    "For each, return only a single string including Markdown code blocks, separated by triple backticks (```markdown). For example:"
+    "\"```markdown\\n| Header1 | Header2 |\\n| --- | --- |\\n| value1 | value2 |\\n```\"... "
     "Ensure the output reflects the same information as the original, but with clearer structure and improved readability where possible. "
     "Do not include any explanations or extra text.\n\n"
     "Here is the input text:\n{}\nNow, please provide your answer:"
@@ -158,18 +163,36 @@ def main():
     df_html = pd.read_parquet(HTML_TABLE_PARQUET) # Columns: [paper_id, html_path, page_type, table_list]
     print("📝 df_html shape:", df_html.shape)
 
+    # 2502.12345v1 => (2502.12345, 1)
+    def parse_arxiv_id(paper_id):
+        match = re.match(r"(\d{4}\.\d{5})(v(\d+))?", paper_id)
+        if match:
+            arxiv_id_pure = match.group(1)
+            arxiv_id_version = int(match.group(3)) if match.group(3) else 1
+            return pd.Series([arxiv_id_pure, arxiv_id_version])
+        else:
+            return pd.Series([paper_id, 1])  # fallback
+    df_html[['arxiv_id_pure', 'arxiv_id_version']] = df_html['paper_id'].apply(parse_arxiv_id)
+    # keep the latest version
+    df_html = df_html.sort_values('arxiv_id_version', ascending=False).drop_duplicates('arxiv_id_pure', keep='first')
     # --- Step 4: Merge title mapping with HTML table info on arxiv_id/paper_id ---
-    df_html_merged = pd.merge(
-        df_title2arxiv, df_html,
-        left_on="arxiv_id", right_on="paper_id",
-        how="left"
-    )
+    def parse_arxiv_id_simple(arxiv_id):
+        match = re.match(r"(\d{4}\.\d{5})(v(\d+))?", str(arxiv_id))
+        if match:
+            return match.group(1)
+        else:
+            return arxiv_id
+    df_title2arxiv['arxiv_id_pure'] = df_title2arxiv['arxiv_id'].apply(parse_arxiv_id_simple)
+    df_html_merged = pd.merge(df_title2arxiv, df_html,left_on="arxiv_id_pure", right_on="arxiv_id_pure",how="left")
+    #df_html_merged = pd.merge(df_title2arxiv, df_html,left_on="arxiv_id", right_on="paper_id",how="left")
+    
     df_html_merged.rename(columns={
         "html_path": "html_html_path", 
         "page_type": "html_page_type", 
         "table_list": "html_table_list", 
-        "paper_id": "html_paper_id" 
+        "paper_id": "html_paper_id"
     }, inplace=True)
+    print(df_html_merged[df_html_merged['html_paper_id'] == '1508.00305'].iloc[0])
     print("📝 df_html_merged shape:", df_html_merged.shape)
     # --- Step 5: Merge annotations with the title-HTML mapping on retrieved_title ---
     df_merged = pd.merge(
@@ -233,8 +256,8 @@ def main():
     print("📝 After merging PDF info, final shape:", df_final.shape)
 
     # --- Step 8: Save final integration results ---
-    df_final.to_parquet(FINAL_PARQUET, index=False)
-    print(f"\n🎉 Integration done. Output saved to {FINAL_PARQUET}, total {len(df_final)} rows.\n")
+    #df_final.to_parquet(FINAL_PARQUET, index=False)
+    #print(f"\n🎉 Integration done. Output saved to {FINAL_PARQUET}, total {len(df_final)} rows.\n")
 
     # --- Step 9: Stats ---
     df_html_items = df_final[(df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext")]
@@ -250,7 +273,15 @@ def main():
         lambda x: prompt_template.format(x) if isinstance(x, str) and x.strip() else ""
     )
     df_extracted = df_final[df_final["combined_text"].str.strip().astype(bool)]
-    print(f"Remaining items with non-empty extracted tables or figures: {len(df_extracted)}")
+
+    # Keep only items with non-empty extracted tables or figures
+    has_html = (df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext")
+    has_pdf = (df_final["pdf_pdf_path"].notna()) & (df_final["pdf_pdf_path"] != "")
+    df_remaining = df_final[~has_html & ~has_pdf]
+    # Then filter the remaining items with non-empty extracted tables or figures
+    df_remaining_tmp = df_remaining[df_remaining["combined_text"].str.strip().astype(bool)]
+    print(f"Remaining items (no HTML or PDF) with non-empty extracted tables or figures: {len(df_remaining)}")  
+    print(f"Remaining items with non-empty extracted tables or figures: {len(df_remaining_tmp)}")
 
     # count token for the extracted figures
     df_final['token_count_combined_text'] = df_final['combined_text'].apply(count_tokens)
@@ -292,26 +323,29 @@ def main():
                     "max_tokens": max_tok
                 }
             }, ensure_ascii=False)
+        
         print("⚙️ Building JSONL lines in parallel...")
         jsonl_lines = Parallel(n_jobs=-1)(
-            delayed(build_jsonl_line)(idx, data) for idx, data in tqdm(batch_entries.items())
+        delayed(build_jsonl_line)(idx, data) for idx, data in tqdm(batch_entries.items())
         )
         jsonl_lines = [line for line in jsonl_lines if line]
         with open(input_path, "w", encoding="utf-8") as f:
             f.write("\n".join(jsonl_lines) + "\n")
         print(f"✅ Created {input_path} with {len(jsonl_lines)} entries (parallelized)")  ########
-        
-        output_file = "data/processed/batch_output.jsonl"
-        main_batch_query(input_path, output_file) # batch query and save
-        # 5) Parse the boutput_file to attach responses back to df_extracted
-        print(f"⚙️ Parsing {output_file} ...")
-        with open(output_file, "r", encoding="utf-8") as in_f:
+
+        run_llm = True #####
+        if run_llm:
+            main_batch_query(input_path, BATCH_OUTPUT_PATH) # batch query and save
+        # 5) Parse the output_file to attach responses back to df_extracted
+        print(f"⚙️ Parsing {BATCH_OUTPUT_PATH} ...")
+        with open(BATCH_OUTPUT_PATH, "r", encoding="utf-8") as in_f:
             for line in in_f:
                 obj = json.loads(line.strip())
                 c_id = obj.get("custom_id", "")
                 # e.g. "req-123" => index=123
-                if not c_id.startswith("req-"):
-                    continue
+                #if not c_id.startswith("req-"):
+                #    continue
+                # I have removed the req-, directly use row index as batch index
                 row_index = int(c_id.replace("req-", ""))
                 # Attempt to get the raw content
                 resp = obj.get("response", {})
@@ -327,10 +361,9 @@ def main():
         df_final["llm_response_raw"] = df_extracted["llm_response_raw"]
         
         # 7) Save final CSV with the new LLM responses
-        os.makedirs(LLM_OUTPUT_FOLDER, exist_ok=True)
-        output_path = os.path.join(LLM_OUTPUT_FOLDER, "llm_markdown_table_results.csv")
-        df_final.to_csv(output_path, index=False)
-        print(f"✅ LLM results saved to {output_path}")
+        #os.makedirs(LLM_OUTPUT_FOLDER, exist_ok=True)
+        df_final.to_csv(FINAL_OUTPUT_CSV, index=False)
+        print(f"✅ LLM results saved to {FINAL_OUTPUT_CSV}")
     else:
         print("No items require LLM batch processing. Skipping batch step.")
 

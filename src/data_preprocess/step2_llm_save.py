@@ -24,10 +24,10 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
     """
     For each row in df, extract markdown tables from 'llm_response_raw',
     save them as individual CSV files, and collect their paths.
-    Returns updated DataFrame with a new column: 'saved_csv_paths'.
+    Returns updated DataFrame with a new column: 'llm_table_list'.
     """
     os.makedirs(output_dir, exist_ok=True)
-    df["saved_csv_paths"] = [[] for _ in range(len(df))]  ######## initialize empty list
+    df["llm_table_list"] = [[] for _ in range(len(df))]  ######## initialize empty list
 
     for idx, row in df.iterrows():
         # --- skip if HTML fulltext is available ---
@@ -84,7 +84,7 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
                 print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
                 continue
 
-        df.at[idx, "saved_csv_paths"] = csv_paths  ######## update the row
+        df.at[idx, "llm_table_list"] = csv_paths  ######## update the row
 
     return df
 
@@ -101,5 +101,5 @@ if __name__ == "__main__":
     # Save updated parquet
     updated_parquet_path = "final_integration_with_paths.parquet" ########
     df_parquet.to_parquet(updated_parquet_path, index=False)
-    print(f"\n🎉 All markdown tables saved. Paths recorded in 'saved_csv_paths'.")
+    print(f"\n🎉 All markdown tables saved. Paths recorded in 'llm_table_list'.")
     print(f"📝 Updated parquet saved to: {updated_parquet_path}")

@@ -7,7 +7,7 @@ target_dir="$repo_root/starmie_internal/data/scilake_large/datalake"
 # List of subfolders relative to the repo root
 folders=(
     "CitationLake/data/processed/deduped_hugging_csvs"
-    "CitationLake/data/processed/cleaned_markdown_csvs_github"
+    "CitationLake/data/processed/deduped_github_csvs"
     "CitationLake/tables_output"
     "CitationLake/llm_tables"
 )

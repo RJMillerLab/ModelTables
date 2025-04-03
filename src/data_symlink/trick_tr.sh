@@ -4,7 +4,7 @@
 repo_root="/Users/doradong/Repo"
 folders=(
     "CitationLake/data/processed/deduped_hugging_csvs"
-    "CitationLake/data/processed/cleaned_markdown_csvs_github"
+    "CitationLake/data/processed/deduped_github_csvs"
     "CitationLake/tables_output"
     "CitationLake/llm_tables"
 )

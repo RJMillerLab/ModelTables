@@ -88,7 +88,7 @@ bash src/data_localindexing/build_mini_citation_es.sh
 3. Extract tables to local folder:
 ```bash
 python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
-# (Optional) python -m src.data_preprocess.step2_recreate_symlinks # re-create the symbolic link | I found zipping files would make symlink file into real files
+
 python -m src.data_preprocess.step2_md2text # process downloaded github html (if any) to markdown
 python -m src.data_preprocess.step2_se_url_title # fetching title from bibtex, PDF url.
 python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
@@ -101,27 +101,35 @@ python -m src.data_preprocess.step2_integration_order > step2_integration_order_
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
 #cp -r llm_outputs/llm_markdown_table_results_aligned.csv llm_outputs/llm_markdown_table_results.csv
-python -m src.data_preprocess.step2_llm_save # save table into local csv
-# go to starmie folder, and copy this sh file to run 
-bash src/data_symlink/ln_scilake_large.sh # symlink 4: cleaned_markdown_csvs_github|deduped_hugging_csvs|tables_output|llm_tables
-bash src/data_symlink/trick_transpose.sh # trick: transpose csv in new folder
-bash src/data_symlink/trick_str.sh # trick: str value in new folder
-bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
+TODO: (rerun, update arxiv_id, guarantee ```json ```markdown can be saved) python -m src.data_preprocess.step2_llm_save # save table into local csv
 
-TODO: # produce groundtruth
+# deprecated as we don't use PDF for extraction at this time
+#python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_tab and then test
+```
 
-python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_tab and then test
-python -m src.data_preprocess.step2_extract_pdf #TODO: write!
-# TODO: prepare folder for finetune
-# TODO: tricks, baseline, diff sources
-# Evaluation:
-bash src/data_localindexing/build_mini_citation_es.sh
+```bash
+# produce groundtruth
+python -m src.data_gt.step3_pre_merge # merge all the table list into modelid file | modelcard_all_title_list + final_integration_with_paths -> modelcard_step3_merged
+python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device | modelcard_step2 + modelcard_step3_merged -> modelcard_step4
+TODO: bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph (need extra 200G)
+TODO: # query for citation graph
+TODO: python -m src.data_gt.step3_gt # build up groundtruth | modelcard_step4.parquet -> scilakeUnionBenchmark_by_ids.pickle
+
 #python -m src.data_preprocess.step2_CitationInfo #  get citations relation from graph edge .db
 # TODO: get tags arxiv id, seems nothing in tags... only shows on web...
 ```
 
 ```bash
-# how to run starmie
+# go to starmie folder, and copy this sh file to run 
+bash src/data_symlink/ln_scilake_large.sh # symlink 4: dedupled_github_csvs|deduped_hugging_csvs|tables_output|llm_tables
+bash src/data_symlink/trick_tr.sh # trick: transpose csv in new folder
+bash src/data_symlink/trick_str.sh # trick: str value in new folder
+bash src/data_symlink/trick_tr_str.sh # trick: tr + str value in new folder
+bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
+```
+
+```bash
+# how to run starmie finetuning and checking
 bash prepare_sample.sh # sample 1000 samples from each resources folder
 bash check_empty.sh # filter out empty files (or low quality files later)
 bash scripts/step1_pretrain.sh # finetune contrastive learning
