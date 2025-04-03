@@ -47,7 +47,7 @@ def _safe_parse_list(val):  ########
         return []
 
 def merge_table_list_to_df2():
-    df = pd.read_parquet(FINAL_INTEGRATION_PARQUET, columns=['query', 'html_table_list', 'llm_table_list'])
+    df = pd.read_parquet(FINAL_INTEGRATION_PARQUET, columns=['query', 'html_table_list', 'llm_table_list']) # , 'corpusid'
     print(f"  df loaded with shape: {df.shape}")
 
     # Clean stringified lists ########
