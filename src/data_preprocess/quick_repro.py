@@ -45,25 +45,21 @@ def update_llm_responses_in_df(df: pd.DataFrame, llm_responses: dict) -> pd.Data
 
 # -------------- Main Process -------------- #
 def main():
-    csv_file_path = "llm_outputs/llm_markdown_table_results.csv"  ######## Original CSV file path ########
+    csv_file_path = "data/processed/llm_markdown_table_results.parquet"  ######## Original CSV file path ########
     log_file_path = "step2_integration_order_3.log"               ######## Log file path ########
-    updated_csv_path = "llm_outputs/llm_markdown_table_results_aligned.csv"  ######## Updated CSV file path ########
-    updated_parquet_path = "llm_outputs/final_integration_aligned.parquet"     ######## Updated Parquet file path ########
+    updated_csv_path = "data/processed/llm_markdown_table_results_aligned.parquet"  ######## Updated CSV file path ########
 
     llm_responses = parse_llm_log(log_file_path)
     print(f"Parsed {len(llm_responses)} LLM responses from log file.")  ########
 
-    df = pd.read_csv(csv_file_path)
+    df = pd.read_parquet(csv_file_path)
     print(f"Loaded CSV with {len(df)} rows.")  ########
 
     df_updated = update_llm_responses_in_df(df, llm_responses)
     print("Updated the 'llm_response_raw' column based on log file.")  ########
 
-    df_updated.to_csv(updated_csv_path, index=False)
+    df_updated.to_parquet(updated_csv_path, index=False)
     print(f"Saved updated CSV to {updated_csv_path}.")  ########
-
-    df_updated.to_parquet(updated_parquet_path, index=False)
-    print(f"Saved updated Parquet to {updated_parquet_path}.")  ########
 
 if __name__ == "__main__":
     main()

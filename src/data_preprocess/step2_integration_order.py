@@ -20,13 +20,19 @@ from src.llm.model import LLM_response
 
 # --------------- Fixed Path Constants --------------- #
 TITLE2ARXIV_JSON = "title2arxiv_new_cache.json"       ######## # Mapping: title -> arxiv_id
-HTML_TABLE_PARQUET = "html_table.parquet"             ######## # Contains: paper_id, html_path, page_type, table_list
+HTML_TABLE_PARQUET = "data/processed/html_table.parquet"             ######## # Contains: paper_id, html_path, page_type, table_list
 ANNOTATIONS_PARQUET = "extracted_annotations.parquet" ######## # base
 PDF_CACHE_PATH = "pdf_download_cache.json"            ######## #
 #LLM_OUTPUT_FOLDER = "llm_outputs"                     ######## # Folder for output CSV files (even if LLM is not called)
-#FINAL_PARQUET = "final_integration.parquet"           ########
-FINAL_OUTPUT_CSV = "llm_markdown_table_results.csv"
+#FINAL_PARQUET = "data/processed/final_integration.parquet"           ########
+FINAL_OUTPUT_CSV = "data/processed/llm_markdown_table_results.parquet"
 BATCH_OUTPUT_PATH = "data/processed/batch_output.jsonl"
+BATCH_INPUT_PATH = "data/processed/batch_input.jsonl"
+
+# if the below is set is False, we just update FINAL_OUTPUT_CSV file
+run_llm = True ##### whether we re-run llm, set to False if we want to skip the LLM call and use previous results
+run_rebuild_batchinput = True ### whether we want to rebuild the batch input file
+# ---------------------- Imports ---------------------- #
 
 
 from src.llm.batch import main_batch_query
@@ -294,48 +300,49 @@ def main():
 
     # -------------- Parallel querying LLM (example) --------------
     
-    df_extracted.to_parquet("before_llm_output.parquet", index=False)
-    print("combined text finished, next step is to run LLM")
+    #df_extracted.to_parquet("before_llm_output.parquet", index=False)
+    #print("combined text finished, next step is to run LLM")
 
     if not df_extracted.empty:
-        print("⚙️ Preparing batch_input.jsonl ...")
-        input_path = "data/processed/batch_input.jsonl"
         max_context = 16384
         token_buffer = 300
         model_name = "gpt-4o-mini"
         ######## Recompute prompt_token_count
         df_final["adaptive_max_tokens"] = df_final["token_count_combined_text"].apply(lambda x: min(x + token_buffer, max_context))  ########
-        ######## Build list of (index, prompt, max_tokens)
-        batch_entries = df_final[["llm_prompt", "adaptive_max_tokens"]].to_dict(orient="index")
-        def build_jsonl_line(row_index, row_data):
-            prompt = row_data["llm_prompt"]
-            max_tok = row_data["adaptive_max_tokens"]
-            ########## ! or max_tok = max_context directly
-            if not isinstance(prompt, str) or not prompt.strip():
-                return None
-            return json.dumps({
-                "custom_id": str(row_index),
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": {
-                    "model": model_name,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tok
-                }
-            }, ensure_ascii=False)
-        
-        print("⚙️ Building JSONL lines in parallel...")
-        jsonl_lines = Parallel(n_jobs=-1)(
-        delayed(build_jsonl_line)(idx, data) for idx, data in tqdm(batch_entries.items())
-        )
-        jsonl_lines = [line for line in jsonl_lines if line]
-        with open(input_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(jsonl_lines) + "\n")
-        print(f"✅ Created {input_path} with {len(jsonl_lines)} entries (parallelized)")  ########
 
-        run_llm = True #####
+        if run_rebuild_batchinput:
+            print("⚙️ Preparing data/processed/batch_input.jsonl ...")
+            ######## Build list of (index, prompt, max_tokens)
+            batch_entries = df_final[["llm_prompt", "adaptive_max_tokens"]].to_dict(orient="index")
+            def build_jsonl_line(row_index, row_data):
+                prompt = row_data["llm_prompt"]
+                max_tok = row_data["adaptive_max_tokens"]
+                ########## ! or max_tok = max_context directly
+                if not isinstance(prompt, str) or not prompt.strip():
+                    return None
+                return json.dumps({
+                    "custom_id": str(row_index),
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": {
+                        "model": model_name,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": max_tok
+                    }
+                }, ensure_ascii=False)
+            
+            print("⚙️ Building JSONL lines in parallel...")
+            jsonl_lines = Parallel(n_jobs=-1)(
+            delayed(build_jsonl_line)(idx, data) for idx, data in tqdm(batch_entries.items())
+            )
+            jsonl_lines = [line for line in jsonl_lines if line]
+            with open(BATCH_INPUT_PATH, "w", encoding="utf-8") as f:
+                f.write("\n".join(jsonl_lines) + "\n")
+            print(f"✅ Created {BATCH_INPUT_PATH} with {len(jsonl_lines)} entries (parallelized)")  ########
+
         if run_llm:
-            main_batch_query(input_path, BATCH_OUTPUT_PATH) # batch query and save
+            print("⚙️ Running LLM batch query...")
+            main_batch_query(BATCH_INPUT_PATH, BATCH_OUTPUT_PATH) # batch query and save
         # 5) Parse the output_file to attach responses back to df_extracted
         print(f"⚙️ Parsing {BATCH_OUTPUT_PATH} ...")
         with open(BATCH_OUTPUT_PATH, "r", encoding="utf-8") as in_f:
@@ -362,7 +369,7 @@ def main():
         
         # 7) Save final CSV with the new LLM responses
         #os.makedirs(LLM_OUTPUT_FOLDER, exist_ok=True)
-        df_final.to_csv(FINAL_OUTPUT_CSV, index=False)
+        df_final.to_parquet(FINAL_OUTPUT_CSV, index=False)
         print(f"✅ LLM results saved to {FINAL_OUTPUT_CSV}")
     else:
         print("No items require LLM batch processing. Skipping batch step.")

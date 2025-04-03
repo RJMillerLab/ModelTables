@@ -86,8 +86,10 @@ def save_markdown_to_csv_from_content(model_id, content, source, file_idx, outpu
     for table_idx, table in enumerate(tables, start=1):
         identifier = f"git_readme{file_idx}_table{table_idx}"
         csv_path = generate_csv_path(model_id, source, identifier, output_folder)
-        MarkdownHandler.markdown_to_csv(table, csv_path)
-        saved_paths.append(csv_path)
+        tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path, verbose=True) # print failed saving, avoid it work silently
+        if tmp_path:
+            saved_paths.append(tmp_path)
+        #saved_paths.append(csv_path)
     return saved_paths
 
 ########

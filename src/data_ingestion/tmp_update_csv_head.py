@@ -34,5 +34,5 @@ def process_directory(directory_path):
         fix_table_header(str(csv_file), output_csv=str(csv_file))
 
 if __name__ == "__main__":
-    target_directory = "tables_output"
+    target_directory = "data/processed/tables_output"
     process_directory(target_directory)

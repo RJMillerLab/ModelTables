@@ -16,7 +16,7 @@ import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
 
-FINAL_INTEGRATION_PARQUET   = "final_integration_with_paths.parquet"
+FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths.parquet"
 ALL_TITLE_PATH              = "data/processed/modelcard_all_title_list.parquet"
 MERGE_PATH                  = "data/processed/modelcard_step3_merged.parquet" ########
 
@@ -47,16 +47,13 @@ def _safe_parse_list(val):  ########
         return []
 
 def merge_table_list_to_df2():
-    df = pd.read_parquet(FINAL_INTEGRATION_PARQUET, columns=['query', 'html_table_list', 'saved_csv_paths'])
+    df = pd.read_parquet(FINAL_INTEGRATION_PARQUET, columns=['query', 'html_table_list', 'llm_table_list'])
     print(f"  df loaded with shape: {df.shape}")
 
     # Clean stringified lists ########
     df['html_table_list'] = df['html_table_list'].apply(_safe_parse_list)  ########
-    df['saved_csv_paths'] = df['saved_csv_paths'].apply(_safe_parse_list)  ########
+    df['llm_table_list'] = df['llm_table_list'].apply(_safe_parse_list)  ########
 
-    if 'saved_csv_paths' in df.columns:
-        df.rename(columns={'saved_csv_paths': 'llm_table_list'}, inplace=True)
-    
     df2 = pd.read_parquet(ALL_TITLE_PATH)
     print(f"  df2 loaded with shape: {df2.shape}")
     print("\nStep 1: Expanding df2 to match df (on df2.all_title_list vs df.query)...")

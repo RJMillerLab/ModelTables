@@ -3,10 +3,10 @@ import shutil
 import pandas as pd
 
 def migrate_files_and_update_paths():
-    parquet_path = "html_table.parquet"
+    parquet_path = "data/processed/html_table.parquet"
     df = pd.read_parquet(parquet_path)
     
-    output_dir = 'tables_output'
+    output_dir = 'data/processed/tables_output'
     migrated_count = 0
     
     for dir_name in os.listdir(output_dir):
@@ -49,7 +49,7 @@ def migrate_files_and_update_paths():
 
     df['table_list'] = df['table_list'].apply(update_paths)
     
-    backup_path = "html_table_backup.parquet"
+    backup_path = "data/processed/html_table_backup.parquet"
     shutil.copy(parquet_path, backup_path)
     df.to_parquet(parquet_path, index=False)
     

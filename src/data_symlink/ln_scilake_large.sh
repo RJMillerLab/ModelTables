@@ -8,8 +8,8 @@ target_dir="$repo_root/starmie_internal/data/scilake_large/datalake"
 folders=(
     "CitationLake/data/processed/deduped_hugging_csvs"
     "CitationLake/data/processed/deduped_github_csvs"
-    "CitationLake/tables_output"
-    "CitationLake/llm_tables"
+    "CitationLake/data/processed/tables_output"
+    "CitationLake/data/processed/llm_tables"
 )
 
 for rel_folder in "${folders[@]}"; do

@@ -39,7 +39,7 @@ def classify_page(html_path):
     # Default to 'metadata' if none of the above rules are met
     return 'metadata'
 
-def extract_tables_and_save(html_path, paper_id, output_dir='tables_output'):
+def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tables_output'):
     """
     Extracts all <table> tags from the given HTML file, converts them to CSV,
     and saves them in a new folder: {output_dir}/{paper_id}/{paper_id}_table{idx}.csv
@@ -55,6 +55,7 @@ def extract_tables_and_save(html_path, paper_id, output_dir='tables_output'):
     soup = BeautifulSoup(html, 'html.parser')
     tables = soup.find_all('table')
 
+    os.makedirs(output_dir, exist_ok=True)
     # Create an output directory for this paper if it doesn't exist
     #paper_output_dir = os.path.join(output_dir, paper_id)
     #os.makedirs(paper_output_dir, exist_ok=True)
@@ -88,7 +89,7 @@ def process_item(item):
     """
     paper_id, html_path = item
     page_type = classify_page(html_path)
-    table_list = extract_tables_and_save(html_path, paper_id, output_dir='tables_output')
+    table_list = extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tables_output')
     return {
         'paper_id': paper_id,
         'html_path': html_path,
@@ -100,7 +101,7 @@ print('processing the html files')
 df = pd.DataFrame(data.items(), columns=['paper_id', 'html_path'])
 
 ######## # 1) Check if parquet already exists; if yes, load it
-parquet_file = "html_table.parquet"
+parquet_file = "data/processed/html_table.parquet"
 if os.path.exists(parquet_file):
     df_existing = pd.read_parquet(parquet_file)
     print(f"Loaded existing {parquet_file}, found {len(df_existing)} records.")

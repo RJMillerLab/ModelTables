@@ -89,17 +89,17 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
     return df
 
 if __name__ == "__main__":
-    input_csv = os.path.join("llm_outputs", "llm_markdown_table_results.csv")
-    df_parquet = pd.read_csv(input_csv)
+    input_csv = os.path.join("data/processed/llm_markdown_table_results.parquet")
+    df_parquet = pd.read_parquet(input_csv)
     print(df_parquet.head(5))
     print(df_parquet.columns)
 
-    output_dir =  "llm_tables"
+    output_dir =  "data/processed/llm_tables"
     os.makedirs(output_dir, exist_ok=True)
     # Process tables and write csvs
     df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=True) ########
     # Save updated parquet
-    updated_parquet_path = "final_integration_with_paths.parquet" ########
+    updated_parquet_path = "data/processed/final_integration_with_paths.parquet" ########
     df_parquet.to_parquet(updated_parquet_path, index=False)
     print(f"\n🎉 All markdown tables saved. Paths recorded in 'llm_table_list'.")
     print(f"📝 Updated parquet saved to: {updated_parquet_path}")
