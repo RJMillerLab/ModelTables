@@ -2,7 +2,7 @@
 Author: Zhengyuan Dong
 Created: 2025-04-03
 Last Modified: 2025-04-04
-Description: Get statistics of tables in CSV files from different resources
+Description: Get statistics of tables in CSV files from different resources (optimized with joblib)
 """
 
 import pandas as pd
@@ -11,14 +11,15 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 import os
 
-def process_csv_file(csv_file):
+
+def process_csv_file(csv_file, allow_one_row=False): ########
     try:
         df = pd.read_csv(csv_file)
         if df.shape[1] == 0:
             return {"path": csv_file, "status": "zero_col"}, None
         if df.shape[0] == 0:
             return {"path": csv_file, "status": "zero_row"}, None
-        if df.shape[0] == 1:
+        if df.shape[0] == 1 and not allow_one_row: ########
             return {"path": csv_file, "status": "one_row"}, None
         return {"path": csv_file, "rows": df.shape[0], "cols": df.shape[1], "status": "valid"}, None
     except Exception as e:
@@ -40,7 +41,9 @@ def get_statistics_table(df, csv_columns, n_jobs=8): ########
 
             aggregate_valid_paths.update(valid_paths)
 
-            results = Parallel(n_jobs=n_jobs)(delayed(process_csv_file)(p) for p in tqdm(valid_paths, desc=f"Processing {benchmark_name}")) ########
+            allow_one_row = benchmark_name != 'scilake-html' ########
+
+            results = Parallel(n_jobs=n_jobs)(delayed(process_csv_file)(p, allow_one_row=allow_one_row) for p in tqdm(valid_paths, desc=f"Processing {benchmark_name}")) ########
 
             valid_file_list = []
             one_row_list = [] ########
@@ -106,7 +109,7 @@ def get_statistics_table(df, csv_columns, n_jobs=8): ########
         "# Tables": all_num_tables,
         "# Cols": all_num_cols,
         "Avg # Rows": int(avg_rows_all),
-        "Size (GB)": "nan"
+        "Size (GB)": np.nan
     })
 
     benchmark_data = {  # borrowed from starmie
@@ -136,9 +139,9 @@ def main():
 
     os.makedirs("data/analysis", exist_ok=True)
 
-    benchmark_df = get_statistics_table(df, csv_columns, n_jobs=8) ########
+    benchmark_df = get_statistics_table(df, csv_columns, n_jobs=-1) ########
 
-    benchmark_df.to_parquet("data/analysis/exp_setting_tab1.parquet", index=False)
+    benchmark_df.to_parquet("data/analysis/benchmark_results.parquet", index=False)
 
     print("✅ Statistics saved successfully.")
 
