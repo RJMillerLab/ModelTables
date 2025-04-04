@@ -19,88 +19,92 @@ from itertools import combinations
 # === Configuration ===
 INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet"
 OUTPUT_PICKLE_SCORE = "data/processed/modelcard_citation_overlap_by_paperId_score.pickle"
-OUTPUT_PICKLE_THRESHOLD = "data/processed/modelcard_citation_overlap_by_paperId_related.pickle"
+#OUTPUT_PICKLE_THRESHOLD = "data/processed/modelcard_citation_overlap_by_paperId_related.pickle"
 OUTPUT_PICKLE_DIRECT = "data/processed/modelcard_citation_direct_relation.pickle"
 THRESHOLD = 0.6
-MODE = "citation"  # or "citing"
+MODE = "reference"  # or "citation"
 
 def load_paperId_lists(df, mode):
     paperId_to_ids = {}
     for _, row in df.iterrows():
-        pid = row.get("paperId")
-        if pd.isna(pid):
-            continue
-        try:
-            parsed = json.loads(row.get("parsed_response", "{}"))
-            paper_list = parsed.get("cited_papers" if mode == "citation" else "citing_papers", [])
-            id_list = [p.get("paperId") for p in paper_list if p.get("paperId")]
-            paperId_to_ids[pid] = set(id_list)
-        except Exception as e:
-            print(f"[Warning] Skipping row due to JSON error: {e}")
-            continue
+        pid = row["paperId"]
+        assert not pd.isna(pid)
+        parsed = json.loads(row["parsed_response"])
+        paper_list = parsed["cited_papers"] if mode == "reference" else parsed["citing_papers"]
+        if len(parsed["cited_papers"])==0:
+            print(f"Warning: {len(parsed['cited_papers'])} cited papers found for {pid}.")
+        id_list = [p["paperId"] for p in paper_list]
+        paperId_to_ids[pid] = set(id_list)
     return paperId_to_ids
 
 def compute_overlap_scores(paperId_to_ids):
     score_map = {}
-    related_map = defaultdict(set)
+    #related_map = defaultdict(set)
     paper_items = list(paperId_to_ids.items())
 
     for (pid1, set1), (pid2, set2) in tqdm(combinations(paper_items, 2), total=len(paper_items)*(len(paper_items)-1)//2):
         inter = len(set1 & set2)
         union = len(set1) + len(set2)
         if union == 0:
-            continue
-        score = (2 * inter) / union
+            score = 0
+        else:
+            score = (2 * inter) / union
         score_map[(pid1, pid2)] = score
-        if score >= THRESHOLD:
-            related_map[pid1].add(pid2)
-            related_map[pid2].add(pid1)
-    return score_map, related_map
+        #if score >= THRESHOLD:
+            #related_map[pid1].add(pid2)
+            #related_map[pid2].add(pid1)
+    return score_map
+    #return score_map, related_map
 
-def extract_direct_links(df):
-    direct_links = defaultdict(set)
+def extract_direct_links(df, all_paper_pairs=None):
+    direct_score_map = {}
     paper_id_set = set(df["paperId"].dropna().unique())
-
-    for _, row in df.iterrows():
-        src_pid = row.get("paperId")
-        if not src_pid or pd.isna(src_pid):
-            continue
-        try:
-            parsed = json.loads(row.get("original_response", "{}"))
-            references = parsed.get("references", [])
-            for ref in references:
-                ref_pid = ref.get("paperId")
-                if ref_pid and ref_pid in paper_id_set:
-                    direct_links[src_pid].add(ref_pid)
-        except Exception as e:
-            print(f"[Warning] Failed direct link parse: {e}")
-            continue
-    return direct_links
+    paperId_to_reference = load_paperId_lists(df, mode="reference")
+    paperId_to_citation = load_paperId_lists(df, mode="citation")
+    assert len(paperId_to_reference) > 0, "reference paperId list is empty"
+    for pid, cited_set in paperId_to_reference.items():
+        for cited_pid in cited_set:
+            if cited_pid in paper_id_set:
+                pair = tuple(sorted((pid, cited_pid)))
+                direct_score_map[pair] = 1.0
+    for pid, citing_set in paperId_to_citation.items():
+        for citing_pid in citing_set:
+            if citing_pid in paper_id_set:
+                pair = tuple(sorted((pid, citing_pid)))
+                direct_score_map[pair] = 1.0
+    if all_paper_pairs:
+        for pair in all_paper_pairs:
+            if pair not in direct_score_map:
+                direct_score_map[pair] = 0.0  ########
+    return direct_score_map
 
 def main():
     df = pd.read_parquet(INPUT_PARQUET)
     print(f"Loaded {len(df)} rows from citation file.")
-
     paperId_to_ids = load_paperId_lists(df, MODE)
-    print(f"Prepared paperId sets for {len(paperId_to_ids)} papers.")
+    all_paper_ids = list(df["paperId"].dropna().unique())
+    all_pairs = [tuple(sorted(p)) for p in combinations(all_paper_ids, 2)]
+    #print(paperId_to_ids)
 
+    print(f"Prepared paperId sets for {len(paperId_to_ids)} papers.")
     print("Computing overlap scores and thresholded relationships...")
-    score_map, related_map = compute_overlap_scores(paperId_to_ids)
+    #score_map, related_map = compute_overlap_scores(paperId_to_ids)
+    score_map = compute_overlap_scores(paperId_to_ids)
 
     print("Extracting direct citation relationships...")
-    direct_map = extract_direct_links(df)
+    direct_map = extract_direct_links(df, all_paper_pairs=all_pairs)
 
     os.makedirs(os.path.dirname(OUTPUT_PICKLE_SCORE), exist_ok=True)
     with open(OUTPUT_PICKLE_SCORE, "wb") as f:
         pickle.dump(score_map, f)
-    with open(OUTPUT_PICKLE_THRESHOLD, "wb") as f:
-        pickle.dump(related_map, f)
+    #with open(OUTPUT_PICKLE_THRESHOLD, "wb") as f:
+    #    pickle.dump(related_map, f)
     with open(OUTPUT_PICKLE_DIRECT, "wb") as f:
         pickle.dump(direct_map, f)
 
     print("✅ Done. All data saved:")
     print(f"  - Overlap scores:      {OUTPUT_PICKLE_SCORE}")
-    print(f"  - Related paper pairs: {OUTPUT_PICKLE_THRESHOLD}")
+    #print(f"  - Related paper pairs: {OUTPUT_PICKLE_THRESHOLD}")
     print(f"  - Direct citations:    {OUTPUT_PICKLE_DIRECT}")
 
 
