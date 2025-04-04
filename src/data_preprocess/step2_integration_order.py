@@ -28,7 +28,7 @@ BATCH_OUTPUT_PATH = "data/processed/batch_output.jsonl"
 BATCH_INPUT_PATH = "data/processed/batch_input.jsonl"
 
 MAX_CONTEXT = 16384
-TOKEN_BUFFER = 300
+TOKEN_BUFFER = 300 # for symbol like ```markdown ```
 MODEL_NAME = "gpt-4o-mini"
 
 # Debug: if the below is set is False, we just update FINAL_OUTPUT_CSV file
@@ -143,20 +143,33 @@ def split_row_text(row, max_tokens=16000, token_buffer=300, model="gpt-4o-mini")
     Split the row's formatted extracted content (obtained per cell) into chunks without breaking individual blocks.
     """
     blocks = get_extracted_blocks(row)
+    if not blocks:
+        return []
+    block_tokens = [count_tokens(block, model=model) for block in blocks]
+    total_tokens = sum(block_tokens)
+    n_chunks = max(1, -(-total_tokens // (max_tokens - token_buffer)))
+    target_tokens = total_tokens / n_chunks
     chunks = []
     current_chunk = ""
-    for block in blocks:
-        candidate = current_chunk + ("\n" if current_chunk else "") + block
-        if count_tokens(candidate, model=model) > max_tokens - token_buffer:
+    current_chunk_token_count = 0
+    for block, blk_tokens in zip(blocks, block_tokens):
+        if blk_tokens > (max_tokens - token_buffer):
             if current_chunk:
                 chunks.append(current_chunk)
-                current_chunk = block
-            else:
-                # If a single block exceeds the limit, keep it as one chunk
-                chunks.append(block)
                 current_chunk = ""
+                current_chunk_token_count = 0
+            chunks.append(block)
+            continue
+        if current_chunk and (current_chunk_token_count + blk_tokens > target_tokens):
+            chunks.append(current_chunk)
+            current_chunk = block
+            current_chunk_token_count = blk_tokens
         else:
-            current_chunk = candidate
+            if current_chunk:
+                current_chunk += "\n" + block
+            else:
+                current_chunk = block
+            current_chunk_token_count += blk_tokens
     if current_chunk:
         chunks.append(current_chunk)
     return chunks
