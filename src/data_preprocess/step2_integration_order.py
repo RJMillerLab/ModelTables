@@ -2,7 +2,7 @@
 """
 Author: Zhengyuan Dong
 Date: 2025-03-30
-Last edited: 2025-04-01
+Last edited: 2025-04-04
 Description: Integration code for combining HTML, PDF, and extracted annotations,
              labeling the source for each item (HTML, PDF, or extracted),
              and saving final results.
@@ -19,19 +19,21 @@ from src.llm.model import LLM_response
 
 
 # --------------- Fixed Path Constants --------------- #
-TITLE2ARXIV_JSON = "title2arxiv_new_cache.json"       ######## # Mapping: title -> arxiv_id
-HTML_TABLE_PARQUET = "data/processed/html_table.parquet"             ######## # Contains: paper_id, html_path, page_type, table_list
-ANNOTATIONS_PARQUET = "extracted_annotations.parquet" ######## # base
-PDF_CACHE_PATH = "pdf_download_cache.json"            ######## #
-#LLM_OUTPUT_FOLDER = "llm_outputs"                     ######## # Folder for output CSV files (even if LLM is not called)
-#FINAL_PARQUET = "data/processed/final_integration.parquet"           ########
+TITLE2ARXIV_JSON = "title2arxiv_new_cache.json"             ######## # Mapping: title -> arxiv_id
+HTML_TABLE_PARQUET = "data/processed/html_table.parquet"    ######## # Contains: paper_id, html_path, page_type, table_list
+ANNOTATIONS_PARQUET = "extracted_annotations.parquet"       ######## # base
+PDF_CACHE_PATH = "pdf_download_cache.json"
 FINAL_OUTPUT_CSV = "data/processed/llm_markdown_table_results.parquet"
 BATCH_OUTPUT_PATH = "data/processed/batch_output.jsonl"
 BATCH_INPUT_PATH = "data/processed/batch_input.jsonl"
 
-# if the below is set is False, we just update FINAL_OUTPUT_CSV file
-run_llm = True ##### whether we re-run llm, set to False if we want to skip the LLM call and use previous results
-run_rebuild_batchinput = True ### whether we want to rebuild the batch input file
+MAX_CONTEXT = 16384
+TOKEN_BUFFER = 300
+MODEL_NAME = "gpt-4o-mini"
+
+# Debug: if the below is set is False, we just update FINAL_OUTPUT_CSV file
+RUN_LLM = True ##### whether we re-run llm, set to False if we want to skip the LLM call and use previous results
+RUN_REBUILD_BATCHINPUT = True ### whether we want to rebuild the batch input file
 # ---------------------- Imports ---------------------- #
 
 
@@ -100,47 +102,99 @@ def non_empty(x):
         return len(x.strip()) > 0
     return False
 
+def get_extracted_blocks(row):
+    """
+    Return a list of formatted blocks from extracted tables and figures, each wrapped as a text block.
+    """
+    blocks = []
+    # Process table entries
+    table_entries = safe_list(row.get("extracted_tables", []))
+    for entry in table_entries:
+        text = ""
+        if isinstance(entry, dict):
+            text = entry.get("extracted_text", "").strip()
+            if "id" in entry:
+                text = f"Table {entry['id']}:\n{text}"
+        elif isinstance(entry, str):
+            text = entry.strip()
+        if text:
+            blocks.append(f"```\n{text}\n```")
+    # Process figure entries
+    figure_entries = safe_list(row.get("extracted_figures", []))
+    for entry in figure_entries:
+        text = ""
+        if isinstance(entry, dict):
+            if "id" in entry and str(entry["id"]).startswith("tab"):
+                text = entry.get("extracted_text", "").strip()
+                text = f"Figure {entry['id']}:\n{text}"
+        elif isinstance(entry, str):
+            text = entry.strip()
+        if text:
+            blocks.append(f"```\n{text}\n```")
+    return blocks
+
 def combine_table_and_figure_text(row) -> str:
-    table_entries = row.get("extracted_tables", [])
-    table_texts = []
-    if isinstance(table_entries, (list, tuple, np.ndarray)):
-        for entry in table_entries:
-            if isinstance(entry, dict):
-                text = entry.get("extracted_text", "")
-                if isinstance(text, str) and text.strip():
-                    table_texts.append(text.strip())
-            elif isinstance(entry, str):
-                if entry.strip():
-                    table_texts.append(entry.strip())
-    else:
-        text = str(table_entries)
-        if text.strip():
-            table_texts.append(text.strip())
+    """Return the extracted content as a single string by joining formatted blocks."""
+    blocks = get_extracted_blocks(row)
+    return "\n".join(blocks)
 
-    figure_entries = row.get("extracted_figures", [])
-    figure_texts = []
-    if isinstance(figure_entries, (list, tuple, np.ndarray)):
-        for entry in figure_entries:
-            if isinstance(entry, dict):
-                fig_id = entry.get("id", "")
-                if isinstance(fig_id, str) and fig_id.startswith("tab"):
-                    text = entry.get("extracted_text", "")
-                    if isinstance(text, str) and text.strip():
-                        figure_texts.append(text.strip())
+def split_row_text(row, max_tokens=16000, token_buffer=300, model="gpt-4o-mini"):
+    """
+    Split the row's formatted extracted content (obtained per cell) into chunks without breaking individual blocks.
+    """
+    blocks = get_extracted_blocks(row)
+    chunks = []
+    current_chunk = ""
+    for block in blocks:
+        candidate = current_chunk + ("\n" if current_chunk else "") + block
+        if count_tokens(candidate, model=model) > max_tokens - token_buffer:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = block
+            else:
+                # If a single block exceeds the limit, keep it as one chunk
+                chunks.append(block)
+                current_chunk = ""
+        else:
+            current_chunk = candidate
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
 
-    combined_texts = table_texts + figure_texts
-    if not combined_texts:
-        return ""
-    return "\n".join(combined_texts)
+def get_truncated_prompts(row, max_tokens=16000, token_buffer=300, model="gpt-4o-mini"):
+    """
+    Split the row's formatted extracted content into chunks and return a list of truncated prompts.
+    Each prompt is created using the prompt_template.
+    """
+    chunks = split_row_text(row, max_tokens=max_tokens, token_buffer=token_buffer, model=model)
+    prompts = [prompt_template.format(chunk) for chunk in chunks]
+    return json.dumps(prompts, ensure_ascii=False)
+
+def build_jsonl_lines(row_index, row_data, model_name="gpt-4o-mini", token_buffer=300, max_context=16384):  ########
+    """
+    Build one or more JSONL entries for a row using the precomputed truncated prompts.
+    """
+    try:
+        prompts_list = json.loads(row_data["llm_prompt_truncated"])  ########
+    except Exception:
+        prompts_list = []
+    if not prompts_list:  ########
+        return []  ########
+    if len(prompts_list) == 1:  ########
+        return [(f"{row_index}", prompts_list[0], row_data["adaptive_max_tokens"])]  ########
+    else:  ########
+        entries = []  ########
+        for idx, prompt_line in enumerate(prompts_list):  ########
+            entries.append((f"{row_index}-{idx+1}", prompt_line, row_data["adaptive_max_tokens"]))  ########
+        return entries  ########
 
 prompt_template = (
     "The following text may contain multiple tables, including descriptions, metadata captions, and body content. "
     "Some tables may be poorly formatted (e.g., missing delimiters between columns). "
     "Please identify and extract each table, and convert it into a separate Markdown code block. "
-    "For each, return only a JSON array of Markdown code blocks, formatted like: "
     "For each, return only a single string including Markdown code blocks, separated by triple backticks (```markdown). For example:"
-    "\"```markdown\\n| Header1 | Header2 |\\n| --- | --- |\\n| value1 | value2 |\\n```\"... "
-    "Ensure the output reflects the same information as the original, but with clearer structure and improved readability where possible. "
+    "\"```markdown\\n| Header1 | Header2 |\\n| value1 | value2 |\\n```\\n```markdown\\n...\\n```"
+    "Ensure the output reflects the same tabular information as the original, but with clearer structure and improved readability where possible. "
     "Do not include any explanations or extra text.\n\n"
     "Here is the input text:\n{}\nNow, please provide your answer:"
 )
@@ -198,7 +252,7 @@ def main():
         "table_list": "html_table_list", 
         "paper_id": "html_paper_id"
     }, inplace=True)
-    print(df_html_merged[df_html_merged['html_paper_id'] == '1508.00305'].iloc[0])
+    #print(df_html_merged[df_html_merged['html_paper_id'] == '1508.00305'].iloc[0])
     print("📝 df_html_merged shape:", df_html_merged.shape)
     # --- Step 5: Merge annotations with the title-HTML mapping on retrieved_title ---
     df_merged = pd.merge(
@@ -261,10 +315,6 @@ def main():
     df_final.drop(columns=["openaccessurl"], inplace=True)
     print("📝 After merging PDF info, final shape:", df_final.shape)
 
-    # --- Step 8: Save final integration results ---
-    #df_final.to_parquet(FINAL_PARQUET, index=False)
-    #print(f"\n🎉 Integration done. Output saved to {FINAL_PARQUET}, total {len(df_final)} rows.\n")
-
     # --- Step 9: Stats ---
     df_html_items = df_final[(df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext")]
     print(f"Items with HTML (fulltext): {len(df_html_items)}")
@@ -275,9 +325,10 @@ def main():
     print(f"Remaining items with local PDF path: {len(df_pdf_items)}")
 
     df_final.loc[:, "combined_text"] = df_final.apply(combine_table_and_figure_text, axis=1) 
-    df_final["llm_prompt"] = df_final["combined_text"].apply(
-        lambda x: prompt_template.format(x) if isinstance(x, str) and x.strip() else ""
-    )
+    #df_final["llm_prompt"] = df_final["combined_text"].apply(
+    #    lambda x: prompt_template.format(x) if isinstance(x, str) and x.strip() else ""
+    #)
+    df_final["llm_prompt_truncated"] = df_final.apply(lambda row: get_truncated_prompts(row, max_tokens=16384, token_buffer=TOKEN_BUFFER, model=MODEL_NAME) if isinstance(row["combined_text"], str) and row["combined_text"].strip() else "[]", axis=1)
     df_extracted = df_final[df_final["combined_text"].str.strip().astype(bool)]
 
     # Keep only items with non-empty extracted tables or figures
@@ -296,65 +347,54 @@ def main():
     print(f"Max tokens in a single item: {df_final['token_count_combined_text'].max()}")
     #print(f"Min tokens in a single item: {df_final['token_count_combined_text'].min()}")
     print(f"Token count for prompt template: {count_tokens(prompt_template)}")
-    print(f"⚠️ Items with token count > 16000: {(df_final['token_count_combined_text'] > 16000).sum()}")  ########
+    print(f"⚠️ Items with token count > 16000: {(df_final['token_count_combined_text'] > 16000).sum()}")
 
     # -------------- Parallel querying LLM (example) --------------
     
-    #df_extracted.to_parquet("before_llm_output.parquet", index=False)
-    #print("combined text finished, next step is to run LLM")
-
     if not df_extracted.empty:
-        max_context = 16384
-        token_buffer = 300
-        model_name = "gpt-4o-mini"
         ######## Recompute prompt_token_count
-        df_final["adaptive_max_tokens"] = df_final["token_count_combined_text"].apply(lambda x: min(x + token_buffer, max_context))  ########
+        df_final["adaptive_max_tokens"] = df_final["token_count_combined_text"].apply(lambda x: min(x + TOKEN_BUFFER, MAX_CONTEXT))
 
-        if run_rebuild_batchinput:
+        if RUN_REBUILD_BATCHINPUT:
             print("⚙️ Preparing data/processed/batch_input.jsonl ...")
             ######## Build list of (index, prompt, max_tokens)
-            batch_entries = df_final[["llm_prompt", "adaptive_max_tokens"]].to_dict(orient="index")
-            def build_jsonl_line(row_index, row_data):
-                prompt = row_data["llm_prompt"]
-                max_tok = row_data["adaptive_max_tokens"]
-                ########## ! or max_tok = max_context directly
-                if not isinstance(prompt, str) or not prompt.strip():
-                    return None
-                return json.dumps({
-                    "custom_id": str(row_index),
-                    "method": "POST",
-                    "url": "/v1/chat/completions",
-                    "body": {
-                        "model": model_name,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": max_tok
-                    }
-                }, ensure_ascii=False)
+            batch_entries = df_final[["llm_prompt_truncated", "adaptive_max_tokens"]].to_dict(orient="index")
             
-            print("⚙️ Building JSONL lines in parallel...")
-            jsonl_lines = Parallel(n_jobs=-1)(
-            delayed(build_jsonl_line)(idx, data) for idx, data in tqdm(batch_entries.items())
+            print("⚙️ Building JSONL lines in parallel with splitting...")
+            all_entries = Parallel(n_jobs=-1)(
+                delayed(build_jsonl_lines)(idx, data, model_name=MODEL_NAME, token_buffer=TOKEN_BUFFER, max_context=MAX_CONTEXT)
+                for idx, data in tqdm(batch_entries.items())  ########
             )
-            jsonl_lines = [line for line in jsonl_lines if line]
+            jsonl_lines = []
+            for entry_list in all_entries:
+                if entry_list:
+                    for custom_id, prompt_line, max_tok in entry_list:
+                        jsonl_lines.append(json.dumps({
+                            "custom_id": custom_id,
+                            "method": "POST",
+                            "url": "/v1/chat/completions",
+                            "body": {
+                                "model": MODEL_NAME,
+                                "messages": [{"role": "user", "content": prompt_line}],
+                                "max_tokens": max_tok
+                            }
+                        }, ensure_ascii=False))
             with open(BATCH_INPUT_PATH, "w", encoding="utf-8") as f:
                 f.write("\n".join(jsonl_lines) + "\n")
-            print(f"✅ Created {BATCH_INPUT_PATH} with {len(jsonl_lines)} entries (parallelized)")  ########
+            print(f"✅ Created {BATCH_INPUT_PATH} with {len(jsonl_lines)} entries (parallelized)")
 
-        if run_llm:
+        if RUN_LLM:
             print("⚙️ Running LLM batch query...")
             main_batch_query(BATCH_INPUT_PATH, BATCH_OUTPUT_PATH) # batch query and save
         # 5) Parse the output_file to attach responses back to df_extracted
-        print(f"⚙️ Parsing {BATCH_OUTPUT_PATH} ...")
+        print(f"⚙️ Parsing {BATCH_OUTPUT_PATH} and aggregating responses...")
+        responses_dict = {}
         with open(BATCH_OUTPUT_PATH, "r", encoding="utf-8") as in_f:
             for line in in_f:
                 obj = json.loads(line.strip())
                 c_id = obj.get("custom_id", "")
-                # e.g. "req-123" => index=123
-                #if not c_id.startswith("req-"):
-                #    continue
-                # I have removed the req-, directly use row index as batch index
-                row_index = int(c_id.replace("req-", ""))
-                # Attempt to get the raw content
+                # Use the part before the '-' as the original row index
+                original_index = c_id.split("-")[0]
                 resp = obj.get("response", {})
                 body = resp.get("body", {})
                 choices = body.get("choices", [])
@@ -362,13 +402,16 @@ def main():
                     content = choices[0]["message"].get("content", "")
                 else:
                     content = "No content or error."
-                df_extracted.loc[row_index, "llm_response_raw"] = content
+                responses_dict.setdefault(original_index, []).append((c_id, content))
+
+        # Aggregate responses for each original row (sorting by chunk order if available)
+        for original_index, responses in responses_dict.items():
+            sorted_responses = sorted(responses, key=lambda x: int(x[0].split("-")[1]) if "-" in x[0] else 0)
+            aggregated_response = "\n".join([resp for _, resp in sorted_responses])
+            df_extracted.loc[int(original_index), "llm_response_raw"] = aggregated_response
         
         # 6) Merge results back into df_final
         df_final["llm_response_raw"] = df_extracted["llm_response_raw"]
-        
-        # 7) Save final CSV with the new LLM responses
-        #os.makedirs(LLM_OUTPUT_FOLDER, exist_ok=True)
         df_final.to_parquet(FINAL_OUTPUT_CSV, index=False)
         print(f"✅ LLM results saved to {FINAL_OUTPUT_CSV}")
     else:

@@ -81,7 +81,7 @@ def get_statistics_table(df, csv_columns, n_jobs=8): ########
                 "# Tables": num_tables,
                 "# Cols": num_cols,
                 "Avg # Rows": int(avg_rows),
-                "Size (GB)": "nan"
+                "Size (GB)": np.nan
             })
 
             all_num_tables += num_tables

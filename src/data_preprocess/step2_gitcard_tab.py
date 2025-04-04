@@ -88,8 +88,8 @@ def save_markdown_to_csv_from_content(model_id, content, source, file_idx, outpu
         csv_path = generate_csv_path(model_id, source, identifier, output_folder)
         tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path, verbose=True) # print failed saving, avoid it work silently
         if tmp_path:
-            saved_paths.append(tmp_path)
-        #saved_paths.append(csv_path)
+            #saved_paths.append(tmp_path)
+            saved_paths.append(csv_path)
     return saved_paths
 
 ########
@@ -167,8 +167,9 @@ def process_markdown_files(github_folder, output_folder):
         for i, table in enumerate(tables):
             csv_basename = f"{base_csv_name}_table_{i}.csv"
             csv_path = os.path.join(output_folder, csv_basename)
-            MarkdownHandler.markdown_to_csv(table, csv_path)
-            table_csv_basenames.append(csv_basename)
+            tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path)
+            if tmp_path:
+                table_csv_basenames.append(csv_basename)
         # If no tables found, store an empty list instead of skipping
         md_to_csv_mapping[base_csv_name] = table_csv_basenames if table_csv_basenames else []
     # Save mapping as JSON for reference
@@ -224,8 +225,9 @@ def main():
             out_csv_path = generate_csv_path_for_dedup(hval, j, dedup_folder_hugging)  ########
             if os.path.lexists(out_csv_path):
                 os.remove(out_csv_path)
-            MarkdownHandler.markdown_to_csv(table_content, out_csv_path)
-            csv_list.append(os.path.abspath(out_csv_path))  ########
+            tmp_csv_path = MarkdownHandler.markdown_to_csv(table_content, out_csv_path)
+            if tmp_csv_path:
+                csv_list.append(os.path.abspath(out_csv_path))  ########
         hash_to_csv_map[hval] = csv_list
     hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping.json")  ########
     with open(hugging_map_json_path, 'w', encoding='utf-8') as jf:

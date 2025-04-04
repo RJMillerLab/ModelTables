@@ -59,7 +59,7 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
             print(f"❌ Failed to parse JSON for row {idx}: {e}")
             continue"""
         
-        pattern = re.compile(r"```markdown\s*(.*?)\s*```", re.DOTALL)  ########
+        """pattern = re.compile(r"```markdown\s*(.*?)\s*```", re.DOTALL)  ########
         table_blocks = pattern.findall(raw_response)  ########
         if not table_blocks:  ########
             table_blocks = [raw_response.strip()]  ########
@@ -77,15 +77,56 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
             filename = f"{safe_key}_table{i}.csv"  ########
             out_csv_path = os.path.join(output_dir, filename)
             try:
-                MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
-                csv_paths.append(out_csv_path)  ######## collect path
-                print(f"✅ Saved: {out_csv_path}")
+                tmp_csv_path = MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
+                if tmp_csv_path: # if have output
+                    csv_paths.append(tmp_csv_path)  ######## collect path
+                    print(f"✅ Saved: {tmp_csv_path}")
             except Exception as e:
                 print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
                 continue
 
-        df.at[idx, "llm_table_list"] = csv_paths  ######## update the row
+        df.at[idx, "llm_table_list"] = csv_paths  ######## update the row"""
+        # updated processing logic
+        table_blocks = []  ########
+        try:  ########
+            if raw_response.strip().startswith("["):  ########
+                parsed_json = json.loads(raw_response)  ########
+                if isinstance(parsed_json, list):  ########
+                    for item in parsed_json:  ########
+                        if isinstance(item, str):  ########
+                            table_blocks.extend(re.findall(r"```markdown\s*(.*?)\s*```", item, re.DOTALL))  ########
+            else:  ########
+                table_blocks = re.findall(r"```markdown\s*(.*?)\s*```", raw_response, re.DOTALL)  ########
+        except Exception as e:  ########
+            print(f"❌ JSON parse failed at row {idx}: {e}")  ########
+            table_blocks = re.findall(r"```markdown\s*(.*?)\s*```", raw_response, re.DOTALL)  ########
+        if not table_blocks and raw_response.strip():  ########
+            table_blocks = [raw_response.strip()]  ########
+        table_blocks = list(dict.fromkeys(table_blocks))  ######## remove duplicates
+        ######## End updated markdown block extraction ########
 
+        key_value = row[key_column]
+        if pd.isna(key_value) or not str(key_value).strip():
+            key_value = f"row_{idx}"  ######## fallback ID
+        safe_key = str(key_value).strip().replace(" ", "_").replace("/", "_")
+
+        csv_paths = []
+        for i, block in enumerate(table_blocks):
+            if not isinstance(block, str) or not block.strip():
+                continue
+            markdown_table = clean_markdown_block(block)
+            filename = f"{safe_key}_table{i}.csv"  ########
+            out_csv_path = os.path.join(output_dir, filename)
+            try:
+                tmp_csv_path = MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
+                if tmp_csv_path:  ######## check if output path returned
+                    #csv_paths.append(tmp_csv_path)  ######## collect path
+                    csv_paths.append(out_csv_path)  ######## collect path
+                    #print(f"✅ Saved: {tmp_csv_path}")
+            except Exception as e:
+                print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
+                continue
+        df.at[idx, "llm_table_list"] = csv_paths  ######## update the row
     return df
 
 if __name__ == "__main__":
