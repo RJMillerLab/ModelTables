@@ -1,18 +1,30 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-03
-Last Modified: 2025-04-03
+Last Modified: 2025-04-04
 Description: Get statistics of tables in CSV files from different resources
 """
 
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+from joblib import Parallel, delayed
 import os
 
-tqdm.pandas()
+def process_csv_file(csv_file):
+    try:
+        df = pd.read_csv(csv_file)
+        if df.shape[1] == 0:
+            return {"path": csv_file, "status": "zero_col"}, None
+        if df.shape[0] == 0:
+            return {"path": csv_file, "status": "zero_row"}, None
+        if df.shape[0] == 1:
+            return {"path": csv_file, "status": "one_row"}, None
+        return {"path": csv_file, "rows": df.shape[0], "cols": df.shape[1], "status": "valid"}, None
+    except Exception as e:
+        return None, f"Error reading {csv_file}: {e}"
 
-def get_statistics_table(df, csv_columns):
+def get_statistics_table(df, csv_columns, n_jobs=8): ########
     benchmarks = []
     aggregate_valid_paths = set()
     all_num_tables = 0
@@ -20,7 +32,7 @@ def get_statistics_table(df, csv_columns):
     all_total_rows = 0
 
     for benchmark_name, cols in csv_columns.items():
-        if benchmark_name != 'scilake-all':
+        if benchmark_name != 'scilake-all':  # for scilake-all, we re-use the count for previous resources
             valid_paths = []
             for col in cols:
                 if col in df.columns:
@@ -28,17 +40,36 @@ def get_statistics_table(df, csv_columns):
 
             aggregate_valid_paths.update(valid_paths)
 
-            num_tables = len(valid_paths)
+            results = Parallel(n_jobs=n_jobs)(delayed(process_csv_file)(p) for p in tqdm(valid_paths, desc=f"Processing {benchmark_name}")) ########
+
+            valid_file_list = []
+            one_row_list = [] ########
+            zero_row_list = [] ########
+            zero_col_list = [] ########
+
+            num_tables = 0
             num_cols = 0
             total_rows = 0
 
-            for csv_file in tqdm(valid_paths, desc=f"Processing {benchmark_name}"):
-                try:
-                    csv_df = pd.read_csv(csv_file)
-                    num_cols += csv_df.shape[1]
-                    total_rows += csv_df.shape[0]
-                except Exception as e:
-                    print(f"Error reading {csv_file}: {e}")
+            for res, err in results:
+                if err:
+                    print(err)
+                elif res:
+                    status = res.get("status")
+                    if status == "valid":
+                        valid_file_list.append(res["path"])
+                        num_tables += 1
+                        num_cols += res["cols"]
+                        total_rows += res["rows"]
+                    elif status == "one_row":
+                        one_row_list.append(res["path"])
+                        print(f"Warning: {res['path']} has only 1 row, skipping.")
+                    elif status == "zero_row":
+                        zero_row_list.append(res["path"])
+                        print(f"Warning: {res['path']} has 0 rows, skipping.")
+                    elif status == "zero_col":
+                        zero_col_list.append(res["path"])
+                        print(f"Warning: {res['path']} has 0 columns, skipping.")
 
             avg_rows = total_rows / num_tables if num_tables else 0
 
@@ -54,6 +85,20 @@ def get_statistics_table(df, csv_columns):
             all_num_cols += num_cols
             all_total_rows += total_rows
 
+            base_name = benchmark_name.split('-')[-1]
+            with open(f"data/analysis/valid_file_list_{base_name}.txt", "w") as f:
+                for path in valid_file_list:
+                    f.write(path + "\n")
+            with open(f"data/analysis/one_row_list_{base_name}.txt", "w") as f:
+                for path in one_row_list:
+                    f.write(path + "\n")
+            with open(f"data/analysis/zero_row_list_{base_name}.txt", "w") as f:
+                for path in zero_row_list:
+                    f.write(path + "\n")
+            with open(f"data/analysis/zero_col_list_{base_name}.txt", "w") as f:
+                for path in zero_col_list:
+                    f.write(path + "\n")
+
     avg_rows_all = all_total_rows / all_num_tables if all_num_tables else 0
 
     benchmarks.append({
@@ -64,7 +109,7 @@ def get_statistics_table(df, csv_columns):
         "Size (GB)": "nan"
     })
 
-    benchmark_data = { # borrowed from starmie
+    benchmark_data = {  # borrowed from starmie
         "Benchmark": ["SANTOS Small", "TUS Small", "TUS Large", "SANTOS Large", "WDC"],
         "# Tables": [550, 1530, 5043, 11090, 50000000],
         "# Cols": [6322, 14810, 54923, 123477, 250000000],
@@ -89,10 +134,11 @@ def main():
 
     print("⚠️ Step 1: Filtering valid CSV paths...")
 
-    benchmark_df = get_statistics_table(df, csv_columns)
+    os.makedirs("data/analysis", exist_ok=True)
 
-    os.makedirs("data/statistics", exist_ok=True)
-    benchmark_df.to_parquet("data/statistics/benchmark_results.parquet", index=False)
+    benchmark_df = get_statistics_table(df, csv_columns, n_jobs=8) ########
+
+    benchmark_df.to_parquet("data/analysis/exp_setting_tab1.parquet", index=False)
 
     print("✅ Statistics saved successfully.")
 
