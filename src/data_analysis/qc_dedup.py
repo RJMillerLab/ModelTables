@@ -1,23 +1,35 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-04
-Last Modified: 2025-04-04
+Last Modified: 2025-04-05
 Description: Directly load CSV files from specified directories, deduplicate based on their content hash and resource priority,
              update the original parquet file's file paths accordingly with cross-resource deduplication (i.e., if a higher-priority
              resource already contains the canonical file, remove duplicates from lower-priority resources and add the canonical file
              to the higher-priority resource column if missing), and save duplicate mapping details, a unique file list,
              as well as cross-resource duplicate overlap details.
+Tips: Better save a copy of the four folders, to avoid QC control will affect the original files.
 """
 
-import os
+import os, shutil, json
 import pandas as pd
 import numpy as np
 import hashlib
 from collections import defaultdict, Counter
-from tqdm import tqdm  ########
-from joblib import Parallel, delayed  ########
-from tqdm_joblib import tqdm_joblib  ########
-import json
+from tqdm import tqdm
+from joblib import Parallel, delayed
+from tqdm_joblib import tqdm_joblib
+from datetime import datetime
+
+# ---------------- QC CONFIG ----------------
+QC_BACKUP_ROOT = "data/qc_backup"
+os.makedirs(QC_BACKUP_ROOT, exist_ok=True)
+
+def is_placeholder(cell):
+    s = str(cell).strip().lower()
+    return s == "" or s == "nan" or all(ch in " :-" for ch in s)
+
+# Global set to record invalid file paths
+INVALID_FILES = set()  ########
 
 ########
 # Hyperparameters / configuration
@@ -42,13 +54,76 @@ RESOURCE_PRIORITY = {
     "html": 3,
     "llm": 4
 }
-########
 
-########
 # Ensure the output directory exists.
-if not os.path.exists(OUTPUT_DIR):
-    os.makedirs(OUTPUT_DIR)
-########
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+# makeidrs for qc_backup/{resources}
+for resource in RESOURCE_PRIORITY.keys():
+    os.makedirs(os.path.join(QC_BACKUP_ROOT, resource), exist_ok=True)
+
+# ---------------- QC FUNCTIONS ----------------
+
+def backup_and_remove(file_path, resource):
+    """
+    Backup the file to QC_BACKUP_ROOT/{timestamp}/{resource}/ and remove the original file.
+    """
+    backup_path = os.path.join(QC_BACKUP_ROOT, resource, os.path.basename(file_path))
+    try:
+        shutil.copy2(file_path, backup_path)
+    except Exception as e:
+        print(f"[QC] Error backing up {file_path}: {e}")
+    try:
+        os.remove(file_path)
+    except Exception as e:
+        print(f"[QC] Error removing {file_path}: {e}")
+
+def qc_csv_file(file_path, resource, allow_one_row=True):
+    """
+    Perform quality control on a CSV file with a single read.
+    Checks include:
+      - If the file is unreadable, empty (zero rows or zero columns), or has only one row (if not allowed),
+        backup and remove the file.
+      - If the first data row is entirely placeholders, backup the original file, remove the row,
+        and overwrite with the cleaned data.
+    Returns:
+      "valid" if the file passes QC (and is cleaned if needed),
+      Otherwise returns an error status.
+    """
+    try:
+        df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
+    except Exception as e:
+        print(f"[QC] Error reading {file_path}: {e}")
+        backup_and_remove(file_path, resource)
+        return "error"
+    if df.shape[1] == 0:
+        print(f"[QC] File {file_path} has zero columns.")
+        backup_and_remove(file_path, resource)
+        return "zero_col"
+    if df.shape[0] == 0:
+        print(f"[QC] File {file_path} has zero rows.")
+        backup_and_remove(file_path, resource)
+        return "zero_row"
+    if df.shape[0] == 1 and not allow_one_row:
+        print(f"[QC] File {file_path} has only one row and one row is not allowed.")
+        backup_and_remove(file_path, resource)
+        return "one_row"
+    
+    invalid_rows = []
+    for idx in df.index:
+        # If all cells in the row are placeholders, mark this row as invalid.
+        if all(is_placeholder(cell) for cell in df.loc[idx]):
+            invalid_rows.append(idx)
+    if invalid_rows:
+        print(f"[QC] Removing invalid data rows in {file_path}: {invalid_rows}")
+        # Backup the original file before modifying.
+        backup_and_remove(file_path, resource)
+        df_clean = df.drop(index=invalid_rows).reset_index(drop=True)
+        if df_clean.empty:
+            print(f"[QC] After cleaning, file {file_path} is empty.")
+            return "empty_after_clean"
+        df_clean.to_csv(file_path, index=False)
+        print(f"[QC] Cleaned file saved (removed invalid rows): {file_path}")
+    return "valid"
 
 def compute_file_hash(file_path):
     """
@@ -62,8 +137,15 @@ def compute_file_hash(file_path):
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
         return None
+    
+def process_file_in_dir(file_path, resource, order, priority, allow_one_row):
+    status = qc_csv_file(file_path, resource, allow_one_row=allow_one_row)
+    if status != "valid":
+        print(f"[QC] File {file_path} is invalid due to status: {status}. It has been removed.")
+        return {"valid": False, "file_path": file_path}
+    else:
+        return {"valid": True, "file_info": {"file_path": file_path, "resource": resource, "priority": priority, "order": order}}
 
-########
 def list_files_from_directories(directories):
     """
     Given a list of directory info dictionaries (each with 'path', 'resource', and 'priority'),
@@ -74,22 +156,30 @@ def list_files_from_directories(directories):
     for dir_info in directories:
         directory = dir_info["path"]
         resource = dir_info["resource"]
+        ALLOW_ONE_ROW = resource != 'html'
         priority = dir_info["priority"]
-        if not os.path.exists(directory):  ########
-            print(f"Warning: Directory {directory} does not exist. Skipping.")  ########
-            continue  ########
+        if not os.path.exists(directory):
+            print(f"Warning: Directory {directory} does not exist. Skipping.")
+            continue
         # List CSV files and sort them to maintain sequence order
         file_names = sorted([f for f in os.listdir(directory) if f.lower().endswith('.csv')])
-        for order, file_name in enumerate(file_names):
-            file_path = os.path.join(directory, file_name)
-            files_info.append({
-                "file_path": file_path,
-                "resource": resource,
-                "priority": priority,
-                "order": order
-            })
+
+        results = Parallel(n_jobs=-1)(
+            delayed(process_file_in_dir)(os.path.join(directory, file_name), resource, order, priority, ALLOW_ONE_ROW)
+            for order, file_name in enumerate(file_names)
+        )
+        for res in results:
+            if res["valid"]:
+                files_info.append(res["file_info"])
+            else:
+                INVALID_FILES.add(res["file_path"])
     return files_info
-########
+
+def remove_invalid_paths_from_list(path_list, invalid_set):
+    """
+    Remove file paths that are present in the invalid_set.
+    """
+    return [p for p in path_list if p not in invalid_set]
 
 def update_row(row, duplicate_mapping, resource_priority):
     """
@@ -114,6 +204,8 @@ def update_row(row, duplicate_mapping, resource_priority):
     for col, resource in resource_of_col.items():
         lst = row[col]
         if isinstance(lst, (list, tuple, np.ndarray)):
+            #valid_list = remove_invalid_paths_from_list(lst, INVALID_FILES)
+            #row_files[resource] = set(valid_list)
             row_files[resource] = set(lst)
         else:
             row_files[resource] = set()
@@ -159,6 +251,7 @@ def update_row(row, duplicate_mapping, resource_priority):
         for f in updated[resource]:
             if f not in new_list:
                 new_list.append(f)
+        new_list = remove_invalid_paths_from_list(new_list, INVALID_FILES)
         result[col + "_dedup"] = new_list
     return result
 
@@ -166,6 +259,7 @@ def main():
     # --- Step 1: Load file information from specified directories ---
     print("Listing files from directories...")
     files_info = list_files_from_directories(DIRS)  ########
+
     print(f"Total files found: {len(files_info)}")
     
     # --- Step 2: Compute the SHA256 hash for each file in parallel ---
@@ -203,46 +297,6 @@ def main():
             "resources": [fi["resource"] for fi in group]
         })
     
-    # --- Step 5: Compute duplicate file counts and cross-resource duplicate overlap matrix  ########
-    resources = ["hugging", "github", "html", "llm"]
-    total_files = Counter(fi["resource"] for fi in files_info if fi["resource"] in resources)
-    dup_counts = Counter()  # Total duplicate file counts per resource
-    dup_overlap = {r: {s: 0 for s in resources} for r in resources}
-    
-    # this count has priority
-    """for group in hash_groups.values():
-        if len(group) > 1:
-            group_counter = Counter(fi["resource"] for fi in group if fi["resource"] in resources)
-            canonical_resource = sorted(group, key=lambda x: (x["priority"], x["order"]))[0]["resource"]
-            dup_in_group = {}
-            for r, cnt in group_counter.items():
-                if r == canonical_resource:
-                    dup_in_group[r] = max(cnt - 1, 0)
-                else:
-                    dup_in_group[r] = cnt
-                dup_counts[r] += dup_in_group[r]
-            present_resources = list(dup_in_group.keys())
-            for r in present_resources:
-                for s in present_resources:
-                    dup_overlap[r][s] += dup_in_group[r]"""
-    
-    # we want a symmetric matrix
-    # --- Step 5: Compute internal resource duplicates + symmetric cross-resource duplicates ---
-    """import itertools
-
-    resources = ["hugging", "github", "html", "llm"]
-    dup_overlap = {r: {s: 0 for s in resources} for r in resources}
-
-    for group in hash_groups.values():
-        if len(group) > 1:
-            group_counter = Counter(fi["resource"] for fi in group if fi["resource"] in resources)
-            dup_count = sum(group_counter.values()) - len(group_counter)
-            for r in group_counter.keys():
-                dup_overlap[r][r] += dup_count
-            if len(group_counter) > 1:
-                for r, s in itertools.combinations(group_counter.keys(), 2):
-                    dup_overlap[r][s] += dup_count
-                    dup_overlap[s][r] += dup_count"""
     # --- Step 5: Compute internal‑resource duplicates and a symmetric cross‑resource matrix ---
     import itertools                                          
     resources = ["hugging", "github", "html", "llm"]          
@@ -276,19 +330,6 @@ def main():
     for r in resources:
         print(f"  {r}: {dedup_unique[r]}")
     ###################################
-        
-    unique_files = {r: total_files[r] - dup_counts[r] for r in resources}
-    
-    ########
-    # Print a summary line: each resource with its total file count (e.g., "hugging (174218) github (4090) ...")
-    summary_line = " ".join([f"{r} ({total_files[r]})" for r in resources])
-    print("\nDuplicate Matrix (duplicate file counts):")
-    print(summary_line)
-    ########
-    
-    dup_matrix = pd.DataFrame(dup_overlap).T  ########
-    print("\nCross-Resource Duplicate Overlap Matrix (detailed):")
-    print(dup_matrix, "\n")
     
     # --- Step 6: Update the original parquet file with deduplicated file paths across resources ---
     print("Loading original parquet file...")
@@ -329,3 +370,39 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+"""
+Example output:
+
+[QC] Removing invalid data rows in data/processed/llm_tables/725590_table3.csv: [5]
+[QC] Cleaned file saved (removed invalid rows): data/processed/llm_tables/725590_table3.csv
+[QC] Removing invalid data rows in data/processed/llm_tables/91184391_table4.csv: [3]
+[QC] Cleaned file saved (removed invalid rows): data/processed/llm_tables/91184391_table4.csv
+Total files found: 250631
+Computing file hashes...
+100%|████████████████| 250631/250631 [00:27<00:00, 9142.13it/s]
+Hashing files:   0%|                | 0/250631 [00:27<?, ?it/s]
+
+Duplicate Matrix (duplicate file counts):
+hugging (174209) github (4085) html (48904) llm (23433)
+
+Cross‑Resource Duplicate Overlap Matrix (detailed):
+         hugging  github  html  llm
+hugging    27939    1375     0    1
+github      1375     284     0    0
+html           0       0  1527    0
+llm            1       0     0   19
+
+Deduplicated unique‑file counts (after priority rules):
+  hugging: 146270
+  github: 2457
+  html: 47377
+  llm: 23413
+Loading original parquet file...
+Updating file paths in DataFrame using cross-resource duplicate mapping...
+Processing rows: 100%|█| 1108759/1108759 [03:19<00:00, 5561.22i
+Updated parquet saved as data/processed/modelcard_step4_dedup.parquet
+Duplicate mapping saved to data/deduped/duplicate_mapping.json
+Unique file list saved to data/deduped/unique_files.txt
+Duplicate group details saved to data/deduped/duplicate_groups.json
+"""

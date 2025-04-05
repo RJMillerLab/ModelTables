@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-03
-Last Modified: 2025-04-04
+Last Modified: 2025-04-05
 Description: Get statistics of tables in CSV files from different resources (optimized with joblib)
              with additional model-level quality control. For each benchmark resource, two rows are generated:
              one with deduped (weighted) statistics and one (labeled "(sym)") with raw statistics computed by processing
@@ -18,15 +18,9 @@ INPUT_FILE = "data/processed/modelcard_step4_dedup.parquet"
 BENCHMARK_FILE = "data/analysis/benchmark_results.parquet"
 OUTPUT_ANALYSIS_DIR = "data/analysis"
 
-def process_csv_file(csv_file, allow_one_row=False):
+def process_csv_file(csv_file):
     try:
         df = pd.read_csv(csv_file)
-        if df.shape[1] == 0:
-            return {"path": csv_file, "status": "zero_col"}, None
-        if df.shape[0] == 0:
-            return {"path": csv_file, "status": "zero_row"}, None
-        if df.shape[0] == 1 and not allow_one_row:
-            return {"path": csv_file, "status": "one_row"}, None
         return {"path": csv_file, "rows": df.shape[0], "cols": df.shape[1], "status": "valid"}, None
     except Exception as e:
         return None, f"Error reading {csv_file}: {e}"
@@ -61,11 +55,9 @@ def get_statistics_table(df, csv_columns, n_jobs=8):
             dedup_valid_count = len(valid_paths)
             aggregate_valid_paths.update(valid_paths)
 
-            allow_one_row = benchmark_name != 'scilake-html'
-
             # Process deduped valid paths (weighted by frequency)
             results = Parallel(n_jobs=n_jobs)(
-                delayed(process_csv_file)(p, allow_one_row=allow_one_row) 
+                delayed(process_csv_file)(p) 
                 for p in tqdm(valid_paths, desc=f"Processing {benchmark_name}")
             )
 
@@ -200,3 +192,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+"""
+base ❯ python -m src.data_analysis.setting_table        (base)
+⚠️ Step 1: Filtering valid CSV paths...
+Processing scilake-hugging: 100%|█| 146270/146270 [01:03<00:00,
+Processing scilake-github: 100%|█| 2587/2587 [00:00<00:00, 3606
+Processing scilake-html: 100%|█| 11453/11453 [00:03<00:00, 3166
+Processing scilake-llm: 100%|█| 12043/12043 [00:03<00:00, 3070.
+✅ Statistics saved successfully.
+"""
