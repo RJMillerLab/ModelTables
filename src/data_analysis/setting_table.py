@@ -11,6 +11,9 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 import os
 
+INPUT_FILE = "data/processed/modelcard_step4_dedup.parquet"
+BENCHMARK_FILE = "data/analysis/benchmark_results.parquet"
+OUTPUT_ANALYSIS_DIR = "data/analysis"
 
 def process_csv_file(csv_file, allow_one_row=False): ########
     try:
@@ -38,7 +41,7 @@ def get_statistics_table(df, csv_columns, n_jobs=8): ########
             for col in cols:
                 if col in df.columns:
                     valid_paths.extend([p for paths in df[col].dropna() for p in paths if isinstance(p, str) and os.path.exists(p)])
-
+            valid_paths = list(set(valid_paths)) # dedup!
             aggregate_valid_paths.update(valid_paths)
 
             allow_one_row = benchmark_name != 'scilake-html' ########
@@ -89,16 +92,16 @@ def get_statistics_table(df, csv_columns, n_jobs=8): ########
             all_total_rows += total_rows
 
             base_name = benchmark_name.split('-')[-1]
-            with open(f"data/analysis/valid_file_list_{base_name}.txt", "w") as f:
+            with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"valid_file_list_{base_name}.txt"), "w") as f:
                 for path in valid_file_list:
                     f.write(path + "\n")
-            with open(f"data/analysis/one_row_list_{base_name}.txt", "w") as f:
+            with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"one_row_list_{base_name}.txt"), "w") as f:
                 for path in one_row_list:
                     f.write(path + "\n")
-            with open(f"data/analysis/zero_row_list_{base_name}.txt", "w") as f:
+            with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"zero_row_list_{base_name}.txt"), "w") as f:
                 for path in zero_row_list:
                     f.write(path + "\n")
-            with open(f"data/analysis/zero_col_list_{base_name}.txt", "w") as f:
+            with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"zero_col_list_{base_name}.txt"), "w") as f:
                 for path in zero_col_list:
                     f.write(path + "\n")
 
@@ -125,23 +128,24 @@ def get_statistics_table(df, csv_columns, n_jobs=8): ########
     return benchmark_df
 
 def main():
-    df = pd.read_parquet("data/processed/modelcard_step4.parquet")
+    df = pd.read_parquet(INPUT_FILE)
 
     csv_columns = {
-        'scilake-hugging': ['hugging_table_list'],
-        'scilake-github': ['github_table_list'],
-        'scilake-html': ['html_table_list_mapped'],
-        'scilake-llm': ['llm_table_list_mapped'],
-        'scilake-all': ['hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped']
+        'scilake-hugging': ['hugging_table_list_dedup'],
+        'scilake-github': ['github_table_list_dedup'],
+        'scilake-html': ['html_table_list_mapped_dedup'],
+        'scilake-llm': ['llm_table_list_mapped_dedup'],
+        'scilake-all': ['hugging_table_list_dedup', 'github_table_list_dedup',
+                         'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup']
     }
 
     print("⚠️ Step 1: Filtering valid CSV paths...")
 
-    os.makedirs("data/analysis", exist_ok=True)
+    os.makedirs(OUTPUT_ANALYSIS_DIR, exist_ok=True)
 
     benchmark_df = get_statistics_table(df, csv_columns, n_jobs=-1) ########
 
-    benchmark_df.to_parquet("data/analysis/benchmark_results.parquet", index=False)
+    benchmark_df.to_parquet(BENCHMARK_FILE, index=False)
 
     print("✅ Statistics saved successfully.")
 
