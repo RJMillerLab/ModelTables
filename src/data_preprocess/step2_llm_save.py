@@ -1,6 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-03-31
+Last edited: 2025-04-05
 Description: This script save the polished markdown tables to CSV files.
 """
 import os, re
@@ -138,7 +139,7 @@ if __name__ == "__main__":
     output_dir =  "data/processed/llm_tables"
     os.makedirs(output_dir, exist_ok=True)
     # Process tables and write csvs
-    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=True) ########
+    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=False) ########
     # Save updated parquet
     updated_parquet_path = "data/processed/final_integration_with_paths.parquet" ########
     df_parquet.to_parquet(updated_parquet_path, index=False)

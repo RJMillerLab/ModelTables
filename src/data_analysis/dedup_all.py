@@ -209,7 +209,8 @@ def main():
     dup_counts = Counter()  # Total duplicate file counts per resource
     dup_overlap = {r: {s: 0 for s in resources} for r in resources}
     
-    for group in hash_groups.values():
+    # this count has priority
+    """for group in hash_groups.values():
         if len(group) > 1:
             group_counter = Counter(fi["resource"] for fi in group if fi["resource"] in resources)
             canonical_resource = sorted(group, key=lambda x: (x["priority"], x["order"]))[0]["resource"]
@@ -223,8 +224,59 @@ def main():
             present_resources = list(dup_in_group.keys())
             for r in present_resources:
                 for s in present_resources:
-                    dup_overlap[r][s] += dup_in_group[r]
+                    dup_overlap[r][s] += dup_in_group[r]"""
     
+    # we want a symmetric matrix
+    # --- Step 5: Compute internal resource duplicates + symmetric cross-resource duplicates ---
+    """import itertools
+
+    resources = ["hugging", "github", "html", "llm"]
+    dup_overlap = {r: {s: 0 for s in resources} for r in resources}
+
+    for group in hash_groups.values():
+        if len(group) > 1:
+            group_counter = Counter(fi["resource"] for fi in group if fi["resource"] in resources)
+            dup_count = sum(group_counter.values()) - len(group_counter)
+            for r in group_counter.keys():
+                dup_overlap[r][r] += dup_count
+            if len(group_counter) > 1:
+                for r, s in itertools.combinations(group_counter.keys(), 2):
+                    dup_overlap[r][s] += dup_count
+                    dup_overlap[s][r] += dup_count"""
+    # --- Step 5: Compute internal‑resource duplicates and a symmetric cross‑resource matrix ---
+    import itertools                                          
+    resources = ["hugging", "github", "html", "llm"]          
+    dup_overlap = {r: {s: 0 for s in resources} for r in resources}
+    dedup_unique = Counter()      # final unique‑file count after priority dedup
+    for h, group in hash_groups.items():
+        # how many files from each resource are in this hash group?
+        res_counts = Counter(fi["resource"] for fi in group if fi["resource"] in resources)
+        # pick the canonical file (highest‑priority, earliest order)
+        canonical_resource = sorted(group, key=lambda x: (x["priority"], x["order"]))[0]["resource"]
+        dedup_unique[canonical_resource] += 1
+        # 1) internal duplicates (diagonal)
+        for r, cnt in res_counts.items():
+            if cnt > 1:
+                dup_overlap[r][r] += cnt - 1
+        # 2) cross‑resource duplicates (off‑diagonal, keep matrix symmetric)
+        for r, s in itertools.combinations(res_counts.keys(), 2):
+            cross = min(res_counts[r], res_counts[s])
+            dup_overlap[r][s] += cross
+            dup_overlap[s][r] += cross
+
+    # --- Step 5‑B: pretty‑print the results + double‑check unique counts ---
+    total_files = Counter(fi["resource"] for fi in files_info if fi["resource"] in resources)
+    summary_line = " ".join([f"{r} ({total_files[r]})" for r in resources])
+    print("\nDuplicate Matrix (duplicate file counts):")
+    print(summary_line)
+    dup_matrix = pd.DataFrame(dup_overlap).T
+    print("\nCross‑Resource Duplicate Overlap Matrix (detailed):")
+    print(dup_matrix, "\n")
+    print("Deduplicated unique‑file counts (after priority rules):")
+    for r in resources:
+        print(f"  {r}: {dedup_unique[r]}")
+    ###################################
+        
     unique_files = {r: total_files[r] - dup_counts[r] for r in resources}
     
     ########

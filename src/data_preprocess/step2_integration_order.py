@@ -395,10 +395,14 @@ def main():
             with open(BATCH_INPUT_PATH, "w", encoding="utf-8") as f:
                 f.write("\n".join(jsonl_lines) + "\n")
             print(f"✅ Created {BATCH_INPUT_PATH} with {len(jsonl_lines)} entries (parallelized)")
+        else:
+            print(f"⚙️ Skipping batch input file generation, using previous results...")
 
         if RUN_LLM:
             print("⚙️ Running LLM batch query...")
             main_batch_query(BATCH_INPUT_PATH, BATCH_OUTPUT_PATH) # batch query and save
+        else:
+            print("⚙️ Skipping LLM batch query, using previous results...")
         # 5) Parse the output_file to attach responses back to df_extracted
         print(f"⚙️ Parsing {BATCH_OUTPUT_PATH} and aggregating responses...")
         responses_dict = {}

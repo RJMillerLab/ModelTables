@@ -25,7 +25,7 @@ def main():
     USE_API_KEY = API_KEY is not None
 
     # Adjust rate limit based on presence of API key
-    DELAY_SECONDS = 1.0 if USE_API_KEY else 12.1
+    DELAY_SECONDS = 1.0 if USE_API_KEY else 3.0
 
     # Load input data
     df_input = pd.read_parquet(INPUT_PARQUET)
