@@ -58,9 +58,9 @@ def infer_resource_from_path(path: str) -> str:
 
 # ---------------- Hyperparameters / configuration ----------------
 INPUT_DIR = "data/processed"
-INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step4.parquet")
+INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_merged.parquet")
 OUTPUT_DIR = "data/deduped"
-OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step4_dedup.parquet")
+OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_dedup.parquet")
 DUPLICATE_MAPPING_JSON = os.path.join(OUTPUT_DIR, "duplicate_mapping.json")
 UNIQUE_FILES_TXT = os.path.join(OUTPUT_DIR, "unique_files.txt")
 DUPLICATE_GROUPS_JSON = os.path.join(OUTPUT_DIR, "duplicate_groups.json")

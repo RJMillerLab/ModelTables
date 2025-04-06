@@ -19,6 +19,7 @@ from collections import defaultdict
 FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths.parquet"
 ALL_TITLE_PATH              = "data/processed/modelcard_all_title_list.parquet"
 MERGE_PATH                  = "data/processed/modelcard_step3_merged.parquet" ########
+SIDE_PATH                   = "data/processed/modelcard_step2.parquet" ########
 
 def _combine_lists(series):
     """
@@ -45,6 +46,48 @@ def _safe_parse_list(val):  ########
         return list(val)
     else:
         return []
+
+def populate_hugging_table_list(df_merged, processed_base_path):
+    """
+    Populate 'hugging_table_list' using 'hugging_deduped_mapping.json'
+    """
+    hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping.json")
+    with open(hugging_map_json_path, 'r', encoding='utf-8') as jf:
+        hash_to_csv_map = json.load(jf)
+    df_merged['hugging_table_list'] = [[] for _ in range(len(df_merged))]
+    for i, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Populating Hugging table list"):
+        hval = row['readme_hash']
+        if not isinstance(hval, str):
+            continue
+        deduped_csv_list = hash_to_csv_map.get(hval, [])
+        df_merged.at[i, 'hugging_table_list'] = [p[p.index("data/processed/"):] if "data/processed/" in p else p 
+                                                  for p in deduped_csv_list]
+    return df_merged
+
+def populate_github_table_list(df_merged, processed_base_path):
+    """
+    Populate 'github_table_list' using 'md_to_csv_mapping.json'
+    """
+    with open(os.path.join(processed_base_path, "deduped_github_csvs", "md_to_csv_mapping.json"), 'r', encoding='utf-8') as jf:
+        md_to_csv_mapping = json.load(jf)
+    df_merged['github_table_list'] = [[] for _ in range(len(df_merged))]
+    for i, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Populating GitHub table list"):
+        readme_paths = row['readme_path']
+        if isinstance(readme_paths, str):
+            readme_paths = [readme_paths]
+        combined_csvs = []
+        for md_file in readme_paths:
+            md_basename = os.path.basename(md_file).replace(".md", "")
+            value = md_to_csv_mapping.get(md_basename)
+            if value not in [None, []]:
+                combined_csvs.extend(value)
+        combined_csvs = list(set(combined_csvs))
+        full_csv_paths = []
+        for csv_basename in combined_csvs:
+            csv_full_path = os.path.join(processed_base_path, "deduped_github_csvs", csv_basename)
+            full_csv_paths.append(csv_full_path)
+        df_merged.at[i, "github_table_list"] = full_csv_paths
+    return df_merged
 
 def merge_table_list_to_df2():
     df = pd.read_parquet(FINAL_INTEGRATION_PARQUET, columns=['query', 'html_table_list', 'llm_table_list']) # , 'corpusid'
@@ -90,8 +133,14 @@ def merge_table_list_to_df2():
         lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else []
     )
 
-    df2_merged.to_parquet(MERGE_PATH, index=False)
-    return df2_merged
+    # load side data and merge to df with modelId
+    side_df = pd.read_parquet(SIDE_PATH, columns=['modelId', 'readme_path', 'readme_hash'])
+    side_df = populate_hugging_table_list(side_df, os.path.dirname(SIDE_PATH))
+    side_df = populate_github_table_list(side_df, os.path.dirname(SIDE_PATH))
+    df_final = pd.merge(df2_merged, side_df[['modelId', 'github_table_list', 'hugging_table_list']], on='modelId', how='left')
+
+    df_final.to_parquet(MERGE_PATH, index=False)
+    return df_final
 
 if __name__ == "__main__":
     print(f"Merging all tables list...")

@@ -14,7 +14,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 import os, ast
 
-INPUT_FILE = "data/processed/modelcard_step4_dedup.parquet"
+INPUT_FILE = "data/processed/modelcard_step3_dedup.parquet"
 BENCHMARK_FILE = "data/analysis/benchmark_results.parquet"
 OUTPUT_ANALYSIS_DIR = "data/analysis"
 
