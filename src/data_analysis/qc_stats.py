@@ -12,11 +12,21 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from joblib import Parallel, delayed
-import os
+import os, ast
 
 INPUT_FILE = "data/processed/modelcard_step4_dedup.parquet"
 BENCHMARK_FILE = "data/analysis/benchmark_results.parquet"
 OUTPUT_ANALYSIS_DIR = "data/analysis"
+
+def get_valid_paths_from_series(series):
+    valid_paths = []
+    for item in series.dropna():
+        if isinstance(item, (list, tuple, np.ndarray)):
+            lst = item
+        else:
+            raise ValueError
+        valid_paths.extend([p for p in lst if isinstance(p, str) and os.path.exists(p)])
+    return valid_paths
 
 def process_csv_file(csv_file):
     try:
@@ -40,19 +50,17 @@ def get_statistics_table(df, csv_columns, n_jobs=8):
             # Collect raw valid paths (with duplicates)
             raw_valid_paths = []
             for col in cols:
-                if col in df.columns:
-                    raw_valid_paths.extend([p for paths in df[col].dropna() 
-                                            for p in paths if isinstance(p, str) and os.path.exists(p)])
-            raw_valid_count = len(raw_valid_paths)
+                raw_valid_paths.extend(get_valid_paths_from_series(df[col]))
+            #raw_valid_count = len(raw_valid_paths)
 
             # Create frequency dictionary for raw valid paths (for deduped stats)
             freq = {}
             for p in raw_valid_paths:
                 freq[p] = freq.get(p, 0) + 1
 
-            # Deduplicate the valid paths
+            # Deduplicate the valid paths, There exist duplicate paths only across rows
             valid_paths = list(set(raw_valid_paths))
-            dedup_valid_count = len(valid_paths)
+            #dedup_valid_count = len(valid_paths)
             aggregate_valid_paths.update(valid_paths)
 
             # Process deduped valid paths (weighted by frequency)
@@ -62,9 +70,6 @@ def get_statistics_table(df, csv_columns, n_jobs=8):
             )
 
             valid_file_list = []
-            one_row_list = []
-            zero_row_list = []
-            zero_col_list = []
 
             num_tables = 0
             num_cols = 0
@@ -87,15 +92,8 @@ def get_statistics_table(df, csv_columns, n_jobs=8):
                         dedup_num_cols += res["cols"]
                         total_rows += count * res["rows"]
                         dedup_total_rows += res["rows"]
-                    elif status == "one_row":
-                        one_row_list.append(res["path"])
-                        print(f"Warning: {res['path']} has only 1 row, skipping.")
-                    elif status == "zero_row":
-                        zero_row_list.append(res["path"])
-                        print(f"Warning: {res['path']} has 0 rows, skipping.")
-                    elif status == "zero_col":
-                        zero_col_list.append(res["path"])
-                        print(f"Warning: {res['path']} has 0 columns, skipping.")
+                    else:
+                        print(f"Invalid file: {res['path']}")
 
             avg_rows = total_rows / num_tables if num_tables else 0
             dedup_avg_rows = dedup_total_rows / dedup_num_tables if dedup_num_tables else 0
@@ -127,15 +125,6 @@ def get_statistics_table(df, csv_columns, n_jobs=8):
             base_name = benchmark_name.split('-')[-1]
             with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"valid_file_list_{base_name}.txt"), "w") as f:
                 for path in valid_file_list:
-                    f.write(path + "\n")
-            with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"one_row_list_{base_name}.txt"), "w") as f:
-                for path in one_row_list:
-                    f.write(path + "\n")
-            with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"zero_row_list_{base_name}.txt"), "w") as f:
-                for path in zero_row_list:
-                    f.write(path + "\n")
-            with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"zero_col_list_{base_name}.txt"), "w") as f:
-                for path in zero_col_list:
                     f.write(path + "\n")
 
     avg_rows_all = all_total_rows / all_num_tables if all_num_tables else 0
@@ -192,13 +181,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-"""
-base ❯ python -m src.data_analysis.setting_table        (base)
-⚠️ Step 1: Filtering valid CSV paths...
-Processing scilake-hugging: 100%|█| 146270/146270 [01:03<00:00,
-Processing scilake-github: 100%|█| 2587/2587 [00:00<00:00, 3606
-Processing scilake-html: 100%|█| 11453/11453 [00:03<00:00, 3166
-Processing scilake-llm: 100%|█| 12043/12043 [00:03<00:00, 3070.
-✅ Statistics saved successfully.
-"""

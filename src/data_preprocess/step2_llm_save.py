@@ -88,27 +88,27 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
 
         df.at[idx, "llm_table_list"] = csv_paths  ######## update the row"""
         # updated processing logic
-        table_blocks = []  ########
-        try:  ########
-            if raw_response.strip().startswith("["):  ########
-                parsed_json = json.loads(raw_response)  ########
-                if isinstance(parsed_json, list):  ########
-                    for item in parsed_json:  ########
-                        if isinstance(item, str):  ########
-                            table_blocks.extend(re.findall(r"```markdown\s*(.*?)\s*```", item, re.DOTALL))  ########
-            else:  ########
-                table_blocks = re.findall(r"```markdown\s*(.*?)\s*```", raw_response, re.DOTALL)  ########
-        except Exception as e:  ########
-            print(f"❌ JSON parse failed at row {idx}: {e}")  ########
-            table_blocks = re.findall(r"```markdown\s*(.*?)\s*```", raw_response, re.DOTALL)  ########
-        if not table_blocks and raw_response.strip():  ########
-            table_blocks = [raw_response.strip()]  ########
+        table_blocks = []
+        try:
+            if raw_response.strip().startswith("["):
+                parsed_json = json.loads(raw_response)
+                if isinstance(parsed_json, list):
+                    for item in parsed_json:
+                        if isinstance(item, str):
+                            table_blocks.extend(re.findall(r"```markdown\s*(.*?)\s*```", item, re.DOTALL))
+            else:
+                table_blocks = re.findall(r"```markdown\s*(.*?)\s*```", raw_response, re.DOTALL)
+        except Exception as e:
+            print(f"❌ JSON parse failed at row {idx}: {e}")
+            table_blocks = re.findall(r"```markdown\s*(.*?)\s*```", raw_response, re.DOTALL)
+        if not table_blocks and raw_response.strip():
+            table_blocks = [raw_response.strip()]
         table_blocks = list(dict.fromkeys(table_blocks))  ######## remove duplicates
         ######## End updated markdown block extraction ########
 
         key_value = row[key_column]
         if pd.isna(key_value) or not str(key_value).strip():
-            key_value = f"row_{idx}"  ######## fallback ID
+            key_value = f"row_{idx}"
         safe_key = str(key_value).strip().replace(" ", "_").replace("/", "_")
 
         csv_paths = []
@@ -116,18 +116,18 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
             if not isinstance(block, str) or not block.strip():
                 continue
             markdown_table = clean_markdown_block(block)
-            filename = f"{safe_key}_table{i}.csv"  ########
+            filename = f"{safe_key}_table{i}.csv"
             out_csv_path = os.path.join(output_dir, filename)
             try:
                 tmp_csv_path = MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
-                if tmp_csv_path:  ######## check if output path returned
-                    #csv_paths.append(tmp_csv_path)  ######## collect path
-                    csv_paths.append(out_csv_path)  ######## collect path
+                if tmp_csv_path:
+                    #csv_paths.append(tmp_csv_path)
+                    csv_paths.append(out_csv_path)
                     #print(f"✅ Saved: {tmp_csv_path}")
             except Exception as e:
                 print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
                 continue
-        df.at[idx, "llm_table_list"] = csv_paths  ######## update the row
+        df.at[idx, "llm_table_list"] = csv_paths
     return df
 
 if __name__ == "__main__":
@@ -139,9 +139,9 @@ if __name__ == "__main__":
     output_dir =  "data/processed/llm_tables"
     os.makedirs(output_dir, exist_ok=True)
     # Process tables and write csvs
-    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=False) ########
+    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=False)
     # Save updated parquet
-    updated_parquet_path = "data/processed/final_integration_with_paths.parquet" ########
+    updated_parquet_path = "data/processed/final_integration_with_paths.parquet"
     df_parquet.to_parquet(updated_parquet_path, index=False)
     print(f"\n🎉 All markdown tables saved. Paths recorded in 'llm_table_list'.")
     print(f"📝 Updated parquet saved to: {updated_parquet_path}")

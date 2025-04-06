@@ -19,6 +19,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from tqdm_joblib import tqdm_joblib
 from datetime import datetime
+import itertools
 
 # ---------------- QC CONFIG ----------------
 QC_BACKUP_ROOT = "data/qc_backup"
@@ -29,10 +30,33 @@ def is_placeholder(cell):
     return s == "" or s == "nan" or all(ch in " :-" for ch in s)
 
 # Global set to record invalid file paths
-INVALID_FILES = set()  ########
+INVALID_FILES = set()
 
-########
-# Hyperparameters / configuration
+def get_linked_set_from_parquet(df, cols):
+    linked_set = set()
+    for col in cols:
+        if col in df.columns:
+            for paths in df[col]:
+                if isinstance(paths, (list, tuple, np.ndarray)):
+                    linked_set.update([p for p in paths if isinstance(p, str) and os.path.exists(p)])
+                elif isinstance(paths, str):
+                    if os.path.exists(paths):
+                        linked_set.add(paths)
+    return linked_set
+
+def infer_resource_from_path(path: str) -> str:
+    """Infer the resource label from the canonical file path."""
+    if "/deduped_hugging_csvs/" in path or "/hugging" in path:
+        return "hugging"
+    if "/deduped_github_csvs/" in path or "/github" in path:
+        return "github"
+    if "/tables_output/" in path or "/html" in path:
+        return "html"
+    if "/llm_tables/" in path or "/llm" in path:
+        return "llm"
+    return None
+
+# ---------------- Hyperparameters / configuration ----------------
 INPUT_DIR = "data/processed"
 INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step4.parquet")
 OUTPUT_DIR = "data/deduped"
@@ -40,6 +64,7 @@ OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step4_dedup.parquet")
 DUPLICATE_MAPPING_JSON = os.path.join(OUTPUT_DIR, "duplicate_mapping.json")
 UNIQUE_FILES_TXT = os.path.join(OUTPUT_DIR, "unique_files.txt")
 DUPLICATE_GROUPS_JSON = os.path.join(OUTPUT_DIR, "duplicate_groups.json")
+STATS_PATH = os.path.join(OUTPUT_DIR, "stats.json")
 # Directories containing CSV files with their resource labels and priorities.
 DIRS = [
     {"path": "data/processed/deduped_hugging_csvs", "resource": "hugging", "priority": 1},
@@ -94,19 +119,15 @@ def qc_csv_file(file_path, resource, allow_one_row=True):
     except Exception as e:
         print(f"[QC] Error reading {file_path}: {e}")
         backup_and_remove(file_path, resource)
-        return "error"
+        return "error", None
     if df.shape[1] == 0:
         print(f"[QC] File {file_path} has zero columns.")
         backup_and_remove(file_path, resource)
-        return "zero_col"
+        return "zero_col", None
     if df.shape[0] == 0:
         print(f"[QC] File {file_path} has zero rows.")
         backup_and_remove(file_path, resource)
-        return "zero_row"
-    if df.shape[0] == 1 and not allow_one_row:
-        print(f"[QC] File {file_path} has only one row and one row is not allowed.")
-        backup_and_remove(file_path, resource)
-        return "one_row"
+        return "zero_row", None
     
     invalid_rows = []
     for idx in df.index:
@@ -117,36 +138,35 @@ def qc_csv_file(file_path, resource, allow_one_row=True):
         print(f"[QC] Removing invalid data rows in {file_path}: {invalid_rows}")
         # Backup the original file before modifying.
         backup_and_remove(file_path, resource)
-        df_clean = df.drop(index=invalid_rows).reset_index(drop=True)
-        if df_clean.empty:
+        df = df.drop(index=invalid_rows).reset_index(drop=True)
+        if df.empty:
             print(f"[QC] After cleaning, file {file_path} is empty.")
-            return "empty_after_clean"
-        df_clean.to_csv(file_path, index=False)
+            return "empty_after_clean", None
+        df.to_csv(file_path, index=False)
         print(f"[QC] Cleaned file saved (removed invalid rows): {file_path}")
-    return "valid"
-
-def compute_file_hash(file_path):
-    """
-    Compute the SHA256 hash for the file content.
-    If the file cannot be read, return None.
-    """
+    
+    if df.shape[0] == 1 and not allow_one_row:
+        print(f"[QC] File {file_path} has only one row and one row is not allowed.")
+        backup_and_remove(file_path, resource)
+        return "one_row", None
+    # ----- compute hash using DataFrame's CSV representation -----
+    sha256 = None
     try:
-        with open(file_path, 'rb') as f:
-            content = f.read()
-        return hashlib.sha256(content).hexdigest()
+        csv_string = df.to_csv(index=False)
+        sha256 = hashlib.sha256(csv_string.encode("utf-8")).hexdigest()
     except Exception as e:
-        print(f"Error reading {file_path}: {e}")
-        return None
+        print(f"[QC] Hashing failed for {file_path}: {e}")
+    return "valid", sha256
     
 def process_file_in_dir(file_path, resource, order, priority, allow_one_row):
-    status = qc_csv_file(file_path, resource, allow_one_row=allow_one_row)
+    status, file_hash = qc_csv_file(file_path, resource, allow_one_row=allow_one_row)
     if status != "valid":
         print(f"[QC] File {file_path} is invalid due to status: {status}. It has been removed.")
         return {"valid": False, "file_path": file_path}
     else:
-        return {"valid": True, "file_info": {"file_path": file_path, "resource": resource, "priority": priority, "order": order}}
+        return {"valid": True, "file_info": {"file_path": file_path, "resource": resource, "priority": priority, "order": order, "hash": file_hash}}
 
-def list_files_from_directories(directories):
+def valid_filelist_with_qc_from_local(directories):
     """
     Given a list of directory info dictionaries (each with 'path', 'resource', and 'priority'),
     return a list of dictionaries containing file_path, resource, priority, and order (the sequence in the directory).
@@ -164,10 +184,11 @@ def list_files_from_directories(directories):
         # List CSV files and sort them to maintain sequence order
         file_names = sorted([f for f in os.listdir(directory) if f.lower().endswith('.csv')])
 
-        results = Parallel(n_jobs=-1)(
-            delayed(process_file_in_dir)(os.path.join(directory, file_name), resource, order, priority, ALLOW_ONE_ROW)
-            for order, file_name in enumerate(file_names)
-        )
+        with tqdm_joblib(tqdm(desc="Processing files", total=len(file_names))):
+            results = Parallel(n_jobs=-1)(
+                delayed(process_file_in_dir)(os.path.join(directory, file_name), resource, order, priority, ALLOW_ONE_ROW)
+                for order, file_name in enumerate(file_names)
+            )
         for res in results:
             if res["valid"]:
                 files_info.append(res["file_info"])
@@ -183,159 +204,185 @@ def remove_invalid_paths_from_list(path_list, invalid_set):
 
 def update_row(row, duplicate_mapping, resource_priority):
     """
-    For a single row, update the file lists across resources.
-    Steps:
-      - Collect all file paths from the four resource columns.
-      - Group files by their canonical value (using duplicate_mapping).
-      - For each group, determine the resource present in the row and choose the resource with the highest priority (lowest numeric value)
-        as the designated resource for that group.
-      - Update each column: only retain the canonical file in the designated resource's column; remove the group files from other resource columns.
+    For a single row, update the file lists across resources using the following process:
+      1. Gather all file paths from all resource columns, regardless of their original resource.
+      2. Map each file to its canonical value using duplicate_mapping.
+      3. Record the set of resources in which each canonical file appears.
+      4. Determine the designated resource for each canonical file based on the highest priority (lowest numeric value).
+      5. Build the new deduped lists such that each canonical file is placed only in the dedup column of its designated resource.
+         (The updated resource is taken from the canonical file's designated resource.)
     Returns a dictionary mapping updated column names (original column name + "_dedup") to the new file lists.
     """
-    # Define mapping between column names and their resource labels.
+    # Mapping from column names to their resource labels.
     resource_of_col = {
        "hugging_table_list": "hugging",
        "github_table_list": "github",
        "html_table_list_mapped": "html",
        "llm_table_list_mapped": "llm"
     }
-    # Collect files in each resource column (as a set).
-    row_files = {}
-    for col, resource in resource_of_col.items():
-        lst = row[col]
-        if isinstance(lst, (list, tuple, np.ndarray)):
-            #valid_list = remove_invalid_paths_from_list(lst, INVALID_FILES)
-            #row_files[resource] = set(valid_list)
-            row_files[resource] = set(lst)
-        else:
-            row_files[resource] = set()
-    
-    # Get the union of all files in this row.
-    all_files = set()
-    for files in row_files.values():
-        all_files.update(files)
-    
-    # Group files by canonical value using duplicate_mapping.
-    canonical_to_files = defaultdict(set)
-    for f in all_files:
-        canonical = duplicate_mapping.get(f, f)
-        canonical_to_files[canonical].add(f)
-    
-    # For each group, determine which resources are present and choose the one with the highest priority.
-    canonical_designation = {}
-    for canonical, files in canonical_to_files.items():
-        resources_present = set()
-        for resource, files_set in row_files.items():
-            if files_set & files:
-                resources_present.add(resource)
-        if resources_present:
-            designated = min(resources_present, key=lambda r: resource_priority[r])
-            canonical_designation[canonical] = designated
-    
-    # Build updated sets for each resource (only keep the canonical file in the designated resource).
-    updated = {r: set() for r in resource_of_col.values()}
-    for canonical, designated in canonical_designation.items():
-        updated[designated].add(canonical)
-    
-    # Construct new lists for each column preserving as much of the original order as possible.
-    result = {}
-    for col, resource in resource_of_col.items():
-        original_list = row[col] if isinstance(row[col], (list, tuple, np.ndarray)) else []
-        new_list = []
-        # Add in original order: if the canonical of the file belongs to the current resource's updated set, add it.
-        for f in original_list:
+    # Step 1 & 2: Gather all file paths and convert to canonical, preserving order.
+    ordered_canonical = []
+    seen = set()
+    for col in resource_of_col:
+        lst = row[col] if isinstance(row[col], (list, tuple, np.ndarray)) else []
+        for f in lst:
             canonical = duplicate_mapping.get(f, f)
-            if canonical in updated[resource] and canonical not in new_list:
-                new_list.append(canonical)
-        # Append any canonical files in the updated set not already present.
-        for f in updated[resource]:
-            if f not in new_list:
-                new_list.append(f)
-        new_list = remove_invalid_paths_from_list(new_list, INVALID_FILES)
-        result[col + "_dedup"] = new_list
+            if canonical not in seen:
+                seen.add(canonical)
+                ordered_canonical.append(canonical)
+    # ---- Step 2: decide the target resource for each canonical file ------
+    designated = {}
+    for canonical in ordered_canonical:
+        # 2a. If the canonical path already appears in one of the row’s lists,
+        #     we keep it under that column’s resource.
+        target_resource = None
+        for col, res in resource_of_col.items():
+            lst = row[col] if isinstance(row[col], (list, tuple, np.ndarray)) else []
+            if canonical in lst:
+                target_resource = res
+                break
+        # 2b. Otherwise, infer the resource from the path itself.
+        if target_resource is None:
+            target_resource = infer_resource_from_path(canonical)
+        # 2c. Fallback: if still unknown, choose the highest‑priority resource
+        #     among duplicates present in this row; if none, default to ‘hugging’.
+        if target_resource is None:
+            dup_resources = {resource_of_col[c]
+                             for c in resource_of_col
+                             if any(duplicate_mapping.get(p, p) == canonical
+                                    for p in (row[c] if isinstance(row[c], (list, tuple, np.ndarray)) else []))}
+            target_resource = (min(dup_resources, key=lambda r: resource_priority[r])
+                               if dup_resources else "hugging")
+        designated[canonical] = target_resource
+    # ---- Step 3: construct the new deduped lists -------------------------
+    result = {col + "_dedup": [] for col in resource_of_col}
+    for canonical in ordered_canonical:
+        tgt_res = designated[canonical]
+        for col, res in resource_of_col.items():
+            if res == tgt_res:
+                result[col + "_dedup"].append(canonical)
+                break
     return result
 
-def main():
-    # --- Step 1: Load file information from specified directories ---
-    print("Listing files from directories...")
-    files_info = list_files_from_directories(DIRS)  ########
-
-    print(f"Total files found: {len(files_info)}")
-    
-    # --- Step 2: Compute the SHA256 hash for each file in parallel ---
-    print("Computing file hashes...")
-    with tqdm_joblib(tqdm(desc="Hashing files", total=len(files_info))):  ########
-        hashes = Parallel(n_jobs=-1)(
-            delayed(compute_file_hash)(fi["file_path"]) for fi in files_info
-        )
-    for i, h in enumerate(hashes):
-        files_info[i]["hash"] = h
-    
-    # --- Step 3: Group files by hash ---
+def compute_dup_matrix_from_sha(files_info):
+    keys = ["hugging", "github", "html", "llm"]
+    resource_sha = {r: [fi.get("hash") for fi in files_info if fi.get("resource") == r] for r in keys}
+    total_files = {r: len(resource_sha[r]) for r in keys}
+    resource_sha_set = {r: set(sha_list) for r, sha_list in resource_sha.items()}
+    unique_files = {r: len(resource_sha_set[r]) for r in keys}
+    internal_duplicates = {r: total_files[r]-unique_files[r] for r in keys}
+    dup_overlap = {r: {s: 0 for s in keys} for r in keys}
+    for i in range(len(keys)):
+        for j in range(len(keys)):
+            r = keys[i]
+            s = keys[j]
+            if r == s:
+                dup_overlap[r][s] = internal_duplicates[r]
+            else:
+                overlap = len(resource_sha_set[r].intersection(resource_sha_set[s]))
+                dup_overlap[r][s] = overlap
+                dup_overlap[s][r] = overlap
+    dup_matrix = pd.DataFrame(dup_overlap).T
+    # group by hash
     hash_groups = defaultdict(list)
     for fi in files_info:
-        if fi["hash"] is not None:
-            hash_groups[fi["hash"]].append(fi)
+        h = fi.get("hash")
+        if h is not None:
+            hash_groups[h].append(fi)
+    # sort hash group by priority
+    cross_unique_counts = {r: 0 for r in keys}
+    cross_unique_files = {r: [] for r in keys}
+    overall_unique = []
+    for h, group in hash_groups.items():
+        group_sorted = sorted(group, key=lambda x: (x["priority"], x["order"]))
+        canonical = group_sorted[0]
+        res = canonical["resource"]
+        cross_unique_counts[res] += 1
+        cross_unique_files[res].append(canonical["file_path"])
+        hash_groups[h] = group_sorted # update the group to sorted order
+        overall_unique.append(canonical["file_path"])
     
+    stats = {
+        "total_files": total_files,
+        "internal_duplicates": internal_duplicates,
+        "unique_files": unique_files,
+        "cross_unique_counts": cross_unique_counts,
+        "cross_unique_files": cross_unique_files,
+        "overall_unique": overall_unique
+    }
+    return dup_matrix, stats, hash_groups
+
+def main():
+    # --- Step 1: get the linked set (some files exist in local but not linked to model) ---
+    df = pd.read_parquet(INPUT_PARQUET)
+    cols = ["hugging_table_list", "github_table_list", "html_table_list_mapped", "llm_table_list_mapped"]
+    linked_set = get_linked_set_from_parquet(df, cols)
+    print(f"Linked set size from parquet: {len(linked_set)}")
+    
+    # --- Step 2: QC and sha256 hash ---
+    # we don't care what's stats before qc. However, we retain all the csv in data/qc_backup for future reference.
+    files_info = valid_filelist_with_qc_from_local(DIRS)
+    # Filter local files that unlinked to modelcard
+    resource_totals = {}
+    for fi in files_info:
+        res = fi["resource"]
+        resource_totals[res] = resource_totals.get(res, 0) + 1
+    
+    filtered_files_info = [fi for fi in files_info if fi["file_path"] in linked_set]
+    resource_filtered = {}
+    for fi in filtered_files_info:
+        res = fi["resource"]
+        resource_filtered[res] = resource_filtered.get(res, 0) + 1
+    
+    for res in RESOURCE_PRIORITY.keys():
+        total = resource_totals.get(res, 0)
+        kept = resource_filtered.get(res, 0)
+        filtered_out = total - kept
+        print(f"Resource {res}: total {total}, kept {kept}, filtered out {filtered_out}")  ########
+    files_info = filtered_files_info
+
+    # check duplicate stats
+    dup_matrix, stats, hash_groups = compute_dup_matrix_from_sha(files_info)
+    overall_unique = stats["overall_unique"]
+    # save overall_unique
+    with open(os.path.join(OUTPUT_DIR, "overall_unique.txt"), "w") as f:
+        for file_path in overall_unique:
+            f.write(file_path + "\n")
+    print(f"Overall unique file count: {len(overall_unique)}")
+    # save cross_unique_files
+    cross_unique_files = stats["cross_unique_files"]
+    for res, files in cross_unique_files.items():
+        with open(os.path.join(OUTPUT_DIR, f"{res}_unique.txt"), "w") as f:
+            for file_path in files:
+                f.write(file_path + "\n")
+        print(f"{res} unique file count: {len(files)}")
+
+    print("Duplicate Overlap Matrix (across resources):")
+    print(dup_matrix)
+    print("\nStatistics:")
+    print("Total files per resource:", stats["total_files"])
+    print("Interal Unique files per resource:", stats["unique_files"])
+    print("Cross-resource unique counts:", stats["cross_unique_counts"])
+
     # --- Step 4: Determine the canonical file for each hash group and build duplicate_mapping ---
     duplicate_mapping = {}  # Key: duplicate file path, Value: canonical file path
     group_stats = []  # Store details for each hash group
-    for h, group in hash_groups.items():
+    for h, group_sorted in hash_groups.items():
         # Sort group by priority and order to preserve the original sequence.
-        group_sorted = sorted(group, key=lambda x: (x["priority"], x["order"]))
         canonical = group_sorted[0]
-        canonical_path = canonical["file_path"]
         duplicates = []
         for item in group_sorted:
-            if item["file_path"] != canonical_path:
-                duplicate_mapping[item["file_path"]] = canonical_path
+            if item["file_path"] != canonical["file_path"]:
+                duplicate_mapping[item["file_path"]] = canonical["file_path"]
                 duplicates.append(item["file_path"])
         group_stats.append({
             "hash": h,
-            "canonical": canonical_path,
+            "canonical": canonical["file_path"],
             "duplicates": duplicates,
-            "resources": [fi["resource"] for fi in group]
+            "resources": [fi["resource"] for fi in group_sorted]
         })
     
-    # --- Step 5: Compute internal‑resource duplicates and a symmetric cross‑resource matrix ---
-    import itertools                                          
-    resources = ["hugging", "github", "html", "llm"]          
-    dup_overlap = {r: {s: 0 for s in resources} for r in resources}
-    dedup_unique = Counter()      # final unique‑file count after priority dedup
-    for h, group in hash_groups.items():
-        # how many files from each resource are in this hash group?
-        res_counts = Counter(fi["resource"] for fi in group if fi["resource"] in resources)
-        # pick the canonical file (highest‑priority, earliest order)
-        canonical_resource = sorted(group, key=lambda x: (x["priority"], x["order"]))[0]["resource"]
-        dedup_unique[canonical_resource] += 1
-        # 1) internal duplicates (diagonal)
-        for r, cnt in res_counts.items():
-            if cnt > 1:
-                dup_overlap[r][r] += cnt - 1
-        # 2) cross‑resource duplicates (off‑diagonal, keep matrix symmetric)
-        for r, s in itertools.combinations(res_counts.keys(), 2):
-            cross = min(res_counts[r], res_counts[s])
-            dup_overlap[r][s] += cross
-            dup_overlap[s][r] += cross
-
-    # --- Step 5‑B: pretty‑print the results + double‑check unique counts ---
-    total_files = Counter(fi["resource"] for fi in files_info if fi["resource"] in resources)
-    summary_line = " ".join([f"{r} ({total_files[r]})" for r in resources])
-    print("\nDuplicate Matrix (duplicate file counts):")
-    print(summary_line)
-    dup_matrix = pd.DataFrame(dup_overlap).T
-    print("\nCross‑Resource Duplicate Overlap Matrix (detailed):")
-    print(dup_matrix, "\n")
-    print("Deduplicated unique‑file counts (after priority rules):")
-    for r in resources:
-        print(f"  {r}: {dedup_unique[r]}")
-    ###################################
-    
     # --- Step 6: Update the original parquet file with deduplicated file paths across resources ---
-    print("Loading original parquet file...")
-    df = pd.read_parquet(INPUT_PARQUET)  ########
-    cols = ["hugging_table_list", "github_table_list", "html_table_list_mapped", "llm_table_list_mapped"]
-    
     print("Updating file paths in DataFrame using cross-resource duplicate mapping...")
     new_cols = {col + "_dedup": [] for col in cols}
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing rows"):
@@ -345,20 +392,27 @@ def main():
     for col in new_cols:
         df[col] = new_cols[col]
     
-    df.to_parquet(OUTPUT_PARQUET, index=False)  ########
+    df.to_parquet(OUTPUT_PARQUET, index=False)
     print(f"Updated parquet saved as {OUTPUT_PARQUET}")
-    
+
     # --- Step 7: Save duplicate mapping, unique file list, and duplicate group details ---
-    with open(DUPLICATE_MAPPING_JSON, "w") as f:  ########
+    with open(DUPLICATE_MAPPING_JSON, "w") as f:
         json.dump(duplicate_mapping, f, indent=2)
     print(f"Duplicate mapping saved to {DUPLICATE_MAPPING_JSON}")
     
     unique_file_paths = set()
-    for group in hash_groups.values():
-        if group:
-            group_sorted = sorted(group, key=lambda x: (x["priority"], x["order"]))
+    for group_sorted in hash_groups.values():
+        if group_sorted:
             unique_file_paths.add(group_sorted[0]["file_path"])
     unique_file_paths = list(unique_file_paths)
+    assert len(unique_file_paths)==len(hash_groups)
+    # please assert the len of unique_file_paths == the unique files above
+
+    # save stats
+    with open(STATS_PATH, "w") as f:
+        json.dump(stats, f, indent=2)
+
+    print(f"Unique file count: {len(unique_file_paths)}")
     with open(UNIQUE_FILES_TXT, "w") as f:  ########
         for file_path in unique_file_paths:
             f.write(file_path + "\n")
@@ -374,35 +428,5 @@ if __name__ == "__main__":
 """
 Example output:
 
-[QC] Removing invalid data rows in data/processed/llm_tables/725590_table3.csv: [5]
-[QC] Cleaned file saved (removed invalid rows): data/processed/llm_tables/725590_table3.csv
-[QC] Removing invalid data rows in data/processed/llm_tables/91184391_table4.csv: [3]
-[QC] Cleaned file saved (removed invalid rows): data/processed/llm_tables/91184391_table4.csv
-Total files found: 250631
-Computing file hashes...
-100%|████████████████| 250631/250631 [00:27<00:00, 9142.13it/s]
-Hashing files:   0%|                | 0/250631 [00:27<?, ?it/s]
 
-Duplicate Matrix (duplicate file counts):
-hugging (174209) github (4085) html (48904) llm (23433)
-
-Cross‑Resource Duplicate Overlap Matrix (detailed):
-         hugging  github  html  llm
-hugging    27939    1375     0    1
-github      1375     284     0    0
-html           0       0  1527    0
-llm            1       0     0   19
-
-Deduplicated unique‑file counts (after priority rules):
-  hugging: 146270
-  github: 2457
-  html: 47377
-  llm: 23413
-Loading original parquet file...
-Updating file paths in DataFrame using cross-resource duplicate mapping...
-Processing rows: 100%|█| 1108759/1108759 [03:19<00:00, 5561.22i
-Updated parquet saved as data/processed/modelcard_step4_dedup.parquet
-Duplicate mapping saved to data/deduped/duplicate_mapping.json
-Unique file list saved to data/deduped/unique_files.txt
-Duplicate group details saved to data/deduped/duplicate_groups.json
 """

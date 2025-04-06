@@ -12,8 +12,8 @@
 #   Run it: ./count_specific_files.sh
 
 dirs=(
-    "data/processed/deduped_github_csvs"
     "data/processed/deduped_hugging_csvs"
+    "data/processed/deduped_github_csvs"
     "data/processed/tables_output"
     "data/processed/llm_tables"
 )
