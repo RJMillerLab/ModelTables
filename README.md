@@ -106,8 +106,7 @@ python -m src.data_gt.step3_pre_merge # merge all the table list into modelid fi
 python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
 # (Or Optional) bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph (need extra 300G storage). | Then get citations relation from graph edge .db
 python -m src.data_gt.step3_overlap_rate # paper level: compute each two papers' overlap score
-# (Optional: we might deprecate sym) 
-python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
+python -m src.data_analysis.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle files obtained from src.data_gt.step3_overlap_rate
 ```
 
 Quality Control | Run some analysis
@@ -116,11 +115,11 @@ python -m src.data_analysis.qc_dedup > logs/qc_dedup.log # dedup raw tables, kee
 python -m src.data_analysis.qc_stats # stats | I: modelcard_step4_dedup, O: benchmark_results
 # (Optional) python -m src.data_analysis.qc_dc # double check whether the dedup and mapped logic is correct
 bash src/data_analysis/count_files.sh # obtain files count directly from folder | The count above should be smaller than files here.
-python -m src.data_analysis.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle files obtained from src.data_gt.step3_overlap_rate
 ```
 
 Final gt!
 ```bash
+# (Optional: we might deprecate sym) python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
 python -m src.data_gt.step3_gt # build up groundtruth
 ```
 

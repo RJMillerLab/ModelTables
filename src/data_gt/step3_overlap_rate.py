@@ -18,9 +18,9 @@ from itertools import combinations
 
 # === Configuration ===
 INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet"
-OUTPUT_PICKLE_SCORE = "data/processed/modelcard_citation_overlap_by_paperId_score.pickle"
-#OUTPUT_PICKLE_THRESHOLD = "data/processed/modelcard_citation_overlap_by_paperId_related.pickle"
-OUTPUT_PICKLE_DIRECT = "data/processed/modelcard_citation_direct_relation.pickle"
+OVERLAP_RATE = "data/processed/modelcard_citation_overlap_rate.pickle"
+#OVERLAP_LABEL = "data/processed/modelcard_citation_overlap_label.pickle"
+DIRECT_LABEL = "data/processed/modelcard_citation_direct_label.pickle"
 THRESHOLD = 0.6
 MODE = "reference"  # or "citation"
 
@@ -94,18 +94,18 @@ def main():
     print("Extracting direct citation relationships...")
     direct_map = extract_direct_links(df, all_paper_pairs=all_pairs)
 
-    os.makedirs(os.path.dirname(OUTPUT_PICKLE_SCORE), exist_ok=True)
-    with open(OUTPUT_PICKLE_SCORE, "wb") as f:
+    os.makedirs(os.path.dirname(OVERLAP_RATE), exist_ok=True)
+    with open(OVERLAP_RATE, "wb") as f:
         pickle.dump(score_map, f)
-    #with open(OUTPUT_PICKLE_THRESHOLD, "wb") as f:
+    #with open(OVERLAP_LABEL, "wb") as f:
     #    pickle.dump(related_map, f)
-    with open(OUTPUT_PICKLE_DIRECT, "wb") as f:
+    with open(DIRECT_LABEL, "wb") as f:
         pickle.dump(direct_map, f)
 
     print("✅ Done. All data saved:")
-    print(f"  - Overlap scores:      {OUTPUT_PICKLE_SCORE}")
-    #print(f"  - Related paper pairs: {OUTPUT_PICKLE_THRESHOLD}")
-    print(f"  - Direct citations:    {OUTPUT_PICKLE_DIRECT}")
+    print(f"  - Overlap scores:      {OVERLAP_RATE}")
+    #print(f"  - Related paper pairs: {OVERLAP_LABEL}")
+    print(f"  - Direct citations:    {DIRECT_LABEL}")
 
 
 if __name__ == "__main__":
