@@ -25,12 +25,42 @@ import itertools
 QC_BACKUP_ROOT = "data/qc_backup"
 os.makedirs(QC_BACKUP_ROOT, exist_ok=True)
 
+# Global set to record invalid file paths
+INVALID_FILES = set()
+
+# ---------------- Hyperparameters / configuration ----------------
+INPUT_DIR = "data/processed"
+INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_merged.parquet")
+OUTPUT_DIR = "data/deduped"
+# Ensure the output directory exists.
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_dedup.parquet")
+DUPLICATE_MAPPING_JSON = os.path.join(OUTPUT_DIR, "duplicate_mapping.json")
+UNIQUE_FILES_TXT = os.path.join(OUTPUT_DIR, "unique_files.txt")
+DUPLICATE_GROUPS_JSON = os.path.join(OUTPUT_DIR, "duplicate_groups.json")
+STATS_PATH = os.path.join(OUTPUT_DIR, "stats.json")
+# Directories containing CSV files with their resource labels and priorities.
+DIRS = [
+    {"path": "data/processed/deduped_hugging_csvs", "resource": "hugging", "priority": 1},
+    {"path": "data/processed/deduped_github_csvs", "resource": "github", "priority": 2},
+    {"path": "data/processed/tables_output", "resource": "html", "priority": 3},
+    {"path": "data/processed/llm_tables", "resource": "llm", "priority": 4}
+]
+# Resource priority dictionary (for comparing cross-resource priority)
+RESOURCE_PRIORITY = {
+    "hugging": 1,
+    "github": 2,
+    "html": 3,
+    "llm": 4
+}
+# makeidrs for qc_backup/{resources}
+for resource in RESOURCE_PRIORITY.keys():
+    os.makedirs(os.path.join(QC_BACKUP_ROOT, resource), exist_ok=True)
+
+
 def is_placeholder(cell):
     s = str(cell).strip().lower()
     return s == "" or s == "nan" or all(ch in " :-" for ch in s)
-
-# Global set to record invalid file paths
-INVALID_FILES = set()
 
 def get_linked_set_from_parquet(df, cols):
     linked_set = set()
@@ -55,36 +85,6 @@ def infer_resource_from_path(path: str) -> str:
     if "/llm_tables/" in path or "/llm" in path:
         return "llm"
     return None
-
-# ---------------- Hyperparameters / configuration ----------------
-INPUT_DIR = "data/processed"
-INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_merged.parquet")
-OUTPUT_DIR = "data/deduped"
-OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_dedup.parquet")
-DUPLICATE_MAPPING_JSON = os.path.join(OUTPUT_DIR, "duplicate_mapping.json")
-UNIQUE_FILES_TXT = os.path.join(OUTPUT_DIR, "unique_files.txt")
-DUPLICATE_GROUPS_JSON = os.path.join(OUTPUT_DIR, "duplicate_groups.json")
-STATS_PATH = os.path.join(OUTPUT_DIR, "stats.json")
-# Directories containing CSV files with their resource labels and priorities.
-DIRS = [
-    {"path": "data/processed/deduped_hugging_csvs", "resource": "hugging", "priority": 1},
-    {"path": "data/processed/deduped_github_csvs", "resource": "github", "priority": 2},
-    {"path": "data/processed/tables_output", "resource": "html", "priority": 3},
-    {"path": "data/processed/llm_tables", "resource": "llm", "priority": 4}
-]
-# Resource priority dictionary (for comparing cross-resource priority)
-RESOURCE_PRIORITY = {
-    "hugging": 1,
-    "github": 2,
-    "html": 3,
-    "llm": 4
-}
-
-# Ensure the output directory exists.
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-# makeidrs for qc_backup/{resources}
-for resource in RESOURCE_PRIORITY.keys():
-    os.makedirs(os.path.join(QC_BACKUP_ROOT, resource), exist_ok=True)
 
 # ---------------- QC FUNCTIONS ----------------
 

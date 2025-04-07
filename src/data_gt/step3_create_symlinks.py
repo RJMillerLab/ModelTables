@@ -78,10 +78,10 @@ def symlink_factory(input_col, output_subfolder, link_tag, output_col, use_abspa
 # Generate symlink creation functions for different resources.
 # For HTML and LLM, we assume the DataFrame already contains the columns:
 # 'html_table_list_mapped' and 'llm_table_list_mapped' respectively.
-create_symlink_hugging = symlink_factory("hugging_table_list", "sym_hugging_csvs", "hugging_table", "hugging_table_list_sym", False)
-create_symlink_github = symlink_factory("github_table_list", "sym_github_csvs", "github_table", "github_table_list_sym", False)
-create_symlink_html = symlink_factory("html_table_list_mapped", "sym_html_csvs", "html_table", "html_table_list_sym", True)
-create_symlink_llm = symlink_factory("llm_table_list_mapped", "sym_llm_csvs", "llm_table", "llm_table_list_sym", True)
+create_symlink_hugging = symlink_factory("hugging_table_list_dedup", "sym_hugging_csvs", "hugging_table", "hugging_table_list_sym", False)
+create_symlink_github = symlink_factory("github_table_list_dedup", "sym_github_csvs", "github_table", "github_table_list_sym", False)
+create_symlink_html = symlink_factory("html_table_list_mapped_dedup", "sym_html_csvs", "html_table", "html_table_list_sym", True)
+create_symlink_llm = symlink_factory("llm_table_list_mapped_dedup", "sym_llm_csvs", "llm_table", "llm_table_list_sym", True)
 
 # Main execution
 if __name__ == "__main__":
@@ -90,16 +90,16 @@ if __name__ == "__main__":
     data_type = 'modelcard'
     
     # load four keys directly from step3_merged.parquet
-    df_merged = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step3_merged.parquet"),
-                                columns=['modelId', 'html_table_list_mapped', 'llm_table_list_mapped', 'hugging_table_list', 'github_table_list'])
+    df_merged = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step3_dedup.parquet"),
+                                columns=['modelId', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup', 'hugging_table_list_dedup', 'github_table_list_dedup'])
     print(f"Loaded DataFrame with {len(df_merged)} rows.")
 
     # Create symlinks for all resources
-    df_merged = create_symlink_github(df_merged, processed_base_path)
     df_merged = create_symlink_hugging(df_merged, processed_base_path)
+    df_merged = create_symlink_github(df_merged, processed_base_path)
     df_merged = create_symlink_html(df_merged, processed_base_path)
     df_merged = create_symlink_llm(df_merged, processed_base_path)
 
     # Save the final DataFrame
     df_merged.to_parquet(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), index=False)
-    print(f"Symlinks recreated and saved to data/processed/modelcard_step4.parquet.")
+    print(f"Symlinks recreated and saved to data/processed/{data_type}_step4.parquet.")

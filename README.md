@@ -15,6 +15,7 @@ pip install -r requirements.txt
 
 ```bash
 echo "OPENAI_API_KEY='your_api_key'" > .env
+# echo "SEMANTIC_SCHOLAR_API_KEY='your_api_key'" > .env # Optional, use this to download semantic scholar dataset, and faster querying 
 ```
 
 
@@ -78,58 +79,63 @@ python -m src.data_localindexing.build_mini_s2orc_es --mode test --directory /u4
 # batch querying papers_index
 python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file titles.json --cache_file query_cache.json
 # getting full tables
-
-# fuzzy matching: elastic search for citation
-# buildup citation_index database
-bash src/data_localindexing/build_mini_citation_es.sh
-# batch querying citation_index
 ```
 
 3. Extract tables to local folder:
 ```bash
 python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
-
 python -m src.data_preprocess.step2_md2text # process downloaded github html (if any) to markdown
 python -m src.data_preprocess.step2_se_url_title # fetching title from bibtex, PDF url.
 python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
-bash src/data_localindexing/build_mini_s2orc_es.sh # (batch query command) # build up s2orc and batch querying. Input: modelcard_dedup_titles.json, Output: query_cache.parquet
+bash src/data_localindexing/build_mini_s2orc_es.sh # (batch query command) # build up s2orc and batch querying. 
 bash src/data_preprocess/step2_se_url_tab.sh # extract title & openaccessurl | use title to fetch table from semantic scholar dataset
-
 python -m src.data_preprocess.step2_get_html # download html
 python -m src.data_preprocess.step2_html_parsing # extract tables from html
-python -m src.data_preprocess.step2_integration_order > step2_integration_order_3.log # first html | then PDF? | finally llm polished table text
+mkdir logs
+python -m src.data_preprocess.step2_integration_order > logs/step2_integration_order_3.log # first html | then PDF? (no) | finally llm polished table text
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
-#cp -r llm_outputs/llm_markdown_table_results_aligned.csv llm_outputs/llm_markdown_table_results.csv
-TODO: (rerun, update arxiv_id, guarantee ```json ```markdown can be saved) python -m src.data_preprocess.step2_llm_save # save table into local csv
-
-# deprecated as we don't use PDF for extraction at this time
-#python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_tab and then test
+#cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results.parquet
+python -m src.data_preprocess.step2_llm_save # save table into local csv
 ```
+
+4. Label groundtruth for unionable search baselines:
 
 ```bash
-# produce groundtruth
-python -m src.data_gt.step3_pre_merge # merge all the table list into modelid file | modelcard_all_title_list + final_integration_with_paths -> modelcard_step3_merged
-python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device | modelcard_step2 + modelcard_step3_merged -> modelcard_step4
-TODO: bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph (need extra 200G)
-TODO: # query for citation graph
-TODO: python -m src.data_gt.step3_gt # build up groundtruth | modelcard_step4.parquet -> scilakeUnionBenchmark_by_ids.pickle
-
-#python -m src.data_preprocess.step2_CitationInfo #  get citations relation from graph edge .db
-# TODO: get tags arxiv id, seems nothing in tags... only shows on web...
+python -m src.data_gt.step3_pre_merge # merge all the table list into modelid file
+python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
+# (Or Optional) bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph (need extra 300G storage). | Then get citations relation from graph edge .db
+python -m src.data_gt.step3_overlap_rate # paper level: compute each two papers' overlap score
+# (Optional: we might deprecate sym) 
+python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
 ```
 
+Quality Control | Run some analysis
+```bash
+python -m src.data_analysis.qc_dedup > logs/qc_dedup.log # dedup raw tables, keep dedup in order hugging>github>html>llm | I: modelcard_step3_merged, O: modelcard_step3_dedup.parquet
+python -m src.data_analysis.qc_stats # stats | I: modelcard_step4_dedup, O: benchmark_results
+# (Optional) python -m src.data_analysis.qc_dc # double check whether the dedup and mapped logic is correct
+bash src/data_analysis/count_files.sh # obtain files count directly from folder | The count above should be smaller than files here.
+python -m src.data_analysis.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle files obtained from src.data_gt.step3_overlap_rate
+```
+
+Final gt!
+```bash
+python -m src.data_gt.step3_gt # build up groundtruth
+```
+
+5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
-bash src/data_symlink/ln_scilake_large.sh # symlink 4: dedupled_github_csvs|deduped_hugging_csvs|tables_output|llm_tables
 bash src/data_symlink/trick_tr.sh # trick: transpose csv in new folder
 bash src/data_symlink/trick_str.sh # trick: str value in new folder
 bash src/data_symlink/trick_tr_str.sh # trick: tr + str value in new folder
+bash src/data_symlink/ln_scilake_large.sh # symlink 4: dedupled_github_csvs|deduped_hugging_csvs|tables_output|llm_tables
 bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
 ```
 
+6. Run updated [starmie](https://github.com/DoraDong-2023/starmie_internal) scripts for finetuning and check performance
 ```bash
-# how to run starmie finetuning and checking
 bash prepare_sample.sh # sample 1000 samples from each resources folder
 bash check_empty.sh # filter out empty files (or low quality files later)
 bash scripts/step1_pretrain.sh # finetune contrastive learning
@@ -137,21 +143,17 @@ bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake 
 bash scripts/step3_search_hnsw.sh # data lake search!
 ```
 
-4. Label groundtruth for unionable search baselines:
-```bash
-python -m src.data_preprocess.step4 # process groundtruth (work for API, not work for dump data)
-```
-
-5. Analyze some statistics
+7. Analyze some statistics
 ```bash
 python -m src.data_preprocess.step1_analysis # get analysis on proportion of different links
-python -m src.data_preprocess.step1_parsetags # Parse tags into columns with name start with `card_tag_xx`
-python -m src.data_preprocess.step3_statistic_table # get statistic tables, not need to run step4, but require to run step3
 python -m src.data_preprocess.step3_save_starmie_results # analyze searching results of starmie
+TODO: add statistics analysis from dataset_processed.ipynb
 ```
 
 (Deprecated scripts: Previously we download pdfs and try to parse them. However, we find semantic scholar dataset includes it.)
 ```bash
+# deprecated as we don't use PDF for extraction at this time
+#python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_tab and then test
 python -m src.data_preprocess.step_down_pdf
 python -m src.data_preprocess.step_add_pdftab # Issue: deterministic PDF2table is not accurate enough. Try LLM based image extraction (not implemented here)
 python -m src.data_preprocess.step_down_tex # Issue: IP rate limit on accessing tex files, Possible solution: use arxiv bulk downloading
@@ -159,10 +161,11 @@ python -m src.data_preprocess.step_add_textab
 python -m src.data_preprocess.step_add_gittab
 python -m src.data_ingestion.tmp_extract_url # Update PDF url from extracted url (some don't have .pdf, need to extract from html or add)
 python -m src.data_ingestion.tmp_extract_table # Extract table/figures caption and cited text from s2orc dumped data, but don't contain text and figure detailed content!
+python -m src.data_preprocess.step4 # process groundtruth (work for API, not work for dump data)
+python -m src.data_preprocess.step2_Citation_Info
+# (Optional) python -m src.data_preprocess.step3_statistic_table # get statistic tables
+python -m src.data_preprocess.step1_parsetags # Parse tags into columns with name start with `card_tag_xx`
 ```
-
----
-Then run in [starmie]()
 
 
 ---
