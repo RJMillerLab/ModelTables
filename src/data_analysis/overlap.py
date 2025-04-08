@@ -1,6 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-04
+Last Modified: 2025-04-06
 Description: Analyze saved overlap scores and direct citation links to evaluate threshold decisions using precision-recall and KDE valley method, then visualize KDE distribution and histogram by class with multiple thresholds.
 """
 
@@ -15,6 +16,12 @@ from scipy.stats import ttest_ind
 from sklearn.metrics import roc_curve
 
 from scipy.stats import mannwhitneyu, ks_2samp
+
+# === Paths ===
+OVERLAP_RATE = "data/processed/modelcard_citation_overlap_rate.pickle"
+DIRECT_LABEL = "data/processed/modelcard_citation_direct_label.pickle"
+RESULT_DIR = "results/overlap_fig1"
+os.makedirs(RESULT_DIR, exist_ok=True)
 
 def otsu_threshold(values):
     """(NEW) Compute Otsu's threshold for 0-1 overlap scores."""
@@ -45,17 +52,11 @@ def otsu_threshold(values):
             threshold = (bin_edges[i] + bin_edges[i+1]) / 2
     return threshold
 
-# === Paths ===
-SCORE_PICKLE = "data/processed/modelcard_citation_overlap_by_paperId_score.pickle"
-DIRECT_PICKLE = "data/processed/modelcard_citation_direct_relation.pickle"
-RESULT_DIR = "results/overlap_fig1"
-os.makedirs(RESULT_DIR, exist_ok=True)
-
 # === Load data ===
-with open(SCORE_PICKLE, "rb") as f:
+with open(OVERLAP_RATE, "rb") as f:
     score_map = pickle.load(f)
 
-with open(DIRECT_PICKLE, "rb") as f:
+with open(DIRECT_LABEL, "rb") as f:
     direct_map = pickle.load(f)
 
 print("✅ Files loaded successfully\n")
@@ -261,7 +262,7 @@ axes[2].set_xlabel("Overlap Score")
 axes[2].set_ylabel("Frequency")
 axes[2].legend()
 
-plt.tight_layout()  # 避免子图文字重叠
+plt.tight_layout()
 hist_fig_path = os.path.join(RESULT_DIR, "score_histogram_3row_comparison.pdf")
 plt.savefig(hist_fig_path, format='pdf')
 plt.close()

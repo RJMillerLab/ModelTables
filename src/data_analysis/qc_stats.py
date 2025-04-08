@@ -1,183 +1,265 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-03
-Last Modified: 2025-04-05
-Description: Get statistics of tables in CSV files from different resources (optimized with joblib)
-             with additional model-level quality control. For each benchmark resource, two rows are generated:
-             one with deduped (weighted) statistics and one (labeled "(sym)") with raw statistics computed by processing
-             each CSV file instance (so if a file appears twice, its rows and columns are counted twice).
+Last Modified: 2025-04-07
+Description:
+  Get statistics of tables in CSV files from different resources (optimized with joblib)
+  with additional model-level quality control. For each benchmark resource, two rows are generated:
+  one with deduped (weighted) statistics and one (labeled "(sym)") with raw statistics computed by processing
+  each CSV file instance (so if a file appears twice, its rows and columns are counted twice).
+
+  2025‑04‑07 update:
+  - Add non‑empty / valid‑title stats.
+  - Compute a new column "all_title_list_valid" (using integration file) to filter valid titles.
+  - Retain external resource hyperparameters.
+  - Switch mode between "table_only" (grouped bar chart for #tables only)
+    and "all_hyper" (grid of charts for all hyperparameters).
+  - For grouped bar chart: Cluster 1 (Baseline/Fix) uses a green gradient;
+    Clusters 2–5 (Sym, Dedup, w/ title, w/ valid title) use a blue gradient.
+  - Additionally, save final results locally and plot #Cols, #Avg Rows, and Size(GB) for baseline as well.
 """
 
+import os
 import pandas as pd
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 from joblib import Parallel, delayed
-import os, ast
+from matplotlib.patches import Patch
 
+# Configuration
 INPUT_FILE = "data/processed/modelcard_step3_dedup.parquet"
-BENCHMARK_FILE = "data/analysis/benchmark_results.parquet"
-OUTPUT_ANALYSIS_DIR = "data/analysis"
+INTEGRATION_FILE = "data/processed/final_integration_with_paths.parquet"
+OUTPUT_DIR = "data/analysis"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+VALID_TITLE_PARQUET = os.path.join(OUTPUT_DIR, "all_title_list_valid.parquet")
 
-def get_valid_paths_from_series(series):
-    valid_paths = []
-    for item in series.dropna():
-        if isinstance(item, (list, tuple, np.ndarray)):
-            lst = item
-        else:
-            raise ValueError
-        valid_paths.extend([p for p in lst if isinstance(p, str) and os.path.exists(p)])
-    return valid_paths
+# Benchmark data (WDC removed)
+benchmark_data = [
+    ["SANTOS Small", 550, 6322, 6921, 0.45],
+    ["TUS Small", 1530, 14810, 4466, 1.00],
+    ["TUS Large", 5043, 54923, 1915, 1.50],
+    ["SANTOS Large", 11090, 123477, 7675, 11.00],
+    ["WDC", 50000000, 250000000, 14, 500.00]
+]
+
+RESOURCES = {
+    'hugging': ['hugging_table_list_dedup'],
+    'github': ['github_table_list_dedup'],
+    'html': ['html_table_list_mapped_dedup'],
+    'llm': ['llm_table_list_mapped_dedup']
+}
+
+BENCHMARK_NAMES = [x[0] for x in benchmark_data]  # For legend
+
 
 def process_csv_file(csv_file):
     try:
         df = pd.read_csv(csv_file)
-        return {"path": csv_file, "rows": df.shape[0], "cols": df.shape[1], "status": "valid"}, None
+        return {
+            'path': csv_file,
+            'rows': df.shape[0],
+            'cols': df.shape[1],
+            'size': os.path.getsize(csv_file)/(1024**3),
+            'status': 'valid'
+        }, None
     except Exception as e:
-        return None, f"Error reading {csv_file}: {e}"
+        return None, str(e)
 
-def get_statistics_table(df, csv_columns, n_jobs=8):
-    benchmarks = []
-    aggregate_valid_paths = set()
-    all_num_tables = 0
-    all_num_cols = 0
-    all_total_rows = 0
-    dedup_all_num_tables = 0
-    dedup_all_num_cols = 0
-    dedup_all_total_rows = 0
 
-    for benchmark_name, cols in csv_columns.items():
-        if benchmark_name != 'scilake-all':  # for scilake-all, we re-use the count for previous resources
-            # Collect raw valid paths (with duplicates)
-            raw_valid_paths = []
-            for col in cols:
-                raw_valid_paths.extend(get_valid_paths_from_series(df[col]))
-            #raw_valid_count = len(raw_valid_paths)
+def compute_resource_stats(df, resource):
+    col = RESOURCES[resource][0]
+    paths = df[col].explode()
+    valid_paths = paths[paths.apply(lambda x: isinstance(x, str) and os.path.exists(x))]
+    unique_paths = valid_paths.unique().tolist()
 
-            # Create frequency dictionary for raw valid paths (for deduped stats)
-            freq = {}
-            for p in raw_valid_paths:
-                freq[p] = freq.get(p, 0) + 1
+    dup_results = Parallel(n_jobs=-1)(
+        delayed(process_csv_file)(p)
+        for p in tqdm(valid_paths.tolist(), desc=f"[DUPLICATED] Processing {resource} files")
+    )
+    dup_valid_files = [r[0] for r in dup_results if r[0] and r[0]['status'] == 'valid']
 
-            # Deduplicate the valid paths, There exist duplicate paths only across rows
-            valid_paths = list(set(raw_valid_paths))
-            #dedup_valid_count = len(valid_paths)
-            aggregate_valid_paths.update(valid_paths)
+    dedup_results = Parallel(n_jobs=-1)(
+        delayed(process_csv_file)(p)
+        for p in tqdm(unique_paths, desc=f"[DEDUP] Processing {resource} files")
+    )
+    dedup_valid_files = [r[0] for r in dedup_results if r[0] and r[0]['status'] == 'valid']
 
-            # Process deduped valid paths (weighted by frequency)
-            results = Parallel(n_jobs=n_jobs)(
-                delayed(process_csv_file)(p) 
-                for p in tqdm(valid_paths, desc=f"Processing {benchmark_name}")
-            )
+    def calculate_metrics(file_list):
+        if not file_list:
+            return [0, 0, 0, 0]
+        total_cols = sum(f['cols'] for f in file_list)
+        total_rows = sum(f['rows'] for f in file_list)
+        avg_rows = int(total_rows / len(file_list))
+        total_size = sum(f['size'] for f in file_list)
+        return [len(file_list), total_cols, avg_rows, total_size]
 
-            valid_file_list = []
+    dup_metrics = calculate_metrics(dup_valid_files)
+    dedup_metrics = calculate_metrics(dedup_valid_files)
 
-            num_tables = 0
-            num_cols = 0
-            total_rows = 0
-            dedup_num_tables = 0
-            dedup_num_cols = 0
-            dedup_total_rows = 0
+    title_paths = list()
+    valid_title_paths = list()
+    # iterate over rows
+    for p_list, ht, hvt in zip(df[col], df['has_title'], df['has_valid_title']):
+        #if isinstance(p_list, (list, tuple, np.ndarray)):
+        if ht:
+            title_paths.extend([p for p in p_list if isinstance(p, str)])
+        if hvt:
+            valid_title_paths.extend([p for p in p_list if isinstance(p, str)])
+    title_paths_set = set(title_paths)
+    valid_title_paths_set = set(valid_title_paths)
 
-            for res, err in results:
-                if err:
-                    print(err)
-                elif res:
-                    status = res.get("status")
-                    if status == "valid":
-                        count = freq.get(res["path"], 1)
-                        valid_file_list.append(res["path"])
-                        num_tables += count
-                        dedup_num_tables += 1
-                        num_cols += count * res["cols"]
-                        dedup_num_cols += res["cols"]
-                        total_rows += count * res["rows"]
-                        dedup_total_rows += res["rows"]
-                    else:
-                        print(f"Invalid file: {res['path']}")
+    #title_count = sum(1 for p in unique_paths if p in title_paths_set)
+    #valid_title_count = sum(1 for p in unique_paths if p in valid_title_paths_set)
+    title_count_dedup = len(title_paths_set & set(unique_paths))
+    valid_title_count_dedup = len(valid_title_paths_set & set(unique_paths))
 
-            avg_rows = total_rows / num_tables if num_tables else 0
-            dedup_avg_rows = dedup_total_rows / dedup_num_tables if dedup_num_tables else 0
+    title_valid_files = [f for f in dedup_valid_files if f['path'] in title_paths_set]  ########
+    valid_title_valid_files = [f for f in dedup_valid_files if f['path'] in valid_title_paths_set]  ########
+    title_valid_metrics = calculate_metrics(title_valid_files)
+    valid_title_valid_metrics = calculate_metrics(valid_title_valid_files)
 
-            dedup_stats = {
-                "Benchmark": benchmark_name,
-                "# Tables": dedup_num_tables,
-                "# Cols": dedup_num_cols,
-                "Avg # Rows": int(dedup_avg_rows),
-                "Size (GB)": np.nan
-            }
-            raw_stats = {
-                "Benchmark": benchmark_name + " (sym)",
-                "# Tables": num_tables,
-                "# Cols": num_cols,
-                "Avg # Rows": int(avg_rows),
-                "Size (GB)": np.nan
-            }
-            benchmarks.append(dedup_stats)
-            benchmarks.append(raw_stats)
-
-            all_num_tables += num_tables
-            all_num_cols += num_cols
-            all_total_rows += total_rows
-            dedup_all_num_tables += dedup_num_tables
-            dedup_all_num_cols += dedup_num_cols
-            dedup_all_total_rows += dedup_total_rows
-
-            base_name = benchmark_name.split('-')[-1]
-            with open(os.path.join(OUTPUT_ANALYSIS_DIR, f"valid_file_list_{base_name}.txt"), "w") as f:
-                for path in valid_file_list:
-                    f.write(path + "\n")
-
-    avg_rows_all = all_total_rows / all_num_tables if all_num_tables else 0
-    dedup_avg_rows_all = dedup_all_total_rows / dedup_all_num_tables if dedup_all_num_tables else 0
-
-    benchmarks.append({
-        "Benchmark": "scilake-all",
-        "# Tables": dedup_all_num_tables,
-        "# Cols": dedup_all_num_cols,
-        "Avg # Rows": int(dedup_avg_rows_all),
-        "Size (GB)": np.nan
-    })
-    benchmarks.append({
-        "Benchmark": "scilake-all (sym)",
-        "# Tables": all_num_tables,
-        "# Cols": all_num_cols,
-        "Avg # Rows": int(avg_rows_all),
-        "Size (GB)": np.nan
-    })
-
-    benchmark_data = {  # borrowed from starmie
-        "Benchmark": ["SANTOS Small", "TUS Small", "TUS Large", "SANTOS Large", "WDC"],
-        "# Tables": [550, 1530, 5043, 11090, 50000000],
-        "# Cols": [6322, 14810, 54923, 123477, 250000000],
-        "Avg # Rows": [6921, 4466, 1915, 7675, 14],
-        "Size (GB)": [0.45, 1, 1.5, 11, 500]
+    return {
+        f"{resource}-dup": dup_metrics,
+        f"{resource}-dedup": dedup_metrics,
+        f"{resource}-title_metrics": title_valid_metrics,
+        f"{resource}-valid_metrics": valid_title_valid_metrics,
+        #f"{resource}-title": title_count,
+        f"{resource}-title-dedup": title_count_dedup,
+        #f"{resource}-valid": valid_title_count,
+        f"{resource}-valid-dedup": valid_title_count_dedup
     }
 
-    benchmark_df = pd.DataFrame(benchmark_data)
-    benchmark_df = pd.concat([benchmark_df, pd.DataFrame(benchmarks)], ignore_index=True)
-    return benchmark_df
+"""def create_combined_results(benchmark_data, resource_stats):
+    columns = ["Benchmark", "# Tables", "# Cols", "Avg # Rows", "Size (GB)"]
+    df = pd.DataFrame(benchmark_data, columns=columns)
+    for resource in RESOURCES:
+        df = pd.concat([
+            df,
+            pd.DataFrame([[f"scilake-{resource}"] + list(resource_stats[f"{resource}-dedup"])], columns=columns),
+            pd.DataFrame([[f"scilake-{resource} (duplicated)"] + list(resource_stats[f"{resource}-dup"])], columns=columns),
+            pd.DataFrame([[f"scilake-{resource}-title-dedup"] + list(resource_stats[f"{resource}-title_metrics"])], columns=columns),
+            pd.DataFrame([[f"scilake-{resource}-valid-dedup"] + list(resource_stats[f"{resource}-valid_metrics"])], columns=columns),
+        ], ignore_index=True)
+    return df"""
+
+def create_combined_results(benchmark_data, resource_stats):
+    columns = ["Benchmark", "# Tables", "# Cols", "Avg # Rows", "Size (GB)"]
+    df = pd.DataFrame(benchmark_data, columns=columns)
+    for resource in RESOURCES:
+        unique_row = pd.DataFrame([[f"scilake-{resource}"] + list(resource_stats[f"{resource}-dedup"])], columns=columns)
+        symlink_row = pd.DataFrame([[f"scilake-{resource} (duplicated)"] + list(resource_stats[f"{resource}-dup"])], columns=columns)
+        w_title_row = pd.DataFrame([[f"scilake-{resource}-title-dedup"] + list(resource_stats[f"{resource}-title_metrics"])], columns=columns)
+        w_valid_row = pd.DataFrame([[f"scilake-{resource}-valid-dedup"] + list(resource_stats[f"{resource}-valid_metrics"])], columns=columns)
+        agg_values = []
+        for i in range(4):
+            val = (resource_stats[f"{resource}-dup"][i] +
+                   resource_stats[f"{resource}-dedup"][i] +
+                   resource_stats[f"{resource}-title_metrics"][i] +
+                   resource_stats[f"{resource}-valid_metrics"][i])
+            agg_values.append(val)
+        #all_row = pd.DataFrame([[f"scilake-{resource}-all"] + agg_values], columns=columns)
+        #df = pd.concat([df, unique_row, symlink_row, w_title_row, w_valid_row, all_row], ignore_index=True)
+        df = pd.concat([df, unique_row, symlink_row, w_title_row, w_valid_row], ignore_index=True)
+    return df
+
+def annotate_bars(ax):
+    for p in ax.patches:
+        height = p.get_height()
+        if height > 0:
+            ax.annotate(f'{int(height)}',
+                        (p.get_x() + p.get_width() / 2, height),
+                        ha='center', va='bottom', fontsize=8, rotation=0)
+
+def plot_metric(df, metric, filename):
+    palette_baseline = ["#8b2e2e", "#b74a3c", "#d96e44", "#f29e4c", "#FFBE5F"]
+    palette_resource = ["#486f90", "#4e8094", "#50a89d", "#a5d2bc"]
+
+    bar_width = 0.15
+    gap = 0.4
+    group_width = len(RESOURCES) * bar_width + gap
+    clusters = ['baseline', 'duplicated', 'dedup', 'w/ title', 'w/ valid title']
+    resources = list(RESOURCES.keys())
+
+    cluster_key_map = {
+        'duplicated': " (duplicated)",
+        'dedup': "",              
+        'w/ title': "-title-dedup",
+        'w/ valid title': "-valid-dedup"
+    }
+
+    heights = []
+    colors = []
+    positions = []
+    for i, val in enumerate(df.iloc[:5][metric]):
+        positions.append(i * bar_width)
+        heights.append(val)
+        colors.append(palette_baseline[i])
+    for ci, cluster in enumerate(clusters[1:], start=1):
+        for ri, resource in enumerate(resources):
+            suffix = cluster_key_map[cluster]
+            idx = f"scilake-{resource}{suffix}"
+            val = df[df['Benchmark'] == idx][metric].values
+            if len(val):
+                positions.append(ci * group_width + ri * bar_width)
+                heights.append(val[0])
+                colors.append(palette_resource[ri])
+    xtick_positions = [0 + (4 - 1) * bar_width / 2] + [
+        i * group_width + (len(resources) - 1) * bar_width / 2 for i in range(1, len(clusters))
+    ]
+    xtick_labels = clusters
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    ax.bar(positions, heights, width=bar_width, color=colors)
+    ax.set_yscale('log')
+    ax.set_xticks(xtick_positions)
+    ax.set_xticklabels(xtick_labels, fontsize=12)
+    ax.set_ylabel(f"{metric} (log scale)", fontsize=14)
+    ax.set_title(f"{metric}", fontsize=16)
+    annotate_bars(ax)
+
+    legend1 = [Patch(facecolor=palette_baseline[i], label=BENCHMARK_NAMES[i])
+               for i in range(len(BENCHMARK_NAMES))]
+    legend2 = [Patch(facecolor=palette_resource[i], label=resources[i])
+               for i in range(len(resources))]
+    leg1 = ax.legend(handles=legend1, title="Baseline", loc='upper left', bbox_to_anchor=(1.01, 1)) 
+    ax.add_artist(leg1)
+    leg2 = ax.legend(handles=legend2, title="Resource", loc='lower left', bbox_to_anchor=(1.01, 0))
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300, bbox_inches='tight')
+    plt.close()
 
 def main():
     df = pd.read_parquet(INPUT_FILE)
+    df_integration = pd.read_parquet(INTEGRATION_FILE)
 
-    csv_columns = {
-        'scilake-hugging': ['hugging_table_list_dedup'],
-        'scilake-github': ['github_table_list_dedup'],
-        'scilake-html': ['html_table_list_mapped_dedup'],
-        'scilake-llm': ['llm_table_list_mapped_dedup'],
-        'scilake-all': ['hugging_table_list_dedup', 'github_table_list_dedup',
-                         'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup']
-    }
+    valid_titles = set(df_integration['query'].dropna().str.strip())
+    df['all_title_list_valid'] = df['all_title_list'].apply(
+        lambda x: [t for t in x if t in valid_titles] if isinstance(x, (list, np.ndarray)) else []
+    )
+    df['has_title'] = df['all_title_list'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
+    df['has_valid_title'] = df['all_title_list_valid'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
+    df.to_parquet(VALID_TITLE_PARQUET, index=False)
+    print(f"Saved valid‑title list to {VALID_TITLE_PARQUET}")
 
-    print("⚠️ Step 1: Filtering valid CSV paths...")
+    resource_stats = {}
+    for resource in RESOURCES:
+        print(f"\nProcessing {resource}...")
+        stats = compute_resource_stats(df, resource)
+        resource_stats.update(stats)
 
-    os.makedirs(OUTPUT_ANALYSIS_DIR, exist_ok=True)
+    results_df = create_combined_results(benchmark_data, resource_stats)
+    results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
+    results_df.to_parquet(results_path, index=False)
+    print(f"\nSaved results to {results_path}")
 
-    benchmark_df = get_statistics_table(df, csv_columns, n_jobs=-1)
-
-    benchmark_df.to_parquet(BENCHMARK_FILE, index=False)
-
-    print("✅ Statistics saved successfully.")
+    plot_metric(results_df, "# Tables", "benchmark_tables.pdf")
+    plot_metric(results_df, "# Cols", "benchmark_cols.pdf")
+    plot_metric(results_df, "Avg # Rows", "benchmark_avg_rows.pdf")
+    print(f"Saved figure to {OUTPUT_DIR}/benchmark_tables.pdf")
+    print(f"Saved figure to {OUTPUT_DIR}/benchmark_cols.pdf")
+    print(f"Saved figure to {OUTPUT_DIR}/benchmark_avg_rows.pdf")
 
 if __name__ == "__main__":
     main()

@@ -84,25 +84,36 @@ python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_d
 3. Extract tables to local folder:
 ```bash
 python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
+# I: data/processed + modelcard_step1.parquet, github_readmes_info.parquet, downloaded_github_readmes/, config.yaml | O: modelcard_step2.parquet, deduped_hugging_csvs/, hugging_deduped_mapping.json, deduped_github_csvs/, md_to_csv_mapping.json
 python -m src.data_preprocess.step2_md2text # process downloaded github html (if any) to markdown
+# I: data/downloaded_github_readmes/ → O: data/downloaded_github_readmes_processed/
 python -m src.data_preprocess.step2_se_url_title # fetching title from bibtex, PDF url.
+# I: modelcard_step1.parquet, github_readme_cache.parquet, github_readmes_processed/, pdf_link + github_link URLs → O: modelcard_all_title_list.parquet, github_readme_cache_update.parquet, github_extraction_cache.json, all_links_with_category.csv
 python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
+# I: modelcard_all_title_list.parquet → O: modelcard_dedup_titles.json, modelcard_title_query_results.json, modelcard_all_title_list_mapped.parquet
 bash src/data_localindexing/build_mini_s2orc_es.sh # (batch query command) # build up s2orc and batch querying. 
+# I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
 bash src/data_preprocess/step2_se_url_tab.sh # extract title & openaccessurl | use title to fetch table from semantic scholar dataset
+# I: query_cache.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_extracted_lines.parquet, merged_df.parquet
 python -m src.data_preprocess.step2_get_html # download html
+# I: extracted_annotations.parquet, arxiv_titles_cache.json → O: title2arxiv_new_cache.json, arxiv_html_cache.json, missing_titles_tmp.txt, arxiv_fulltext_html/*.html
 python -m src.data_preprocess.step2_html_parsing # extract tables from html
+# I: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional) → O: html_table.parquet, data/processed/tables_output/*.csv
 mkdir logs
 python -m src.data_preprocess.step2_integration_order > logs/step2_integration_order_3.log # first html | then PDF? (no) | finally llm polished table text
+# I: title2arxiv_new_cache.json, html_table.parquet, extracted_annotations.parquet, pdf_download_cache.json → O: before_llm_output.parquet, data/processed/batch_input.jsonl, data/processed/batch_output.jsonl, data/processed/llm_markdown_table_results.parquet
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
 #cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results.parquet
 python -m src.data_preprocess.step2_llm_save # save table into local csv
+# I: data/processed/llm_markdown_table_results.parquet → O: data/processed/llm_tables/*.csv, data/processed/final_integration_with_paths.parquet
 ```
 
 4. Label groundtruth for unionable search baselines:
 
 ```bash
 python -m src.data_gt.step3_pre_merge # merge all the table list into modelid file
+# I: data/processed/final_integration_with_paths.parquet, modelcard_all_title_list.parquet → O: modelcard_step3_merged.parquet
 python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
 # (Or Optional) bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph (need extra 300G storage). | Then get citations relation from graph edge .db
 python -m src.data_gt.step3_overlap_rate # paper level: compute each two papers' overlap score
@@ -113,13 +124,15 @@ Quality Control | Run some analysis
 ```bash
 python -m src.data_analysis.qc_dedup > logs/qc_dedup.log # dedup raw tables, keep dedup in order hugging>github>html>llm | I: modelcard_step3_merged, O: modelcard_step3_dedup.parquet
 python -m src.data_analysis.qc_stats # stats | I: modelcard_step4_dedup, O: benchmark_results
+python -m src.data_analysis.qc_stats_fig
 # (Optional) python -m src.data_analysis.qc_dc # double check whether the dedup and mapped logic is correct
 bash src/data_analysis/count_files.sh # obtain files count directly from folder | The count above should be smaller than files here.
 ```
 
 Final gt!
 ```bash
-# (Optional: we might deprecate sym) python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
+python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
+# I: modelcard_step2.parquet, modelcard_step3_merged.parquet, md_to_csv_mapping.json, hugging_deduped_mapping.json → O: modelcard_step4.parquet + sym_*_csvs_*
 python -m src.data_gt.step3_gt # build up groundtruth
 ```
 

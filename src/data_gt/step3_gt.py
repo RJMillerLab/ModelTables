@@ -35,8 +35,9 @@ import pandas as pd
 import pickle
 from tqdm import tqdm
 from enum import Enum
-from collections import defaultdict
+from collections import defaultdict, Counter
 from typing import Dict, Iterable, Set
+from joblib import Parallel, delayed
 
 # === Configuration ===
 DATA_DIR = "data/processed"
@@ -51,7 +52,12 @@ FILES = {
     "step3_merged": f"{DATA_DIR}/modelcard_step3_merged.parquet",
     "integration": f"{DATA_DIR}/final_integration_with_paths.parquet",
     "title_list": f"{DATA_DIR}/modelcard_all_title_list.parquet",
+    "symlink_mapping": f"{DATA_DIR}/symlink_mapping.pickle"
 }
+
+MODEL_GT_PATH = f"{GT_DIR}/groundtruth_model_pairs.pickle"  ########
+MAPPED_GT_PATH = f"{GT_DIR}/groundtruth_mapped_pairs.pickle"  ########
+CSV_PAIR_FREQ_PATH = f"{GT_DIR}/csv_pair_frequency.pickle"  ########
 
 OUTPUT_GT_PATH = f"{GT_DIR}/scilakeUnionBenchmark_by_ids.pickle"
 DISCOUNT_RATE = 0.5
@@ -86,8 +92,48 @@ def load_table_source(mode: TableSourceMode):
     df = pd.read_parquet(path)
     return df.set_index("modelId", drop=False)
 
-# ===== BUSINESS LOGIC ====================================================== #
+def load_symlink_mapping():
+    path = FILES["symlink_mapping"]
+    print(f"Loading symlink mapping from: {path}")
+    with open(path, "rb") as f:
+        mapping = pickle.load(f)
+    return mapping
 
+# ===== HELPER FUNCTIONS FOR PARALLEL PROCESSING ============================
+def process_model_pair(pair, df_tables, use_symlink):
+    """Process a single model pair to extract CSV pair edges.
+    Returns a tuple: ((m1, m2), set_of_csv_edges)
+    """
+    m1, m2 = pair
+    csv_list_m1 = []
+    csv_list_m2 = []
+    if m1 in df_tables.index:
+        csv_list_m1 = extract_csv_list(df_tables.loc[m1], use_symlink)
+    if m2 in df_tables.index:
+        csv_list_m2 = extract_csv_list(df_tables.loc[m2], use_symlink)
+    union_csv = sorted(set(csv_list_m1).union(set(csv_list_m2)))
+    csv_edges = set()
+    for i in range(len(union_csv)):
+        for j in range(i + 1, len(union_csv)):
+            edge = (union_csv[i], union_csv[j])
+            csv_edges.add(edge)
+    return (pair, csv_edges)
+
+def map_csv_edges(result, symlink_map):
+    """Map CSV symlink edges back to their real paths.
+    result: ((m1, m2), csv_edges)
+    Returns: ((m1, m2), new_csv_edges)
+    """
+    pair, csv_edges = result
+    new_csv_edges = set()
+    for csv_edge in csv_edges:
+        csv1, csv2 = csv_edge
+        real_csv1 = symlink_map.get(csv1, csv1)
+        real_csv2 = symlink_map.get(csv2, csv2)
+        new_csv_edges.add((real_csv1, real_csv2))
+    return (pair, new_csv_edges)
+
+# ===== BUSINESS LOGIC ====================================================== #
 def extract_csv_list(
     row: pd.Series,
     use_symlink: bool,
@@ -127,7 +173,7 @@ def build_ground_truth(
     tmp_relationships = load_relationships(rel_mode)
 
     new_relationships = defaultdict(set)
-    for pair, score in tmp_relationships.items():
+    for pair, score in tqdm(tmp_relationships.items(), desc="Filtering relationships"):
         p1, p2 = pair
         #if p1!=p2: # we could include self-loop
         if rel_mode in ['direct_label', 'overlap_label']:
@@ -150,14 +196,14 @@ def build_ground_truth(
 
     # title → modelIds
     title_to_modelIds = defaultdict(set)
-    for _, row in df_titles_exploded.iterrows():
+    for _, row in tqdm(df_titles_exploded.iterrows(), total=len(df_titles_exploded), desc="Mapping titles to modelIds"):  ######## Added tqdm here
         title = row["all_title_list"]
         if pd.notna(title):
             title_to_modelIds[title.strip()].add(row["modelId"])
 
     # paperId → modelIds
     paperId_to_modelIds = defaultdict(set)
-    for _, row in df_metadata.iterrows():
+    for _, row in tqdm(df_metadata.iterrows(), total=len(df_metadata), desc="Mapping paperIds to modelIds"):  ######## Added tqdm here
         pid = row["corpusid"] # actually this is paperId
         title = row["query"]
         if pd.notna(pid) and pd.notna(title):
@@ -171,7 +217,7 @@ def build_ground_truth(
     # ==== Step 1: Build model pair set without weighting ====
     model_pairs = set()
     # 1.1 Intra-paper: Build model pairs within the same paper
-    for pid, models in paperId_to_modelIds.items():
+    for pid, models in tqdm(paperId_to_modelIds.items(), desc="Building intra-paper model pairs"):  ######## Added tqdm here
         models = list(models)
         n = len(models)
         # self-loop of model level
@@ -184,7 +230,7 @@ def build_ground_truth(
                     pair_key = tuple(sorted((models[i], models[j])))
                     model_pairs.add(pair_key)
     # 1.2 Inter-paper: Build model pairs between different papers based on paper relationships
-    for p1, related_papers in paperid_relationships.items():
+    for p1, related_papers in tqdm(paperid_relationships.items(), desc="Building inter-paper model pairs"):  ######## Added tqdm here
         models_p1 = paperId_to_modelIds.get(p1, set())
         for p2 in related_papers:
             models_p2 = paperId_to_modelIds.get(p2, set())
@@ -192,9 +238,10 @@ def build_ground_truth(
                 for m2 in models_p2:
                     pair_key = tuple(sorted((m1, m2)))
                     model_pairs.add(pair_key)
+    print(f"Total model pairs to process: {len(model_pairs)}")
 
     # ==== Step 2: For each model pair, compute CSV weight based on table information ====
-    groundtruth_pairs = set()
+    """groundtruth_pairs = set()
     for m1, m2 in model_pairs:
         csv_list_m1 = []
         csv_list_m2 = []
@@ -202,22 +249,71 @@ def build_ground_truth(
             csv_list_m1 = extract_csv_list(df_tables.loc[m1], use_symlink)
         if m2 in df_tables.index:
             csv_list_m2 = extract_csv_list(df_tables.loc[m2], use_symlink)
-        union_csv = sorted(set(csv_list_m1).union(set(csv_list_m2)))
+        union_csv = sorted(set(csv_list_m1).union(set(csv_list_m2))) # only for this step we can union
         csv_edges = set()
-        for i in range(len(union_csv) - 1):
-            edge = (union_csv[i], union_csv[i + 1])
-            csv_edges.add(edge)
-        groundtruth_pairs.add(((m1, m2), csv_edges))
-    # because we use set, we can only use symlink
+        for i in range(len(union_csv)):
+            for j in range(i + 1, len(union_csv)):
+                edge = (union_csv[i], union_csv[j])
+                csv_edges.add(edge)
+        groundtruth_pairs.add(((m1, m2), csv_edges))"""
+    model_pair_results = Parallel(n_jobs=-1)(
+        delayed(process_model_pair)(pair, df_tables, use_symlink)
+        for pair in tqdm(list(model_pairs), desc="Processing model pairs", leave=True)  ######## Added tqdm with joblib
+    )
+    # Save intermediate model-level groundtruth pairs ########
+    with open(MODEL_GT_PATH, "wb") as f:
+        pickle.dump(model_pair_results, f)
+    print(f"Intermediate model-level groundtruth pairs saved to {MODEL_GT_PATH}")
+    # because we use set, we can only use symlink above
     # ==== TODO: Additional Checks ====
     
-    groundtruth_pairs = list(groundtruth_pairs)
-    # TODO: if use symlink, map back to true csv paths and save
+    # ==== Step 2.5: Map symlink paths back to real CSV paths (if using symlink) ====
+    if use_symlink:
+        symlink_map = load_symlink_mapping()
+        """new_groundtruth_pairs = []
+        for (m1, m2), csv_edges in tqdm(groundtruth_pairs, desc="Mapping symlinks to real paths"):
+            new_csv_edges = set()
+            for csv_edge in csv_edges:
+                csv1, csv2 = csv_edge
+                real_csv1 = symlink_map.get(csv1, csv1)
+                real_csv2 = symlink_map.get(csv2, csv2)
+                new_csv_edges.add((real_csv1, real_csv2))
+            new_groundtruth_pairs.append(((m1, m2), new_csv_edges))
+        groundtruth_pairs = new_groundtruth_pairs"""
+        mapped_results = Parallel(n_jobs=-1)(
+            delayed(map_csv_edges)(result, symlink_map)
+            for result in tqdm(model_pair_results, desc="Mapping CSV edges", leave=True)  ########
+        )
+    else:
+        mapped_results = model_pair_results
+    # Save intermediate mapped groundtruth pairs ########
+    with open(MAPPED_GT_PATH, "wb") as f:
+        pickle.dump(mapped_results, f)
+    print(f"Intermediate mapped groundtruth pairs saved to {MAPPED_GT_PATH}")
+
+    # ==== Step 2.6: Count CSV pair frequencies at CSV pair level ====
+    csv_pair_counter = Counter()
+    for _, csv_edges in mapped_results:
+        for edge in csv_edges:
+            csv_pair_counter[edge] += 1
+    # Save CSV pair frequency counts ########
+    with open(CSV_PAIR_FREQ_PATH, "wb") as f:
+        pickle.dump(csv_pair_counter, f)
+    print(f"CSV pair frequency counts saved to {CSV_PAIR_FREQ_PATH}")
+    print(f"Total unique CSV pairs: {len(csv_pair_counter)}")  ########
+
+    #groundtruth_pairs = list(groundtruth_pairs)
     # ==== Step 3: Save the groundtruth pairs ====
-    os.makedirs(os.path.dirname(OUTPUT_GT_PATH), exist_ok=True)
+    """os.makedirs(os.path.dirname(OUTPUT_GT_PATH), exist_ok=True)
     with open(OUTPUT_GT_PATH, "wb") as f:
         pickle.dump(groundtruth_pairs, f)
-    print(f"✅ Groundtruth saved to {OUTPUT_GT_PATH}")
+    print(f"✅ Groundtruth saved to {OUTPUT_GT_PATH}")"""
+    # ==== Step 3: Save the final groundtruth pairs (model pair level with CSV edges) ====
+    # Here we save the mapped_results as the final groundtruth
+    os.makedirs(os.path.dirname(OUTPUT_GT_PATH), exist_ok=True)
+    with open(OUTPUT_GT_PATH, "wb") as f:
+        pickle.dump(mapped_results, f)
+    print(f"✅ Final groundtruth saved to {OUTPUT_GT_PATH}")
 
 if __name__ == "__main__":
     import argparse

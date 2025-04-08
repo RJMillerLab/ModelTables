@@ -16,6 +16,9 @@ from shutil import copytree
 import shutil
 from src.data_ingestion.readme_parser import MarkdownHandler
 from src.utils import load_data, load_config
+import pickle
+
+global_symlink_mapping = {}
 
 def create_symlinks_generic(df, processed_base_path, input_col, output_subfolder, link_tag, output_col, use_abspath=False):
     """
@@ -53,9 +56,11 @@ def create_symlinks_generic(df, processed_base_path, input_col, output_subfolder
                 os.symlink(target_path, link_path)
             except Exception as e:
                 print(f"Error creating symlink for {orig_path}: {e}")
-            symlink_list.append(link_path)
+            relative_link = link_path[link_path.index("data/processed/"):] if "data/processed/" in link_path else link_path
+            symlink_list.append(relative_link)
+            global_symlink_mapping[relative_link] = target_path
         # Convert paths to be relative starting from "data/processed"
-        symlink_list = [p[p.index("data/processed/"):] if "data/processed/" in p else p for p in symlink_list]
+        #symlink_list = [p[p.index("data/processed/"):] if "data/processed/" in p else p for p in symlink_list]
         df.at[i, output_col] = symlink_list
     return df
 
@@ -103,3 +108,8 @@ if __name__ == "__main__":
     # Save the final DataFrame
     df_merged.to_parquet(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), index=False)
     print(f"Symlinks recreated and saved to data/processed/{data_type}_step4.parquet.")
+
+    mapping_path = os.path.join(processed_base_path, "symlink_mapping.pickle")
+    with open(mapping_path, "wb") as f:
+        pickle.dump(global_symlink_mapping, f)
+    print(f"Symlink mapping saved to {mapping_path}")
