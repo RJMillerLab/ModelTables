@@ -139,10 +139,11 @@ python -m src.data_gt.step3_gt # build up groundtruth
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
+bash src/data_symlink/ln_scilake_large.sh # symlink 4: dedupled_github_csvs|deduped_hugging_csvs|tables_output|llm_tables
+# when fixed four folders, keep data augmentation by below tricks scripts
 bash src/data_symlink/trick_tr.sh # trick: transpose csv in new folder
 bash src/data_symlink/trick_str.sh # trick: str value in new folder
 bash src/data_symlink/trick_tr_str.sh # trick: tr + str value in new folder
-bash src/data_symlink/ln_scilake_large.sh # symlink 4: dedupled_github_csvs|deduped_hugging_csvs|tables_output|llm_tables
 bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
 ```
 

@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-03
-Last Modified: 2025-04-03
+Last Modified: 2025-04-08
 Description: Compute the overlap rate of citation and citing papers based on paperId, and save:
 - pairwise overlap scores
 - thresholded related paper pairs
@@ -15,13 +15,14 @@ import pickle
 from tqdm import tqdm
 from collections import defaultdict
 from itertools import combinations
+import numpy as np
+from scipy.sparse import csr_matrix, lil_matrix
 
 # === Configuration ===
 INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet"
-OVERLAP_RATE = "data/processed/modelcard_citation_overlap_rate.pickle"
-#OVERLAP_LABEL = "data/processed/modelcard_citation_overlap_label.pickle"
-DIRECT_LABEL = "data/processed/modelcard_citation_direct_label.pickle"
-THRESHOLD = 0.6
+OVERLAP_MATRIX = "data/processed/modelcard_citation_overlap_rate.pickle"
+DIRECT_MATRIX = "data/processed/modelcard_citation_direct_label.pickle"
+#THRESHOLD = 0.6
 MODE = "reference"  # or "citation"
 
 def load_paperId_lists(df, mode):
@@ -37,88 +38,96 @@ def load_paperId_lists(df, mode):
         paperId_to_ids[pid] = set(id_list)
     return paperId_to_ids
 
-def compute_overlap_scores(paperId_to_ids):
-    score_map = {}
-    #related_map = defaultdict(set)
-    paper_items = list(paperId_to_ids.items())
+def compute_overlap_matrix(paperId_to_ids):
+    paper_index = sorted(paperId_to_ids.keys())
+    n = len(paper_index)
+    score_matrix = np.zeros((n, n), dtype=np.float32)
+    for i in tqdm(range(n), desc="Computing overlap matrix"):
+        refs_i = set(paperId_to_ids[paper_index[i]])
+        for j in range(i, n):
+            refs_j = set(paperId_to_ids[paper_index[j]])
+            intersection = refs_i & refs_j
+            union = refs_i | refs_j
+            if union:
+                score = len(intersection) / len(union)
+            else:
+                score = 0.0
+            score_matrix[i, j] = score
+            score_matrix[j, i] = score
+    score_csr = csr_matrix(score_matrix)
+    return {
+        "paper_index": paper_index,
+        "score_matrix": score_csr
+    }
 
-    for (pid1, set1), (pid2, set2) in tqdm(combinations(paper_items, 2), total=len(paper_items)*(len(paper_items)-1)//2):
-        inter = len(set1 & set2)
-        union = len(set1) + len(set2)
-        if union == 0:
-            score = 0
-        else:
-            score = (2 * inter) / union
-        score_map[(pid1, pid2)] = score
-        #if score >= THRESHOLD:
-            #related_map[pid1].add(pid2)
-            #related_map[pid2].add(pid1)
-    return score_map
-    #return score_map, related_map
-
-def extract_direct_links(df, all_paper_pairs=None):
-    direct_score_map = {}
-    paper_id_set = set(df["paperId"].dropna().unique())
+def compute_direct_matrix(df):
     paperId_to_reference = load_paperId_lists(df, mode="reference")
     paperId_to_citation = load_paperId_lists(df, mode="citation")
-    assert len(paperId_to_reference) > 0, "reference paperId list is empty"
-    for pid, cited_set in paperId_to_reference.items():
-        for cited_pid in cited_set:
-            if cited_pid in paper_id_set:
-                pair = tuple(sorted((pid, cited_pid)))
-                direct_score_map[pair] = 1.0
-    for pid, citing_set in paperId_to_citation.items():
-        for citing_pid in citing_set:
-            if citing_pid in paper_id_set:
-                pair = tuple(sorted((pid, citing_pid)))
-                direct_score_map[pair] = 1.0
-    if all_paper_pairs:
-        for pair in all_paper_pairs:
-            if pair not in direct_score_map:
-                direct_score_map[pair] = 0.0  ########
-    return direct_score_map
+    paper_ids_set = set(paperId_to_reference.keys()).union(set(paperId_to_citation.keys()))
+    paper_index = sorted(paper_ids_set)
+    n = len(paper_index)
+    direct_matrix = np.zeros((n, n), dtype=np.float32)
+    for i in tqdm(range(n), desc="Computing direct matrix"):
+        pid_i = paper_index[i]
+        refs_i = paperId_to_reference.get(pid_i, set()) | paperId_to_citation.get(pid_i, set())
+        for j in range(i, n):
+            pid_j = paper_index[j]
+            refs_j = paperId_to_reference.get(pid_j, set()) | paperId_to_citation.get(pid_j, set())
+            if (pid_j in refs_i) or (pid_i in refs_j):
+                score = 1.0
+            else:
+                score = 0.0
+            direct_matrix[i, j] = direct_matrix[j, i] = score
+    score_csr = csr_matrix(direct_matrix)
+    return {
+        "paper_index": paper_index,
+        "score_matrix": score_csr
+    }
 
 def main():
     df = pd.read_parquet(INPUT_PARQUET)
     print(f"Loaded {len(df)} rows from citation file.")
     paperId_to_ids = load_paperId_lists(df, MODE)
-    all_paper_ids = list(df["paperId"].dropna().unique())
-    all_pairs = [tuple(sorted(p)) for p in combinations(all_paper_ids, 2)]
-    #print(paperId_to_ids)
+    
+    overlap_data = compute_overlap_matrix(paperId_to_ids)
+    direct_data = compute_direct_matrix(df)
 
-    print(f"Prepared paperId sets for {len(paperId_to_ids)} papers.")
-    print("Computing overlap scores and thresholded relationships...")
-    #score_map, related_map = compute_overlap_scores(paperId_to_ids)
-    score_map = compute_overlap_scores(paperId_to_ids)
+    overlap_index = overlap_data["paper_index"]
+    direct_index = direct_data["paper_index"]
 
-    print("Extracting direct citation relationships...")
-    direct_map = extract_direct_links(df, all_paper_pairs=all_pairs)
+    if overlap_index != direct_index:
+        print("Index mismatch detected! Aligning direct matrix to overlap matrix index...")
+        overlap_map = {pid: i for i, pid in enumerate(overlap_index)}
+        # create a mapping for overlap index to direct index
+        n = len(overlap_index)
+        new_direct_matrix = np.zeros((n, n), dtype=np.float32)
+        direct_map = {pid: i for i, pid in enumerate(direct_index)}
+        for pid in overlap_index:
+            if pid in direct_map:
+                i_new = overlap_map[pid]
+                i_old = direct_map[pid]
+                new_direct_matrix[i_new, :] = direct_data["score_matrix"][i_old, :]
+        direct_data["score_matrix"] = new_direct_matrix
+        direct_data["paper_index"] = overlap_index  ########
 
-    os.makedirs(os.path.dirname(OVERLAP_RATE), exist_ok=True)
-    with open(OVERLAP_RATE, "wb") as f:
-        pickle.dump(score_map, f)
-    #with open(OVERLAP_LABEL, "wb") as f:
-    #    pickle.dump(related_map, f)
-    with open(DIRECT_LABEL, "wb") as f:
-        pickle.dump(direct_map, f)
+    os.makedirs(os.path.dirname(OVERLAP_MATRIX), exist_ok=True)
+    with open(OVERLAP_MATRIX, "wb") as f:
+        pickle.dump(overlap_data, f)
+    with open(DIRECT_MATRIX, "wb") as f:
+        pickle.dump(direct_data, f)
 
     print("✅ Done. All data saved:")
-    print(f"  - Overlap scores:      {OVERLAP_RATE}")
-    #print(f"  - Related paper pairs: {OVERLAP_LABEL}")
-    print(f"  - Direct citations:    {DIRECT_LABEL}")
-
+    print(f"  - Overlap matrix and index: {OVERLAP_MATRIX}")
+    print(f"  - Direct matrix and index:  {DIRECT_MATRIX}")
 
 if __name__ == "__main__":
     main()
 
 """
 Loaded 4547 rows from citation file.
-Prepared paperId sets for 4544 papers.
-Computing overlap scores and thresholded relationships...
-100%|█████████████| 10321696/10321696 [00:26<00:00, 384970.89it/s]
-Extracting direct citation relationships...
+Computing overlap matrix: 100%|███████████████████████████| 4544/4544 [01:31<00:00, 49.67it/s]
+Computing direct matrix: 100%|████████████████████████████| 4544/4544 [02:07<00:00, 35.67it/s]
 ✅ Done. All data saved:
-  - Overlap scores:      data/processed/modelcard_citation_overlap_by_paperId_score.pickle
-  - Related paper pairs: data/processed/modelcard_citation_overlap_by_paperId_related.pickle
-  - Direct citations:    data/processed/modelcard_citation_direct_relation.pickle
+  - Overlap matrix and index: data/processed/modelcard_citation_overlap_rate.pickle
+  - Direct matrix and index:  data/processed/modelcard_citation_direct_label.pickle
 """

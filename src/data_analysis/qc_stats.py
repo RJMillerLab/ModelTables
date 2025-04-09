@@ -33,7 +33,7 @@ INPUT_FILE = "data/processed/modelcard_step3_dedup.parquet"
 INTEGRATION_FILE = "data/processed/final_integration_with_paths.parquet"
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-VALID_TITLE_PARQUET = os.path.join(OUTPUT_DIR, "all_title_list_valid.parquet")
+VALID_TITLE_PARQUET = "data/processed/all_title_list_valid.parquet"
 
 # Benchmark data (WDC removed)
 benchmark_data = [
@@ -119,6 +119,25 @@ def compute_resource_stats(df, resource):
     valid_title_valid_files = [f for f in dedup_valid_files if f['path'] in valid_title_paths_set]  ########
     title_valid_metrics = calculate_metrics(title_valid_files)
     valid_title_valid_metrics = calculate_metrics(valid_title_valid_files)
+
+    # save valid title list to local txt files
+    title_valid_paths = [f['path'] for f in title_valid_files]
+    valid_title_valid_paths = [f['path'] for f in valid_title_valid_files]
+    title_valid_paths_set = set(title_valid_paths)
+    valid_title_valid_paths_set = set(valid_title_valid_paths)
+    print(f"Found {len(title_valid_paths_set)} valid titles in {resource} files")
+    print(f"Found {len(valid_title_valid_paths_set)} valid titles in {resource} files")
+    # save to txt files
+    title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_title_valid.txt")
+    valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid.txt")
+    with open(title_valid_file, 'w') as f:
+        for path in title_valid_paths_set:
+            f.write(f"{path}\n")
+    with open(valid_title_valid_file, 'w') as f:
+        for path in valid_title_valid_paths_set:
+            f.write(f"{path}\n")
+    print(f"Saved valid title list to {title_valid_file}")
+    print(f"Saved valid title list to {valid_title_valid_file}")
 
     return {
         f"{resource}-dup": dup_metrics,
@@ -236,7 +255,7 @@ def main():
 
     valid_titles = set(df_integration['query'].dropna().str.strip())
     df['all_title_list_valid'] = df['all_title_list'].apply(
-        lambda x: [t for t in x if t in valid_titles] if isinstance(x, (list, np.ndarray)) else []
+        lambda x: [t for t in x if t in valid_titles] if isinstance(x, (list, tuple, np.ndarray)) else []
     )
     df['has_title'] = df['all_title_list'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
     df['has_valid_title'] = df['all_title_list_valid'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
