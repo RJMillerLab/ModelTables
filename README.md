@@ -156,6 +156,13 @@ bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake 
 bash scripts/step3_search_hnsw.sh # data lake search!
 ```
 
+Analysis on results
+```bash
+# get top-10 results from step3_search_hnsw
+python -m src.data_analysis.report_generation --json_path /Users/doradong/Repo/tmp/results_starmie/test_hnsw_search_scilake_large_first10.json # generate from results
+# compute the statistics
+```
+
 7. Analyze some statistics
 ```bash
 python -m src.data_preprocess.step1_analysis # get analysis on proportion of different links
