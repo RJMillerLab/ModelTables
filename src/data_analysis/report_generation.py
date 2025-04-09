@@ -12,8 +12,19 @@ import os
 import re
 import pandas as pd
 from datetime import datetime
+from collections import defaultdict
+import numpy as np
 
 BASE_PATH = "/Users/doradong/Repo/CitationLake"
+
+DATA_DIR  = os.path.join(BASE_PATH, "data/processed")          
+FILES = {                                                      
+    "step4_symlink": f"{DATA_DIR}/modelcard_step4.parquet",    
+    "valid_title"  : f"{DATA_DIR}/all_title_list_valid.parquet"
+}
+
+TABLE_SOURCE_PARQUET = os.path.join(BASE_PATH, "data/processed/modelcard_step4.parquet")
+VALID_TITLE_PARQUET = os.path.join(BASE_PATH, "data/processed/all_title_list_valid.parquet")
 
 def get_file_path(filename):
     hugging_pattern = r'^[0-9a-f]{10}_table\d+\.csv$'
@@ -37,6 +48,41 @@ def df_to_markdown(df, max_rows=5):
         return df.head(max_rows).to_markdown(index=False) + "\n..."
     return df
 
+def build_table_model_title_maps():
+    """Return mapping dictionaries:
+       - table_to_models: csv filename → set of modelIds
+       - model_to_titles: modelId → list of valid titles
+    """
+    df_tables = pd.read_parquet(FILES["step4_symlink"])
+    df_titles = pd.read_parquet(FILES["valid_title"], columns=["modelId", "all_title_list", "all_title_list_valid"])
+    df_tables = df_tables.merge(df_titles, on="modelId", how="left")
+    table_cols = [c for c in df_tables.columns if c.endswith("_sym") or c.endswith("_dedup")]
+    table_to_models = defaultdict(set)
+    model_to_titles = {}
+    for _, row in df_tables.iterrows():
+        mid = row["modelId"]
+        raw_vals = row.get("all_title_list", [])                          ########
+        if isinstance(raw_vals, np.ndarray):                              ########
+            raw_vals = raw_vals.tolist()                                  ########
+        if not isinstance(raw_vals, list):                                  ########
+            raw_vals = [raw_vals]                                         ########
+        valid_vals = row.get("all_title_list_valid", [])                    ########
+        if isinstance(valid_vals, np.ndarray):                              ########
+            valid_vals = valid_vals.tolist()                              ########
+        if not isinstance(valid_vals, list):                                  ########
+            valid_vals = [valid_vals] 
+        model_to_titles[mid] = {"raw": raw_vals, "valid": valid_vals}
+        for col in table_cols:
+            col_val = row.get(col, [])
+            if isinstance(col_val, np.ndarray):
+                col_val = col_val.tolist()
+            if not isinstance(col_val, list):
+                col_val = [col_val]
+            for tbl in col_val:
+                if pd.notna(tbl):
+                    table_to_models[os.path.basename(tbl)].add(mid)
+    return table_to_models, model_to_titles
+
 def generate_md_report(json_path, output_file=None):
     if not output_file:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
@@ -44,6 +90,8 @@ def generate_md_report(json_path, output_file=None):
     
     with open(json_path, 'r') as f:
         data = json.load(f)
+    
+    table_to_models, model_to_titles = build_table_model_title_maps()
     
     report = []
     for query_file, retrieved_files in data.items():
@@ -57,6 +105,19 @@ def generate_md_report(json_path, output_file=None):
         except Exception as e:
             report.append(f"**Loading failure: {str(e)}**")
         
+        # Query Table Titles
+        query_key = os.path.basename(query_file)                         ########
+        models = table_to_models.get(query_key, [])
+        if models:
+            report.append("\n**Query Table Model → Titles**")            ########
+            for m in sorted(models):
+                titles = model_to_titles.get(m, {"raw": [], "valid": []})   ########
+                raw_titles = titles.get("raw", [])
+                valid_titles = titles.get("valid", [])
+                report.append(f"- **{m}**:")
+                report.append(f"    - Raw Titles: {raw_titles}")           ########
+                report.append(f"    - Valid Titles: {valid_titles}")
+        
         report.append("\n## Retrieved Tables\n")
         for idx, file in enumerate(retrieved_files[1:], 1):
             report.append(f"### Top {idx}: `{file}`\n")
@@ -66,6 +127,20 @@ def generate_md_report(json_path, output_file=None):
                 report.append(df_to_markdown(df))
             except Exception as e:
                 report.append(f"*Loading failure: {str(e)}*")
+
+            # Retrieved Table Titles
+            tbl_key = os.path.basename(file)
+            models = table_to_models.get(tbl_key, [])
+            if models:
+                report.append("\n**Model → Titles**")
+                for m in sorted(models):
+                    titles = model_to_titles.get(m, {"raw": [], "valid": []})
+                    raw_titles = titles.get("raw", [])
+                    valid_titles = titles.get("valid", [])
+                    report.append(f"- **{m}**:")
+                    report.append(f"    - Raw Titles: {raw_titles}")       ########
+                    report.append(f"    - Valid Titles: {valid_titles}")     ########
+
             report.append("\n")
         
         report.append("\n---\n")

@@ -41,7 +41,7 @@ benchmark_data = [
     ["TUS Small", 1530, 14810, 4466, 1.00],
     ["TUS Large", 5043, 54923, 1915, 1.50],
     ["SANTOS Large", 11090, 123477, 7675, 11.00],
-    ["WDC", 50000000, 250000000, 14, 500.00]
+    #["WDC", 50000000, 250000000, 14, 500.00]
 ]
 
 RESOURCES = {
@@ -150,19 +150,6 @@ def compute_resource_stats(df, resource):
         f"{resource}-valid-dedup": valid_title_count_dedup
     }
 
-"""def create_combined_results(benchmark_data, resource_stats):
-    columns = ["Benchmark", "# Tables", "# Cols", "Avg # Rows", "Size (GB)"]
-    df = pd.DataFrame(benchmark_data, columns=columns)
-    for resource in RESOURCES:
-        df = pd.concat([
-            df,
-            pd.DataFrame([[f"scilake-{resource}"] + list(resource_stats[f"{resource}-dedup"])], columns=columns),
-            pd.DataFrame([[f"scilake-{resource} (duplicated)"] + list(resource_stats[f"{resource}-dup"])], columns=columns),
-            pd.DataFrame([[f"scilake-{resource}-title-dedup"] + list(resource_stats[f"{resource}-title_metrics"])], columns=columns),
-            pd.DataFrame([[f"scilake-{resource}-valid-dedup"] + list(resource_stats[f"{resource}-valid_metrics"])], columns=columns),
-        ], ignore_index=True)
-    return df"""
-
 def create_combined_results(benchmark_data, resource_stats):
     columns = ["Benchmark", "# Tables", "# Cols", "Avg # Rows", "Size (GB)"]
     df = pd.DataFrame(benchmark_data, columns=columns)
@@ -211,7 +198,7 @@ def plot_metric(df, metric, filename):
     heights = []
     colors = []
     positions = []
-    for i, val in enumerate(df.iloc[:5][metric]):
+    for i, val in enumerate(df.iloc[:4][metric]):
         positions.append(i * bar_width)
         heights.append(val)
         colors.append(palette_baseline[i])
