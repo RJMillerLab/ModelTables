@@ -36,7 +36,7 @@ print(f"Loaded {len(df_final)} rows from {data_type}_all_title_list.parquet")
 # Step 3: Extract and deduplicate all titles from "all_title_list" column
 print("Step 3: Extracting and deduplicating all titles...")
 all_titles = []
-for titles in df_final["all_bibtex_titles"]: # all_bibtex_titles: reliable, all_title_list: need to be cleaned ...
+for titles in df_final["all_title_list"]: # all_bibtex_titles: reliable, all_title_list: need to be cleaned ...
     if isinstance(titles, (list, tuple, np.ndarray)):
         all_titles.extend(titles)
     elif isinstance(titles, str):

@@ -389,6 +389,11 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     print(f"[CSV‑real]    shape: {csv_real_adj.shape}")
 
     csv_real_gt = adjacency_to_dict(csv_real_adj, csv_real_index)
+    # only record basename path
+    csv_real_gt = {
+        os.path.basename(k): [os.path.basename(vv) for vv in v]
+        for k, v in csv_real_gt.items()
+    }
 
     # ========== Step 5: Save everything to disk ==========
     # 5.1 Paper adjacency
