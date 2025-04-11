@@ -25,12 +25,19 @@ def plot_metrics(metrics, output_path="metrics_plot.png"):
     map_scores = metrics["map"]
     f1 = metrics["f1"]
     # print length
+    max_k = 10
     print("Length of ks:", len(ks))
     ks = [int(k)+1 for k in range(len(precision))]
     print("Length of precision:", len(precision))
     print("Length of recall:", len(recall))
     print("Length of map_scores:", len(map_scores))
     print("Length of f1:", len(f1))
+    # truncate to 10
+    ks = ks[:max_k]
+    precision = precision[:max_k]
+    recall = recall[:max_k]
+    map_scores = map_scores[:max_k]
+    f1 = f1[:max_k]
 
     #palette_resource = ["#486f90", "#4e8094", "#50a89d", "#a5d2bc"]
     palette_resource = ["#8b2e2e", "#d96e44", "#f29e4c", "#FFBE5F"] # , , "#b74a3c", 

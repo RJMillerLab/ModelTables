@@ -318,7 +318,6 @@ def compute_dup_matrix_from_sha(files_info):
     return dup_matrix, stats, hash_groups
 
 # draw
-
 class BiasedLogNorm(LogNorm):
     def __init__(self, vmin=None, vmax=None, bias=0.3, **kwargs):
         super().__init__(vmin=vmin, vmax=vmax, **kwargs)
@@ -329,13 +328,18 @@ class BiasedLogNorm(LogNorm):
         return np.power(scaled, self.bias)
 
 def save_heatmap(dup_matrix, unique_counts, output_dir):
-    # Step 1: prepare plotting matrix (replace 0 with small value)
-    dup_matrix_plot = dup_matrix.replace(0, 0.0001)
+    # Step 1: prepare plotting matrix using the original values
+    dup_matrix_plot = dup_matrix.copy()
+    dup_matrix_plot[dup_matrix_plot < 10] = 10
+
     # Step 2: define teal color map
     teal_colors = ["#a5d2bc", "#50a89d", "#4e8094", "#486f90"]
     teal_cmap = LinearSegmentedColormap.from_list("teal_gradient", teal_colors)
-    # Step 3: biased log normalization
-    norm = BiasedLogNorm(vmin=0.0001, vmax=dup_matrix_plot.to_numpy().max(), bias=0.3)
+    
+    # Step 3: use log normalization
+    from matplotlib.colors import LogNorm
+    norm = LogNorm(vmin=10, vmax=1000)
+
     # Step 4: plot
     plt.figure(figsize=(6, 5))
     ax = sns.heatmap(
@@ -350,7 +354,8 @@ def save_heatmap(dup_matrix, unique_counts, output_dir):
     )
     ax.set_xlabel("")
     ax.set_ylabel("")
-    plt.setp(ax.get_yticklabels()) #, color="#486f90"
+    plt.setp(ax.get_yticklabels())
+    
     # Step 5: add top labels
     xticks = np.arange(len(unique_counts))
     for idx, res in enumerate(unique_counts.keys()):
@@ -361,7 +366,7 @@ def save_heatmap(dup_matrix, unique_counts, output_dir):
             ha='center',
             va='bottom',
             fontsize=12
-        ) # color="#486f90"
+        )
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "heatmap_overlap.png"))
     plt.savefig(os.path.join(output_dir, "heatmap_overlap.pdf"))
@@ -468,14 +473,19 @@ def main():
         json.dump(stats, f, indent=2)
 
     print(f"Unique file count: {len(unique_file_paths)}")
-    with open(UNIQUE_FILES_TXT, "w") as f:  ########
+    with open(UNIQUE_FILES_TXT, "w") as f:
         for file_path in unique_file_paths:
             f.write(file_path + "\n")
     print(f"Unique file list saved to {UNIQUE_FILES_TXT}")
     
-    with open(DUPLICATE_GROUPS_JSON, "w") as f:  ########
+    with open(DUPLICATE_GROUPS_JSON, "w") as f:
         json.dump(group_stats, f, indent=2)
     print(f"Duplicate group details saved to {DUPLICATE_GROUPS_JSON}")
+
+    # --- Step 4.5: Save dup_matrix and stats for later reuse
+    dup_matrix_file = os.path.join(OUTPUT_DIR, "dup_matrix.pkl")
+    dup_matrix.to_pickle(dup_matrix_file)
+    print(f"Dup matrix saved to {dup_matrix_file}")
 
     save_heatmap(dup_matrix, stats["cross_unique_counts"], OUTPUT_DIR)
 

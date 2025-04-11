@@ -179,6 +179,8 @@ def annotate_bars(ax):
                         ha='center', va='bottom', fontsize=8, rotation=0)
 
 def plot_metric(df, metric, filename):
+    from matplotlib.patches import Patch
+    
     palette_baseline = ["#8b2e2e", "#b74a3c", "#d96e44", "#f29e4c", "#FFBE5F"]
     palette_resource = ["#486f90", "#4e8094", "#50a89d", "#a5d2bc"]
 
@@ -202,6 +204,7 @@ def plot_metric(df, metric, filename):
         positions.append(i * bar_width)
         heights.append(val)
         colors.append(palette_baseline[i])
+    # duplicated, dedup, w/ title, w/ valid title
     for ci, cluster in enumerate(clusters[1:], start=1):
         for ri, resource in enumerate(resources):
             suffix = cluster_key_map[cluster]
@@ -211,12 +214,16 @@ def plot_metric(df, metric, filename):
                 positions.append(ci * group_width + ri * bar_width)
                 heights.append(val[0])
                 colors.append(palette_resource[ri])
+
     xtick_positions = [0 + (4 - 1) * bar_width / 2] + [
         i * group_width + (len(resources) - 1) * bar_width / 2 for i in range(1, len(clusters))
     ]
     xtick_labels = clusters
 
-    fig, ax = plt.subplots(figsize=(12, 10))
+    fig = plt.figure(figsize=(12, 10))
+
+    ax = fig.add_axes([0.08, 0.1, 0.7, 0.8])
+
     ax.bar(positions, heights, width=bar_width, color=colors)
     ax.set_yscale('log')
     ax.set_xticks(xtick_positions)
@@ -225,16 +232,36 @@ def plot_metric(df, metric, filename):
     ax.set_title(f"{metric}", fontsize=16)
     annotate_bars(ax)
 
-    legend1 = [Patch(facecolor=palette_baseline[i], label=BENCHMARK_NAMES[i])
-               for i in range(len(BENCHMARK_NAMES))]
-    legend2 = [Patch(facecolor=palette_resource[i], label=resources[i])
-               for i in range(len(resources))]
-    leg1 = ax.legend(handles=legend1, title="Baseline", loc='upper left', bbox_to_anchor=(1.01, 1)) 
-    ax.add_artist(leg1)
-    leg2 = ax.legend(handles=legend2, title="Resource", loc='lower left', bbox_to_anchor=(1.01, 0))
-    plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300, bbox_inches='tight')
+    handles_baseline = [
+        Patch(facecolor=palette_baseline[i], label=BENCHMARK_NAMES[i])
+        for i in range(len(BENCHMARK_NAMES))
+    ]
+    labels_baseline = [f"Baseline: {n}" for n in BENCHMARK_NAMES]
+
+    handles_resource = [
+        Patch(facecolor=palette_resource[i], label=resources[i])
+        for i in range(len(resources))
+    ]
+    labels_resource = [f"Resource: {res}" for res in resources]
+
+    fig.legend(
+        handles_baseline, labels_baseline,
+        loc="upper left",           
+        bbox_to_anchor=(0.80, 0.90),
+        title="Baseline" 
+    )
+    fig.legend(
+        handles_resource, labels_resource,
+        loc="upper left",
+        bbox_to_anchor=(0.80, 0.50),
+        title="Resource"
+    )
+
+    # avoid using tight_layout()
+    # avoid bbox_inches='tight'
+    plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300)
     plt.close()
+
 
 def main():
     df = pd.read_parquet(INPUT_FILE)
