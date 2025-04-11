@@ -52,6 +52,27 @@ def otsu_threshold(values):
             threshold = (bin_edges[i] + bin_edges[i+1]) / 2
     return threshold
 
+def load_direct_pairs_from_pickle(path):
+    with open(path, "rb") as f:
+        data = pickle.load(f)
+
+    if isinstance(data, dict) and "score_matrix" in data and "paper_index" in data:
+        score_matrix = data["score_matrix"]
+        paper_index = data["paper_index"]
+        rows, cols = score_matrix.nonzero()
+        direct_pairs = set()
+        for i, j in zip(rows, cols):
+            if i >= j:  # avoid duplicates (i,j) and (j,i)
+                continue
+            if score_matrix[i, j] == 1.0:
+                pair = tuple(sorted([paper_index[i], paper_index[j]]))
+                direct_pairs.add(pair)
+        return direct_pairs
+    elif isinstance(data, dict):
+        return {tuple(sorted(k)) for k, v in data.items() if v == 1.0}
+    else:
+        raise ValueError("Unrecognized format in direct label pickle.")
+
 # === Load data ===
 with open(OVERLAP_RATE, "rb") as f:
     score_map = pickle.load(f)
@@ -62,13 +83,13 @@ with open(DIRECT_LABEL, "rb") as f:
 print("✅ Files loaded successfully\n")
 
 # === Create set of direct citation pairs ===
-direct_pairs = set()
-########
-# 如果 direct_map 是 dict: (paper1, paper2) -> score (1.0 / 0.0)
-########
+"""direct_pairs = set()
 for pair, val in direct_map.items():
-    if val == 1.0:
-        direct_pairs.add(tuple(sorted(pair)))
+    print(pair, val)
+    if val[0] == 1.0: # debug here!!!
+        direct_pairs.add(tuple(sorted(pair)))"""
+
+direct_pairs = load_direct_pairs_from_pickle(DIRECT_LABEL)
 
 # === Prepare labels and scores ===
 y_true = []  # 1 if direct, else 0
@@ -141,8 +162,8 @@ print(f"🟢 Youden's J = {best_youden_score:.4f}; Threshold = {best_threshold_y
 
 ########
 # === Compute Otsu’s threshold ===
-otsu_thresh = otsu_threshold(np.array(y_scores))
-print(f"🟣 Otsu Threshold = {otsu_thresh:.4f}")
+#otsu_thresh = otsu_threshold(np.array(y_scores))
+#print(f"🟣 Otsu Threshold = {otsu_thresh:.4f}")
 ########
 
 # === Plot KDE with multiple thresholds ===
@@ -166,8 +187,8 @@ plt.axvline(valley_threshold, color='blue', linestyle='--', linewidth=1.5,
             label=f'KDE valley = {valley_threshold:.2f}')
 plt.axvline(best_threshold_youden, color='green', linestyle='--', linewidth=1.5,
             label=f'Youden = {best_threshold_youden:.2f}')
-plt.axvline(otsu_thresh, color='purple', linestyle='--', linewidth=1.5,
-            label=f'Otsu = {otsu_thresh:.2f}')
+#plt.axvline(otsu_thresh, color='purple', linestyle='--', linewidth=1.5,
+#            label=f'Otsu = {otsu_thresh:.2f}')
 
 plt.title("KDE of Overlap Scores by Label (Multiple Threshold Methods)")
 plt.xlabel("Overlap Score")
@@ -208,8 +229,8 @@ axes[0].axvline(valley_threshold, color='blue', linestyle='--', linewidth=1.5,
                 label=f'KDE valley = {valley_threshold:.2f}')
 axes[0].axvline(best_threshold_youden, color='green', linestyle='--', linewidth=1.5,
                 label=f'Youden = {best_threshold_youden:.2f}')
-axes[0].axvline(otsu_thresh, color='purple', linestyle='--', linewidth=1.5,
-                label=f'Otsu = {otsu_thresh:.2f}')
+#axes[0].axvline(otsu_thresh, color='purple', linestyle='--', linewidth=1.5,
+#                label=f'Otsu = {otsu_thresh:.2f}')
 
 axes[0].set_title("Histogram (None + Direct)")
 axes[0].set_xlabel("Overlap Score")
@@ -232,8 +253,8 @@ axes[1].axvline(valley_threshold, color='blue', linestyle='--', linewidth=1.5,
                 label=f'KDE valley = {valley_threshold:.2f}')
 axes[1].axvline(best_threshold_youden, color='green', linestyle='--', linewidth=1.5,
                 label=f'Youden = {best_threshold_youden:.2f}')
-axes[1].axvline(otsu_thresh, color='purple', linestyle='--', linewidth=1.5,
-                label=f'Otsu = {otsu_thresh:.2f}')
+#axes[1].axvline(otsu_thresh, color='purple', linestyle='--', linewidth=1.5,
+#                label=f'Otsu = {otsu_thresh:.2f}')
 axes[1].set_title("Histogram (Direct Only)")
 axes[1].set_xlabel("Overlap Score")
 axes[1].set_ylabel("Frequency")
@@ -255,8 +276,8 @@ axes[2].axvline(valley_threshold, color='blue', linestyle='--', linewidth=1.5,
                 label=f'KDE valley = {valley_threshold:.2f}')
 axes[2].axvline(best_threshold_youden, color='green', linestyle='--', linewidth=1.5,
                 label=f'Youden = {best_threshold_youden:.2f}')
-axes[2].axvline(otsu_thresh, color='purple', linestyle='--', linewidth=1.5,
-                label=f'Otsu = {otsu_thresh:.2f}')
+#axes[2].axvline(otsu_thresh, color='purple', linestyle='--', linewidth=1.5,
+#                label=f'Otsu = {otsu_thresh:.2f}')
 axes[2].set_title("Histogram (None Only)")
 axes[2].set_xlabel("Overlap Score")
 axes[2].set_ylabel("Frequency")

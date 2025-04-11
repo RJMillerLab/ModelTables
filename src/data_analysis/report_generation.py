@@ -83,7 +83,7 @@ def build_table_model_title_maps():
                     table_to_models[os.path.basename(tbl)].add(mid)
     return table_to_models, model_to_titles
 
-def generate_md_report(json_path, output_file=None):
+def generate_md_report(json_path, include_raw, include_valid, output_file=None):
     if not output_file:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         output_file = f"table_report_{timestamp}.md"
@@ -91,6 +91,11 @@ def generate_md_report(json_path, output_file=None):
     with open(json_path, 'r') as f:
         data = json.load(f)
     
+    # only print first 10
+    print(f"Loaded {len(data)} records from {json_path}")
+    data = {k: v for i, (k, v) in enumerate(data.items()) if i < 10}
+    print(f"Filtered to {len(data)} records for report generation.")
+    # Build table to model and model to titles mapping
     table_to_models, model_to_titles = build_table_model_title_maps()
     
     report = []
@@ -112,11 +117,13 @@ def generate_md_report(json_path, output_file=None):
             report.append("\n**Query Table Model → Titles**")
             for m in sorted(models):
                 titles = model_to_titles.get(m, {"raw": [], "valid": []})
-                raw_titles = titles.get("raw", [])
-                valid_titles = titles.get("valid", [])
                 report.append(f"- **{m}**:")
-                report.append(f"    - Raw Titles: {raw_titles}")
-                report.append(f"    - Valid Titles: {valid_titles}")
+                if include_raw:
+                    raw_titles = titles.get("raw", [])
+                    report.append(f"    - Raw Titles: {raw_titles}")
+                if include_valid:
+                    valid_titles = titles.get("valid", [])
+                    report.append(f"    - Valid Titles: {valid_titles}")
         
         report.append("\n## Retrieved Tables\n")
         for idx, file in enumerate(retrieved_files, 1):
@@ -137,12 +144,13 @@ def generate_md_report(json_path, output_file=None):
                 report.append("\n**Model → Titles**")
                 for m in sorted(models):
                     titles = model_to_titles.get(m, {"raw": [], "valid": []})
-                    raw_titles = titles.get("raw", [])
-                    valid_titles = titles.get("valid", [])
                     report.append(f"- **{m}**:")
-                    report.append(f"    - Raw Titles: {raw_titles}")
-                    report.append(f"    - Valid Titles: {valid_titles}")
-
+                    if include_raw:
+                        raw_titles = titles.get("raw", [])
+                        report.append(f"    - Raw Titles: {raw_titles}")
+                    if include_valid:
+                        valid_titles = titles.get("valid", [])
+                        report.append(f"    - Valid Titles: {valid_titles}")
             report.append("\n")
         
         report.append("\n---\n")
@@ -155,5 +163,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate a markdown report from JSON files.")
     parser.add_argument("--json_path", type=str, default="test_hnsw_search_scilake_large_first10.json", help="Path to the JSON file.")
+    include_valid = True
+    include_raw = False
     args = parser.parse_args()
-    generate_md_report(args.json_path)
+    generate_md_report(args.json_path, include_raw, include_valid)

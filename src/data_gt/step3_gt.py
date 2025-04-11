@@ -10,7 +10,6 @@ Description:
     ----------------------------
     • overlap_rate   : uses a (pid → {related_pids}) mapping with weights
     • direct_label  : uses a (pid → {cited_by_pids}) mapping as GT
-    • overlap_label  : uses a (pid → {related_pids}) mapping with weights
 
     Supported table source modes
     ----------------------------
@@ -25,8 +24,9 @@ Description:
     • ground‑truth benchmark table paths (pickle)
 
 Usage:
-    python -m src.data_gt.step3_gt --rel_mode [overlap_rate, overlap_label, direct_label] --tbl_mode [step4_symlink, step3_merged] (require step4.parquet by create_symlink.py)
-    python -m src.data_gt.step3_gt --rel_mode direct_label --tbl_mode step3_merged
+    python -m src.data_gt.step3_gt --rel_mode [overlap_rate, direct_label] --tbl_mode [step4_symlink, step3_merged] (require step4.parquet by create_symlink.py)
+    python -m src.data_gt.step3_gt --rel_mode direct_label --tbl_mode step4_symlink
+    python -m src.data_gt.step3_gt --rel_mode overlap_rate --tbl_mode step4_symlink
 """
 
 import os
@@ -62,7 +62,6 @@ CSV_REAL_INDEX_PATH = f"{GT_DIR}/csv_real_index.pickle"
 # ---- default files (can be overridden by CLI/kwargs) ----
 FILES = {
     "overlap_rate": f"{DATA_DIR}/modelcard_citation_overlap_rate.pickle",
-    "overlap_label": f"{DATA_DIR}/modelcard_citation_overlap_label.pickle",
     "direct_label": f"{DATA_DIR}/modelcard_citation_direct_label.pickle",
     "step4_symlink": f"{DATA_DIR}/modelcard_step4.parquet",
     "step3_merged": f"{DATA_DIR}/modelcard_step3_merged.parquet",
@@ -79,14 +78,13 @@ CSV_PAIR_FREQ_PATH = f"{GT_DIR}/csv_pair_frequency.pickle"
 OUTPUT_GT_PATH = f"{GT_DIR}/scilakeUnionBenchmark_by_ids.pickle"
 DISCOUNT_RATE = 0.5
 IS_STRICT_MODE = True
-THRESHOLD = 0.2 # for overlap_rate only
+THRESHOLD = 0.1 # for overlap_rate only
 
 
 # ===== ENUMS =============================================================== #
 class RelationshipMode(str, Enum):
     OVERLAP_RATE = "overlap_rate"
     DIRECTED_CITE = "direct_label"
-    OVERLAP_LABEL = "overlap_label"
 
 
 class TableSourceMode(str, Enum):
@@ -245,14 +243,14 @@ def query_related_ids(score_matrix, id_list, query_id, threshold=1.0):
 def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: RelationshipMode):
     """
     Build a paper-level adjacency matrix from the raw score_matrix, using a threshold.
-    - If rel_mode in [direct_label, overlap_label], threshold = 1.0
+    - If rel_mode in [direct_label], threshold = 1.0
     - If rel_mode == overlap_rate, threshold = THRESHOLD (e.g. 0.2)
 
     The output adjacency matrix is square (n x n), with 1 if related, else 0.
     Includes a self-loop as 1 on the diagonal if you want that (just set it at the end).
     """
     n = len(paper_index)
-    if rel_mode in [RelationshipMode.DIRECTED_CITE, RelationshipMode.OVERLAP_LABEL]:
+    if rel_mode in [RelationshipMode.DIRECTED_CITE]:
         thr = 1.0
     else:
         thr = THRESHOLD
@@ -396,42 +394,58 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     }
 
     # ========== Step 5: Save everything to disk ==========
+    suffix = f"__{rel_mode.value}"
     # 5.1 Paper adjacency
-    save_npz(PAPER_LEVEL_ADJ_PATH, paper_paper_adj)
-    with open(PAPER_INDEX_PATH, "wb") as f:
+    save_npz(PAPER_LEVEL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), paper_paper_adj)
+    with open(PAPER_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
         pickle.dump(paper_index, f)
-    print(f"Paper-level adjacency saved to {PAPER_LEVEL_ADJ_PATH}")
-    print(f"Paper index list saved to {PAPER_INDEX_PATH}")
+    print(f"Paper-level adjacency saved to {PAPER_LEVEL_ADJ_PATH}{suffix}.npz")
+    print(f"Paper index list saved to {PAPER_INDEX_PATH}{suffix}.pickle")
 
     # 5.2 Model adjacency
-    save_npz(MODEL_LEVEL_ADJ_PATH, model_model_adj)
-    with open(MODEL_INDEX_PATH, "wb") as f:
+    save_npz(MODEL_LEVEL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), model_model_adj)
+    with open(MODEL_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
         pickle.dump(model_index, f)
-    print(f"Model-level adjacency saved to {MODEL_LEVEL_ADJ_PATH}")
-    print(f"Model index list saved to {MODEL_INDEX_PATH}")
+    print(f"Model-level adjacency saved to {MODEL_LEVEL_ADJ_PATH}{suffix}.npz")
+    print(f"Model index list saved to {MODEL_INDEX_PATH}{suffix}.pickle") 
 
-    save_npz(CSV_LEVEL_ADJ_PATH, csv_csv_adj)
-    with open(CSV_INDEX_PATH, "wb") as f:
+    save_npz(CSV_LEVEL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), csv_csv_adj)
+    with open(CSV_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
         pickle.dump(csv_index, f)
-    print(f"CSV‑level adjacency saved to {CSV_LEVEL_ADJ_PATH}")
-    print(f"CSV index list saved to {CSV_INDEX_PATH}")
+    print(f"CSV‑level adjacency saved to {CSV_LEVEL_ADJ_PATH}{suffix}.npz")
+    print(f"CSV index list saved to {CSV_INDEX_PATH}{suffix}.pickle")
 
     # ---- save symlink‑level 0/1 adjacency ----
-    save_npz(CSV_SYMLINK_ADJ_PATH, csv_symlink_adj)
-    with open(CSV_SYMLINK_INDEX_PATH, "wb") as f:
+    save_npz(CSV_SYMLINK_ADJ_PATH.replace(".npz", f"{suffix}.npz"), csv_symlink_adj)
+    with open(CSV_SYMLINK_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
         pickle.dump(csv_symlink_index, f)
-    print(f"Symlink CSV adjacency → {CSV_SYMLINK_ADJ_PATH}")
+    print(f"Symlink CSV adjacency → {CSV_SYMLINK_ADJ_PATH}{suffix}.npz")
 
     # ---- save real‑path count adjacency ----
-    save_npz(CSV_REAL_ADJ_PATH, csv_real_adj)
-    with open(CSV_REAL_INDEX_PATH, "wb") as f:
+    save_npz(CSV_REAL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), csv_real_adj)
+    with open(CSV_REAL_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
         pickle.dump(csv_real_index, f)
-    print(f"Real CSV adjacency    → {CSV_REAL_ADJ_PATH}")
+    print(f"Real CSV adjacency    → {CSV_REAL_ADJ_PATH}{suffix}.npz")
 
-    with open(f"{GT_DIR}/scilake_large_gt.pickle", "wb") as f:
+    with open(f"{GT_DIR}/scilake_large_gt{suffix}.pickle", "wb") as f:
         pickle.dump(csv_real_gt, f)
-    with open(f"{GT_DIR}/scilake_large_gt.json", "w") as f:
+    with open(f"{GT_DIR}/scilake_large_gt{suffix}.json", "w") as f:
         json.dump(csv_real_gt, f, indent=2)
+    
+    # ---- extra: save real‑path count adjacency (as dict) ----
+    count_dict = defaultdict(dict)
+    rows, cols = csv_real_adj.nonzero()
+    for i, j in zip(rows, cols):
+        if i == j:
+            continue
+        src = os.path.basename(csv_real_index[i])
+        tgt = os.path.basename(csv_real_index[j])
+        count_dict[src][tgt] = int(csv_real_adj[i, j])
+    with open(f"{GT_DIR}/scilake_large_gt_count{suffix}.pickle", "wb") as f:
+        pickle.dump(dict(count_dict), f)
+    with open(f"{GT_DIR}/scilake_large_gt_count{suffix}.json", "w") as f:
+        json.dump(dict(count_dict), f, indent=2)
+    print(f"CSV count dict saved to scilake_large_gt_count{suffix}.pickle/json")
 
     print("✅ Done building matrix-based groundtruth!")
 
