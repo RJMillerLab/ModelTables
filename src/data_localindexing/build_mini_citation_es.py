@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
 Usage:
-  python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --fields minimal
-  python build_mini_citation_es.py --mode query --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --id 8982892
-  python build_mini_citation_es.py --mode test --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index
+    python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index --fields minimal
+    python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index_full --fields full
+    python build_mini_citation_es.py --mode query --index_name citations_index --id 8982892
+    python build_mini_citation_es.py --mode test --index_name citations_index
+    python build_mini_citation_es.py --mode batch --input_file paper_ids.txt --index_name citations_index_full
+    python build_mini_citation_es.py --mode update --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
 
 Notes:
   - In build mode, all NDJSON files (*.ndjson) in the specified directory will be processed.
@@ -18,6 +21,7 @@ import warnings
 import glob
 import re
 from tqdm import tqdm
+import pandas as pd
 from elasticsearch import Elasticsearch, helpers
 
 warnings.filterwarnings("ignore")
@@ -56,6 +60,43 @@ def create_citations_index(es, index_name):
     }
     es.indices.create(index=index_name, body=index_body)
     print(f"Index {index_name} created.")
+
+def backup_index(es, index_name):
+    backup_index_name = index_name + "_backup"
+    if es.indices.exists(index=backup_index_name):
+        es.indices.delete(index=backup_index_name)
+        print(f"Deleted existing backup index: {backup_index_name}")
+    reindex_body = {
+        "source": {"index": index_name},
+        "dest": {"index": backup_index_name}
+    }
+    print(f"Creating backup index: {backup_index_name} ...")
+    es.reindex(body=reindex_body, wait_for_completion=True, request_timeout=300)
+    print(f"Backup index {backup_index_name} created.")
+    return backup_index_name
+
+def update_index_mini2full(es, directory, index_name):
+    backup_index(es, index_name)
+    files = glob.glob(os.path.join(directory, "step*_file"))
+    total_updated = 0
+    for file_path in files:
+        print(f"Processing file for update: {file_path}")
+        actions = []
+        for batch in process_ndjson_file(file_path):
+            for rec in batch:
+                action = {
+                    "_op_type": "update",
+                    "_index": index_name,
+                    "_id": rec.get("citationid"),
+                    "doc": rec,
+                    "doc_as_upsert": False
+                }
+                actions.append(action)
+            if actions:
+                helpers.bulk(es, actions, request_timeout=300)
+                total_updated += len(actions)
+                actions = []
+    print(f"Update completed. Total documents updated: {total_updated}")
 
 def process_ndjson_file(file_path, batch_size=BATCH_SIZE):
     """
@@ -223,10 +264,11 @@ def query_citations(es, paper_index, citations_index, title):
         src = hit["_source"]
         print(f"CitationID: {src.get('citationid')}, Citing: {src.get('citingcorpusid')}, Cited: {src.get('citedcorpusid')}")
     
-def query_citations_by_id(es, citations_index, target_id):
+def query_citations_by_id_mini(es, citations_index, target_id):
     """
     Query the citations index for citation edges where target_id appears as either citingcorpusid or citedcorpusid.
     Separates and prints the results into two groups.
+    Work for minimal mode and full mode.
     """
     query_citing = {
         "query": {
@@ -258,7 +300,86 @@ def query_citations_by_id(es, citations_index, target_id):
         for hit in hits_cited:
             src = hit.get("_source", {})
             print(f"CitationID: {src.get('citationid')}, Citing: {src.get('citingcorpusid')}, Cited: {src.get('citedcorpusid')}")
+
+def query_citations_by_id(es, citations_index, target_id):
+    """
+    Query the citations index for citation edges where target_id appears as either
+    citingcorpusid or citedcorpusid.
+    Returns a dictionary with two keys:
+      - "cited_papers": List of items from records where target_id is in citingcorpusid
+                        (i.e. target paper cites other papers).
+      - "citing_papers": List of items from records where target_id is in citedcorpusid
+                        (i.e. other papers cite the target paper).
+    Each item is a JSON object containing all item fields (e.g. intents, contexts, isinfluential)
+    and a nested key ("citedPaper" or "citingPaper") with the corresponding paper details.
+
+    Work only for full mode.
+    """
+    # Query records where target_id is in citingcorpusid (target paper is doing the citing,
+    # so the other side is a cited paper)
+    query_from = {"query": {"term": {"citingcorpusid": target_id}}}
+    resp_from = es.search(index=citations_index, body=query_from, size=50)
+    hits_from = resp_from.get("hits", {}).get("hits", [])
+    cited_papers = []
+    for hit in hits_from:
+        src = hit.get("_source", {})
+        item = {}
+        item["intents"] = src.get("intents", [])
+        item["contexts"] = src.get("contexts", [])
+        item["isInfluential"] = src.get("isinfluential", False)
+        item["citedPaper"] = {
+            "paperId": src.get("citedcorpusid"),
+            "title": src.get("citedtitle", None),
+            "abstract": src.get("citedabstract", None)
+        }
+        cited_papers.append(item)
     
+    # Query records where target_id is in citedcorpusid (target paper is being cited,
+    # so the other side is a citing paper)
+    query_to = {"query": {"term": {"citedcorpusid": target_id}}}
+    resp_to = es.search(index=citations_index, body=query_to, size=50)
+    hits_to = resp_to.get("hits", {}).get("hits", [])
+    citing_papers = []
+    for hit in hits_to:
+        src = hit.get("_source", {})
+        item = {}
+        item["intents"] = src.get("intents", [])
+        item["contexts"] = src.get("contexts", [])
+        item["isInfluential"] = src.get("isinfluential", False)
+        item["citingPaper"] = {
+            "paperId": src.get("citingcorpusid"),
+            "title": src.get("citingtitle", None),
+            "abstract": src.get("citingabstract", None)
+        }
+        citing_papers.append(item)
+    
+    return {"cited_papers": cited_papers, "citing_papers": citing_papers}
+    
+def batch_query(es, citations_index, input_file):
+    """
+    Batch query mode: Process an input file containing a list of paper IDs (one per line)
+    and return a DataFrame where the index is the paper ID and there are two columns:
+      - "cited_papers": JSON list of papers that are cited by the target paper.
+      - "citing_papers": JSON list of papers that cite the target paper.
+    The DataFrame is printed as a JSON string.
+    """
+    if not os.path.exists(input_file):
+        print(f"Error: Input file {input_file} does not exist.")
+        return
+    with open(input_file, "r", encoding="utf-8") as f:
+        paper_ids = [line.strip() for line in f if line.strip()]
+    results = []
+    for pid in paper_ids:
+        res = query_citations_by_id(es, citations_index, pid)
+        results.append({
+            "paper_id": pid,
+            "cited_papers": res.get("cited_papers"),
+            "citing_papers": res.get("citing_papers")
+        })
+    df = pd.DataFrame(results).set_index("paper_id")
+    # Print the DataFrame as a JSON string.
+    print(df.to_json(orient="index", force_ascii=False, indent=2))
+
 def test_index(es, index_name):
     """
     Display the total document count and sample documents from the specified index.
@@ -272,15 +393,15 @@ def test_index(es, index_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Elasticsearch Citation Graph Loader & Query Tool")
-    parser.add_argument("--mode", choices=["build", "query", "test"], required=True,
+    parser.add_argument("--mode", choices=["build", "query", "test", "batch", "update"], required=True,
                         help="build: import citation data; query: search by paper title; test: show index samples")
     parser.add_argument("--directory", type=str, help="Directory with NDJSON citation files (for build mode)")
     parser.add_argument("--index_name", type=str, default="citations_index",
                         help="Elasticsearch index name for citations")
     parser.add_argument("--fields", choices=["full", "minimal"], default="minimal",
                         help="Store full fields or only minimal fields (citationid, citingcorpusid, citedcorpusid)")
-    parser.add_argument("--id", type=str, required=True,
-                        help="Paper id to search for (query mode)")
+    parser.add_argument("--id", type=str, default="150223110", help="Paper id to search for (query mode)")
+    parser.add_argument("--input_file", type=str, default="tmp.txt", help="Input file with paper IDs for batch query mode")
     args = parser.parse_args()
 
     es = Elasticsearch(
@@ -296,9 +417,20 @@ def main():
             return
         build_citations_index(es, args.directory, args.index_name, args.fields)
     elif args.mode == "query":
-        query_citations_by_id(es, args.index_name, args.id)
+        result = query_citations_by_id(es, args.index_name, args.id)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.mode == "test":
         test_index(es, args.index_name)
+    elif args.mode == "batch":
+        if not args.input_file:
+            print("Error: --input_file is required for batch mode.")
+            return
+        batch_query(es, args.index_name, args.input_file)
+    elif args.mode == "update":
+        if not args.directory:
+            print("Error: --directory is required in update mode.")
+            return
+        update_index_mini2full(es, args.directory, args.index_name)
 
 if __name__ == "__main__":
     main()
