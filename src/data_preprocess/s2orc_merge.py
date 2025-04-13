@@ -5,12 +5,16 @@ Last Modified: 2025-04-12
 Description: This script merges multiple DataFrames from S2ORC data, processes JSON fields, and saves the final DataFrame to a Parquet file.
 Usage:
     python -m src.data_preprocess.s2orc_merge
+Updates:
+    There are some missing citations/references in the titles2ids parquet file. This script will identify them and print the missing items.
+    There are some 429 errors in the API query. This script will identify them and print the missing items.
 """
 
 import pandas as pd
 import json
 from pathlib import Path
 from collections import Counter, defaultdict
+from glob import glob  ######## Added to enable file pattern matching
 
 DATA_FOLDER = "data/processed"
 OUTPUT_FILE = f"{DATA_FOLDER}/s2orc_rerun.parquet"
@@ -200,10 +204,21 @@ def analyze_intent_influential_correlation(json_series):
 
 # MAIN EXECUTION BLOCK
 if __name__ == "__main__":
-    citations_cache = pd.read_parquet(Path(DATA_FOLDER) / "s2orc_citations_cache.parquet")
-    references_cache = pd.read_parquet(Path(DATA_FOLDER) / "s2orc_references_cache.parquet")
-    query_results = pd.read_parquet(Path(DATA_FOLDER) / "s2orc_query_results.parquet")
-    titles2ids = pd.read_parquet(Path(DATA_FOLDER) / "s2orc_titles2ids.parquet")
+    data_path = Path(DATA_FOLDER)  ######## Define data_path using Path
+    prefix = ""  ######## Define prefix as needed (here empty; modify if needed)
+    
+    def load_and_concat(pattern):
+        ######## Helper function to concatenate files by pattern
+        files = list(data_path.glob(pattern))
+        if not files:
+            raise FileNotFoundError(f"No files found matching pattern: {pattern}")
+        return pd.concat([pd.read_parquet(file) for file in files], ignore_index=True)
+    
+    citations_cache = load_and_concat("s2orc_citations_cache*.parquet")  ######## Concat multiple citations cache files
+    references_cache = load_and_concat("s2orc_references_cache*.parquet")  ######## Concat multiple references cache files
+    query_results = load_and_concat("s2orc_query_results*.parquet")  ######## Concat multiple query results files
+    titles2ids = load_and_concat("s2orc_titles2ids*.parquet")  ######## Concat multiple titles mapping files
+
     final_merged_df = merge_dataframes(query_results, titles2ids, citations_cache, references_cache)
     new_cols = final_merged_df["parsed_response_reference"].apply(
         lambda x: pd.Series(
@@ -231,4 +246,26 @@ if __name__ == "__main__":
     for intent, stats in intent_influential_stats.items():
         print(f"{intent}: {stats}")
     print('Save merged dataframe to', OUTPUT_FILE)
-
+    
+    ######## New Block: Identify missing citations/references based on titles2ids parquet ########
+    # Retrieve paper IDs from citations cache (English: get paper IDs from citations_cache)
+    citations_ids = set(citations_cache["paperId"].unique())  ######## English: Retrieve paper IDs from citations cache
+    # Retrieve paper IDs from references cache (English: get paper IDs from references_cache)
+    references_ids = set(references_cache["paperId"].unique())  ######## English: Retrieve paper IDs from references cache
+    
+    # Filter titles2ids DataFrame for rows whose paperId is missing in either citations or references caches
+    missing_df = titles2ids[~(titles2ids["paperId"].isin(citations_ids)) | ~(titles2ids["paperId"].isin(references_ids))]  ######## English: Find missing paper IDs
+    
+    if not missing_df.empty:
+        print("\nMissing Items that require re-query (based on titles2ids parquet):")
+        for _, row in missing_df.iterrows():
+            missing_citation = row["paperId"] not in citations_ids  ######## English: Flag missing citation
+            missing_reference = row["paperId"] not in references_ids  ######## English: Flag missing reference
+            print("PaperId:", row.get("paperId"))
+            print("Query:", row.get("query", "N/A"))  ######## English: Print query if available
+            print("Retrieved Title:", row.get("retrieved_title", "N/A"))  ######## English: Print retrieved title if available
+            print("Missing Citation:", missing_citation)
+            print("Missing Reference:", missing_reference)
+            print("-" * 40)
+    else:
+        print("\nNo missing items found in citation or reference caches based on titles2ids parquet.")

@@ -26,12 +26,13 @@ REFERENCE_URL_TEMPLATE = "https://api.semanticscholar.org/graph/v1/paper/{paper_
 BATCH_FIELDS = "corpusId,paperId,title,authors,year,venue,citations,references"  ######## Fields for batch query
 
 # File paths
-TITLES_JSON_FILE = "data/processed/modelcard_dedup_titles.json"  ######## Input file for titles
-TITLES_CACHE_FILE = "data/processed/s2orc_titles2ids.parquet"  ######## Cache file for titles mapping
-BATCH_CACHE_FILE = "data/processed/s2orc_batch_results.parquet"  ######## Cache file for batch results
-CITATIONS_CACHE_FILE = "data/processed/s2orc_citations_cache.parquet"  ######## Cache file for citations
-REFERENCES_CACHE_FILE = "data/processed/s2orc_references_cache.parquet"  ######## Cache file for references
-MERGED_RESULTS_FILE = "data/processed/s2orc_query_results.parquet"  ######## Output file for merged results
+prefix = "" #"_429"
+TITLES_JSON_FILE = f"data/processed/modelcard_dedup_titles{prefix}.json"  ######## Input file for titles
+TITLES_CACHE_FILE = f"data/processed/s2orc_titles2ids{prefix}.parquet"  ######## Cache file for titles mapping
+BATCH_CACHE_FILE = f"data/processed/s2orc_batch_results{prefix}.parquet"  ######## Cache file for batch results
+CITATIONS_CACHE_FILE = f"data/processed/s2orc_citations_cache{prefix}.parquet"  ######## Cache file for citations
+REFERENCES_CACHE_FILE = f"data/processed/s2orc_references_cache{prefix}.parquet"  ######## Cache file for references
+MERGED_RESULTS_FILE = f"data/processed/s2orc_query_results{prefix}.parquet"  ######## Output file for merged results
 
 load_dotenv()
 API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY")

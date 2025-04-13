@@ -4,7 +4,7 @@ Created: 2025-04-12
 Last Modified: 2025-04-12
 Description: This script extracts error titles from a log file and saves them in either TXT or JSON format.
 Usage:
-    python -m src.data_preprocess.s2orc_log_429 --logfile logs/s2orc_API_query.log --outformat json --outfile tmp_429.json --error 429
+    python -m src.data_preprocess.s2orc_log_429 --logfile logs/s2orc_API_query.log --outformat json --outfile data/processed/modelcard_dedup_titles_429.json --error 429
 """
 
 import json
