@@ -3,10 +3,11 @@ Author: Zhengyuan Dong
 Created: 2025-04-10
 Last Modified: 2025-04-10
 Description:
-    1. Query Semantic Scholar API to get paper details, citations, and references.
+    1. Query Semantic Scholar API to get paper details, citations, and references. (This might be slower than local database query)
     2. Save the results to parquet files.
     3. Merge the results into a final output file.
     4. Handle API rate limits and errors.
+TODO: add tqdm for following steps (already tqdm for step1)
 """
 
 import os

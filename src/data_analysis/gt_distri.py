@@ -1,11 +1,11 @@
-"""
+"""""
 Author: Zhengyuan Dong
 Created: 2025-04-11
 Last Modified: 2025-04-11
 Description: Distribution analysis of GT lengths in pickle files using a loader class and reusable functions.
 Usage:
     python -m src.data_analysis.gt_distri
-"""
+"""""
 
 import os
 import pickle
@@ -28,8 +28,7 @@ NEW_PALETTE = {
     "scilake_direct": "#8b2e2e",
     "scilake_rate": "#d96e44",
 }
-# alette_baseline = ["#8b2e2e", "#b74a3c", "#d96e44", "#f29e4c", "#FFBE5F"]
-
+# ================= Loader Class =================
 class GTLengthLoader:
     """Class to load pickle files and extract the length of list-type ground truth entries."""
     def __init__(self, source_name: str, file_path: str):
@@ -80,10 +79,16 @@ def load_all_lengths(pickle_paths):
 def plot_histogram(length_data, palette, title, output_prefix):
     """Plot histogram with transparent bars and log scale."""
     plt.figure(figsize=(10, 6))
-    bins = np.arange(0, max(max(v) for v in length_data.values()) + 2)
+    # 修改：处理空列表，若数据为空则默认最大值为 0 ########
+    max_val = 0  ########
+    for v in length_data.values():  ########
+        if len(v) > 0:  ########
+            max_val = max(max_val, max(v))  ########
+    bins = np.arange(0, max_val + 2)  ########
     for source, lengths in length_data.items():
-        plt.hist(lengths, bins=bins, alpha=0.4, label=source,
-                 color=palette[source], edgecolor=None)
+        if len(lengths) > 0:  ########
+            plt.hist(lengths, bins=bins, alpha=0.4, label=source,
+                     color=palette[source], edgecolor=None)
     plt.title(title)
     plt.xlabel("List Length")
     plt.ylabel("Frequency")
@@ -93,13 +98,15 @@ def plot_histogram(length_data, palette, title, output_prefix):
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, f"{output_prefix}_histogram.png"))
     plt.savefig(os.path.join(OUTPUT_DIR, f"{output_prefix}_histogram.pdf"))
-    #plt.show()
+    # plt.show()
 
 def plot_kde(length_data, palette, title, output_prefix):
     """Plot KDE smoothed distribution with fill and log scale."""
     plt.figure(figsize=(10, 6))
 
     def plot_kde_manual(data, label, color):
+        if len(data) == 0:  ########
+            return  ########
         kde = gaussian_kde(data)
         x_vals = np.linspace(min(data) - 1, max(data) + 1, 200)
         y_vals = kde(x_vals)
@@ -118,24 +125,44 @@ def plot_kde(length_data, palette, title, output_prefix):
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, f"{output_prefix}_kde.png"))
     plt.savefig(os.path.join(OUTPUT_DIR, f"{output_prefix}_kde.pdf"))
-    #plt.show()
+    # plt.show()
 
-# === Example usage with first set ===
-PICKLE_PATHS_1 = {
-    "scilake": "/Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__direct_label.pickle", # TODO: use the final decided one
-    "santos": "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",
-    "tus": "/Users/doradong/Repo/santos/groundtruth/tusUnionBenchmark.pickle"
+PICKLE_PATHS_1 = {  ########
+    "scilake": "/Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__direct_label.pickle",  ########
+    "santos": "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",  ########
+    "tus": "/Users/doradong/Repo/santos/groundtruth/tusUnionBenchmark.pickle"  ########
 }
 print_large_keys(PICKLE_PATHS_1, threshold=1000)
 length_data_1 = load_all_lengths(PICKLE_PATHS_1)
 plot_histogram(length_data_1, TEAL_PALETTE, "Distribution of GT Lengths (Histogram)", "gt1")
 plot_kde(length_data_1, TEAL_PALETTE, "Distribution of GT Lengths (KDE)", "gt1")
 
-PICKLE_PATHS_2 = {
-    "scilake_direct": "/Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__direct_label.pickle",
-    "scilake_rate": "/Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__overlap_rate.pickle",
+PICKLE_PATHS_2 = {  ########
+    "scilake_direct": "/Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__direct_label.pickle",  ########
+    "scilake_rate": "/Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__overlap_rate.pickle",  ########
 }
 length_data_2 = load_all_lengths(PICKLE_PATHS_2)
 plot_histogram(length_data_2, NEW_PALETTE, "Distribution of GT Lengths (Histogram)", "gt2")
 plot_kde(length_data_2, NEW_PALETTE, "Distribution of GT Lengths (KDE)", "gt2")
 print('saved to ', OUTPUT_DIR)
+
+PICKLE_PATHS_3 = {  ########
+    "santos_union": "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",  ########
+    "santos_joinable": "/Users/doradong/Repo/santos/groundtruth/santosIntentColumnBenchmark.pickle",  ########
+    "tus_union": "/Users/doradong/Repo/santos/groundtruth/tusUnionBenchmark.pickle",  ########
+    "tus_joinable": "/Users/doradong/Repo/santos/groundtruth/tusIntentColumnBenchmark.pickle",  ########
+    "realtables_union": "/Users/doradong/Repo/santos/groundtruth/real_tablesUnionBenchmark.pickle",  ########
+    "realtables_joinable": "/Users/doradong/Repo/santos/groundtruth/real_tablesIntentColumnBenchmark.pickle",  ########
+}
+SIX_PALETTE = {  ########
+    "santos_union": "#e41a1c",       ########
+    "santos_joinable": "#377eb8",    ########
+    "tus_union": "#4daf4a",          ########
+    "tus_joinable": "#984ea3",       ########
+    "realtables_union": "#ff7f00",   ########
+    "realtables_joinable": "#a65628" ########
+}
+length_data_3 = load_all_lengths(PICKLE_PATHS_3)  ########
+plot_histogram(length_data_3, SIX_PALETTE, "GT Length Distribution: Union vs Joinable", "gt3")  ########
+plot_kde(length_data_3, SIX_PALETTE, "GT Length Distribution: Union vs Joinable", "gt3")  ########
+print('Saved union vs joinable comparison to', OUTPUT_DIR)
