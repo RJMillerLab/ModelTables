@@ -2,7 +2,7 @@
 """
 Usage:
   python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --fields minimal
-  python build_mini_citation_es.py --mode query --paper_index /u4/z6dong/shared_data/se_s2orc_250218/papers_index --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --title "BioMANIA: Simplifying bioinformatics data analysis through conversation"
+  python build_mini_citation_es.py --mode query --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --id 8982892
   python build_mini_citation_es.py --mode test --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index
 
 Notes:
@@ -223,6 +223,42 @@ def query_citations(es, paper_index, citations_index, title):
         src = hit["_source"]
         print(f"CitationID: {src.get('citationid')}, Citing: {src.get('citingcorpusid')}, Cited: {src.get('citedcorpusid')}")
     
+def query_citations_by_id(es, citations_index, target_id):
+    """
+    Query the citations index for citation edges where target_id appears as either citingcorpusid or citedcorpusid.
+    Separates and prints the results into two groups.
+    """
+    query_citing = {
+        "query": {
+            "term": {"citingcorpusid": target_id}
+        }
+    }
+    query_cited = {
+        "query": {
+            "term": {"citedcorpusid": target_id}
+        }
+    }
+    response_citing = es.search(index=citations_index, body=query_citing, size=50)
+    response_cited = es.search(index=citations_index, body=query_cited, size=50)
+    hits_citing = response_citing.get("hits", {}).get("hits", [])
+    hits_cited = response_cited.get("hits", {}).get("hits", [])
+    
+    print(f"========== Citation edges where citingcorpusid equals {target_id} ==========")
+    if not hits_citing:
+        print("No documents found where citingcorpusid matches.")
+    else:
+        for hit in hits_citing:
+            src = hit.get("_source", {})
+            print(f"CitationID: {src.get('citationid')}, Citing: {src.get('citingcorpusid')}, Cited: {src.get('citedcorpusid')}")
+    
+    print(f"========== Citation edges where citedcorpusid equals {target_id} ==========")
+    if not hits_cited:
+        print("No documents found where citedcorpusid matches.")
+    else:
+        for hit in hits_cited:
+            src = hit.get("_source", {})
+            print(f"CitationID: {src.get('citationid')}, Citing: {src.get('citingcorpusid')}, Cited: {src.get('citedcorpusid')}")
+    
 def test_index(es, index_name):
     """
     Display the total document count and sample documents from the specified index.
@@ -241,11 +277,10 @@ def main():
     parser.add_argument("--directory", type=str, help="Directory with NDJSON citation files (for build mode)")
     parser.add_argument("--index_name", type=str, default="citations_index",
                         help="Elasticsearch index name for citations")
-    parser.add_argument("--paper_index", type=str, default="papers_index",
-                        help="Elasticsearch index name for papers (for query mode)")
-    parser.add_argument("--title", type=str, help="Paper title to search for (query mode)")
     parser.add_argument("--fields", choices=["full", "minimal"], default="minimal",
                         help="Store full fields or only minimal fields (citationid, citingcorpusid, citedcorpusid)")
+    parser.add_argument("--id", type=str, required=True,
+                        help="Paper id to search for (query mode)")
     args = parser.parse_args()
 
     es = Elasticsearch(
@@ -261,10 +296,7 @@ def main():
             return
         build_citations_index(es, args.directory, args.index_name, args.fields)
     elif args.mode == "query":
-        if not args.title:
-            print("Error: --title is required in query mode.")
-            return
-        query_citations(es, args.paper_index, args.index_name, args.title)
+        query_citations_by_id(es, args.index_name, args.id)
     elif args.mode == "test":
         test_index(es, args.index_name)
 

@@ -2,7 +2,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-03-17
-Last updated: 2025-03-27
+Last updated: 2025-04-13
 Description:
   Demonstration of how to batch extract from Parquet-based ES query cache,
   then for each top-K retrieved title (or corpusid), query the SQLite index
@@ -28,26 +28,58 @@ from joblib import Parallel, delayed
 import subprocess
 from extract_table import extract_references
 
-def fetch_db_entries(parquet_cache, db_path):
+def quality_filter_cache(parquet_cache):
+    """
+    Quality filter the Elasticsearch query cache.
+
+    Reads the Parquet-based query cache and filters records based on quality metrics:
+      - Only records with rank == 1.
+      - Records where the query matches the retrieved_title (after lowercasing and stripping quotes/spaces).
+      - Only keeps records with a score greater than or equal to the minimum score among exact matches.
+
+    Args:
+        parquet_cache (str): Path to the Parquet query cache.
+
+    Returns:
+        DataFrame: Filtered DataFrame of eligible records.
+    """
     df_es = pd.read_parquet(parquet_cache)
     exact_matches = df_es[
         (df_es['rank'] == 1) &
         (df_es['query'].str.lower().str.strip('" ') == df_es['retrieved_title'].str.lower().str.strip('" '))
     ]
     min_score = exact_matches['score'].min()
-    eligible_matches = df_es[(df_es['score'] >= min_score) & (df_es['rank']==1)].copy()
-    titles = eligible_matches['retrieved_title'].str.lower().str.strip().unique()
-    placeholders = ','.join(['?'] * len(titles))
+    eligible_matches = df_es[(df_es['score'] >= min_score) & (df_es['rank'] == 1)].copy()
+    return eligible_matches
+
+def query_db_by_corpusid(filtered_df, db_path):
+    """
+    Query the SQLite database using corpusid values from the filtered ES query cache.
+
+    Extracts unique corpusid values from the filtered DataFrame, queries the database 
+    to retrieve corresponding records, and then merges the DB results with the filtered data.
+    (Updated to use corpusid instead of title) ########
+
+    Args:
+        filtered_df (DataFrame): The filtered Elasticsearch query cache DataFrame.
+        db_path (str): Path to the SQLite database.
+
+    Returns:
+        DataFrame: Merged DataFrame containing both ES data and the corresponding DB records.
+    """
+    # Extract unique corpusid values, converting to lowercase and stripping spaces ########
+    corpusids = filtered_df['corpusid'].str.lower().str.strip().unique()
+    placeholders = ','.join(['?'] * len(corpusids))
     with sqlite3.connect(db_path) as conn:
-        query = f"SELECT corpusid, filename, line_index, LOWER(TRIM(title)) as title FROM papers WHERE title IN ({placeholders})"
-        db_df = pd.read_sql(query, conn, params=titles.tolist())
-    merged_df = eligible_matches.merge(
-        db_df,
-        left_on=['retrieved_title', 'corpusid'],
-        right_on=['title', 'corpusid'],
-        how='left'
-    )
-    #merged_df = merged_df.drop(columns=['rank', 'title_clean'])  ########
+        # Query the database using corpusid instead of title ########
+        query = f"""
+                SELECT corpusid, filename, line_index, LOWER(TRIM(title)) as title
+                FROM papers
+                WHERE corpusid IN ({placeholders})
+                """
+        db_df = pd.read_sql(query, conn, params=list(corpusids))
+    # Merge on corpusid only
+    merged_df = filtered_df.merge(db_df, on='corpusid', how='left')
     return merged_df
 
 def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
@@ -124,9 +156,14 @@ def main():
 
     args = parser.parse_args()
 
-    merged_df = fetch_db_entries(args.parquet_cache, args.db_path)
+    # Step 1: Quality filter the Elasticsearch query cache.
+    filtered_df = quality_filter_cache(args.parquet_cache)
+    # Step 2: Query the SQLite database using corpusid from the filtered data. ########
+    merged_df = query_db_by_corpusid(filtered_df, args.db_path)
     merged_df.to_parquet("data/processed/merged_df.parquet", index=False)
+    # Step 3: Extract specific lines from NDJSON files and write to a temporary Parquet file.
     extract_lines_to_parquet(merged_df, args.directory, args.temp_parquet, args.n_jobs)
+    # Step 4: Parse annotations from the extracted lines and write final annotated data to output Parquet.
     final_annotation_extraction(args.temp_parquet, args.output_parquet, args.n_jobs)
 
 if __name__ == "__main__":

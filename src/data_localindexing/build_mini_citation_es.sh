@@ -73,9 +73,9 @@ curl -XGET "http://${NODE_IP}:9200/_cluster/health?wait_for_status=yellow&timeou
 
 echo "========Running bulk import..."
 
-#python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --fields minimal
-#python build_mini_citation_es.py --mode query --paper_index /u4/z6dong/shared_data/se_s2orc_250218/papers_index --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index --title "BioMANIA: Simplifying bioinformatics data analysis through conversation"
-python build_mini_citation_es.py --mode test --index_name /u4/z6dong/shared_data/se_citations_250218/citations_index
+#python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index --fields minimal
+python build_mini_citation_es.py --mode query --index_name citations_index --id 150223110
+#python build_mini_citation_es.py --mode test --index_name citations_index
 
 echo "========Bulk import completed."
 
