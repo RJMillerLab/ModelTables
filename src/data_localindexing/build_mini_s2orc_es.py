@@ -11,7 +11,7 @@ Usage:
   python build_mini_s2orc_es.py --mode test --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
 
   # Batch query mode: Load titles from a JSON or CSV file, execute batch queries, and cache results in Parquet.
-  python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name paper_index --titles_file modelcard_dedup_titles.json --cache_file query_cache.parquet
+  python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name paper_index --titles_file modelcard_dedup_titles.json --cache_file data/processed/query_cache.parquet
 
 Notes:
   - Build mode: Data is streamed from the SQLite database and imported into Elasticsearch using streaming_bulk.
@@ -355,7 +355,7 @@ def main():
     parser.add_argument("--titles_file",
                         default="/u4/z6dong/Repo/CitationLake/data/processed/modelcard_dedup_titles.json",
                         help="File (JSON or CSV) containing list of titles for batch querying")
-    parser.add_argument("--cache_file", default="query_cache.parquet",
+    parser.add_argument("--cache_file", default="data/processed/query_cache.parquet",
                         help="Parquet file to store query results (never removed)")
 
     args = parser.parse_args()

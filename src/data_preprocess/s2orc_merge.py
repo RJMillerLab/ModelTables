@@ -14,7 +14,7 @@ import pandas as pd
 import json
 from pathlib import Path
 from collections import Counter, defaultdict
-from glob import glob  ######## Added to enable file pattern matching
+from glob import glob
 
 DATA_FOLDER = "data/processed"
 OUTPUT_FILE = f"{DATA_FOLDER}/s2orc_rerun.parquet"
@@ -214,8 +214,15 @@ if __name__ == "__main__":
             raise FileNotFoundError(f"No files found matching pattern: {pattern}")
         return pd.concat([pd.read_parquet(file) for file in files], ignore_index=True)
     
-    citations_cache = load_and_concat("s2orc_citations_cache*.parquet")  ######## Concat multiple citations cache files
-    references_cache = load_and_concat("s2orc_references_cache*.parquet")  ######## Concat multiple references cache files
+    # Load original citations and references caches (including _429 versions)
+    citations_cache_main = load_and_concat("s2orc_citations_cache*.parquet")  ######## Concat multiple citations cache files
+    references_cache_main = load_and_concat("s2orc_references_cache*.parquet")  ######## Concat multiple references cache files
+    # Load missing citations and references caches (including _429 versions)
+    citations_missing = load_and_concat("s2orc_citations_missing*.parquet")  ######## Concat missing citations files
+    references_missing = load_and_concat("s2orc_references_missing*.parquet")  ######## Concat missing references files
+    # Combine original and missing caches for final merge
+    citations_cache = pd.concat([citations_cache_main, citations_missing], ignore_index=True)  ######## Combined citations
+    references_cache = pd.concat([references_cache_main, references_missing], ignore_index=True)  ######## Combined references
     query_results = load_and_concat("s2orc_query_results*.parquet")  ######## Concat multiple query results files
     titles2ids = load_and_concat("s2orc_titles2ids*.parquet")  ######## Concat multiple titles mapping files
 

@@ -215,7 +215,7 @@ def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
 
 def main():
     ######## 1) Load a local Parquet file with "retrieved_title" column ########
-    parquet_path = "extracted_annotations.parquet"
+    parquet_path = "data/processed/extracted_annotations.parquet"
     df_parquet = pd.read_parquet(parquet_path)
     all_titles = set(df_parquet["retrieved_title"].dropna().unique())
     print(f"[INFO] Loaded {len(df_parquet)} rows from {parquet_path}, found {len(all_titles)} unique 'retrieved_title'.")

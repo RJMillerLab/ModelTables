@@ -75,7 +75,7 @@ echo "========Running bulk import..."
 #python build_mini_s2orc_es.py --mode build --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index
 #python build_mini_s2orc_es.py --mode test --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index
 #python build_mini_s2orc_es.py --mode query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --query "BioMANIA: Simplifying bioinformatics data analysis through conversation"
-python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file modelcard_dedup_titles.json --cache_file query_cache.parquet
+python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file modelcard_dedup_titles.json --cache_file data/processed/query_cache.parquet
 echo "========Bulk import completed."
 
 echo "========Killing Elasticsearch process with PID ${ES_PID}..."

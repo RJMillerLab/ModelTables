@@ -656,8 +656,8 @@ def main():
             link=lk, domain=dm, category=cat, handler=handler, invalid=invalid
         ))
     df_links = pd.DataFrame(records)
-    df_links.to_csv("all_links_with_category.csv", index=False)
-    print("Wrote all_links_with_category.csv")
+    df_links.to_csv("data/processed/all_links_with_category.csv", index=False)
+    print("Wrote data/processed/all_links_with_category.csv")
 
     valid_df = df_links[df_links["invalid"] == False].copy()
     print(f"Valid links: {len(valid_df)}")

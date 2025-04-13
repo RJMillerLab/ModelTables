@@ -138,7 +138,7 @@ def domain_round_robin_download(urls, output_folder, pdf_cache, cache_path):
     return downloaded_paths, failed_urls
 
 def main():
-    parquet_path = "extracted_annotations.parquet"
+    parquet_path = "data/processed/extracted_annotations.parquet"
     if not os.path.isfile(parquet_path):
         print("❌  Parquet file not found:", parquet_path)
         return

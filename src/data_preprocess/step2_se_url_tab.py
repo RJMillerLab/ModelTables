@@ -13,8 +13,8 @@ Optimized batch extraction from ES cache → SQLite → NDJSON lines → Annotat
 python step2_se_url_tab.py \
     --directory /u4/z6dong/shared_data/se_s2orc_250218 \
     --db_path /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db \
-    --parquet_cache query_cache.parquet \
-    --output_parquet extracted_annotations.parquet \
+    --parquet_cache data/processed/query_cache.parquet \
+    --output_parquet data/processed/extracted_annotations.parquet \
     --n_jobs -1
 """
 
@@ -125,7 +125,7 @@ def main():
     args = parser.parse_args()
 
     merged_df = fetch_db_entries(args.parquet_cache, args.db_path)
-    merged_df.to_parquet("merged_df.parquet", index=False)
+    merged_df.to_parquet("data/processed/merged_df.parquet", index=False)
     extract_lines_to_parquet(merged_df, args.directory, args.temp_parquet, args.n_jobs)
     final_annotation_extraction(args.temp_parquet, args.output_parquet, args.n_jobs)
 
