@@ -26,7 +26,35 @@ import pandas as pd
 from tqdm import tqdm
 from joblib import Parallel, delayed
 import subprocess
-from extract_table import extract_references
+
+def extract_annotations(data, key):
+    raw_data = data.get("content", {}).get("annotations", {}).get(key, "[]")
+    if not raw_data:  # Explicitly handle None values
+        return []
+    try:
+        return json.loads(raw_data)
+    except json.JSONDecodeError:
+        return []
+
+def extract_references(data, content_text):
+    extracted_data = {}
+    annotations = {
+        "extracted_title": "title",
+    }
+    for key, annotation_key in annotations.items():
+        extracted = [
+            {
+                "start": item["start"],
+                "end": item["end"],
+                "extracted_text": content_text[item["start"]:item["end"]],
+                **({"id": item.get("attributes", {}).get("id", "unknown")} if "id" in item.get("attributes", {}) else {}),
+                **({"figure_ref_id": item.get("attributes", {}).get("ref_id", "unknown")} if "ref_id" in item.get("attributes", {}) else {})
+            }
+            for item in extract_annotations(data, annotation_key)
+            if isinstance(item.get("start"), int) and isinstance(item.get("end"), int) and item["start"] < item["end"]
+        ]
+        extracted_data[key] = extracted
+    return extracted_data
 
 def quality_filter_cache(parquet_cache):
     """
@@ -68,7 +96,14 @@ def query_db_by_corpusid(filtered_df, db_path):
         DataFrame: Merged DataFrame containing both ES data and the corresponding DB records.
     """
     # Extract unique corpusid values, converting to lowercase and stripping spaces ########
-    corpusids = filtered_df['corpusid'].str.lower().str.strip().unique()
+    #corpusids = filtered_df['corpusid'].str.lower().str.strip().unique()
+    corpusids = (
+        filtered_df['corpusid']
+        .astype(str)
+        .str.lower().str.strip()
+        .dropna()
+        .unique()
+    )
     placeholders = ','.join(['?'] * len(corpusids))
     with sqlite3.connect(db_path) as conn:
         # Query the database using corpusid instead of title ########
@@ -93,7 +128,9 @@ def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
         filepath = os.path.join(data_directory, filename)
         if not os.path.exists(filepath):
             return []
-        sed_cmd = ";".join(f"{idx+1}p" for idx in indices)
+        #sed_cmd = ";".join(f"{idx+1}p" for idx in indices)
+        sed_cmd = ";".join(f"{int(idx)+1}p" for idx in indices)  ######## 强制转为整数 ########
+
         cmd = f"sed -n '{sed_cmd}' '{filepath}'"
         try:
             output = subprocess.check_output(cmd, shell=True, text=True)
