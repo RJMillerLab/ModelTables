@@ -13,7 +13,7 @@ Optimized batch extraction from ES cache → SQLite → NDJSON lines → Annotat
 python step2_se_url_tab.py \
     --directory /u4/z6dong/shared_data/se_s2orc_250218 \
     --db_path /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db \
-    --parquet_cache data/processed/query_cache.parquet \
+    --parquet_cache data/processed/s2orc_rerun.parquet \
     --output_parquet data/processed/extracted_annotations.parquet \
     --n_jobs -1
 """
@@ -136,6 +136,16 @@ def parse_annotations(row):
         print(f"Error: {e}")
         return None
 
+def preprocess_custom_parquet(parquet_path):
+    df = pd.read_parquet(parquet_path)
+    df = df.rename(columns={
+        'query_title': 'query',
+        'corpusId': 'corpusid'
+    })
+    df['rank'] = 1
+    df['score'] = 1000
+    return df
+
 def final_annotation_extraction(temp_parquet, output_parquet, n_jobs):
     df_temp = pd.read_parquet(temp_parquet)
     parsed_data = Parallel(n_jobs=n_jobs)(
@@ -150,14 +160,17 @@ def main():
     parser.add_argument("--directory", required=True, help="Directory of NDJSON files")
     parser.add_argument("--db_path", required=True, help="SQLite database path")
     parser.add_argument("--parquet_cache", required=True, help="Input Parquet cache")
-    parser.add_argument("--output_parquet", default="final_annotations.parquet", help="Output Parquet path")
-    parser.add_argument("--temp_parquet", default="tmp_extracted_lines.parquet", help="Temporary Parquet path")
+    parser.add_argument("--output_parquet", default="data/processed/extracted_annotations.parquet", help="Output Parquet path")
+    parser.add_argument("--temp_parquet", default="data/processed/tmp_extracted_lines.parquet", help="Temporary Parquet path")
     parser.add_argument("--n_jobs", default=-1, type=int, help="Parallel jobs")
 
     args = parser.parse_args()
 
     # Step 1: Quality filter the Elasticsearch query cache.
-    filtered_df = quality_filter_cache(args.parquet_cache)
+    if 'query_cache' in args.parquet_cache: # this is queried from local, thus it might include multiple choice for one item, need to filter out then
+        filtered_df = quality_filter_cache(args.parquet_cache)
+    else:
+        filtered_df = preprocess_custom_parquet(args.parquet_cache)
     # Step 2: Query the SQLite database using corpusid from the filtered data. ########
     merged_df = query_db_by_corpusid(filtered_df, args.db_path)
     merged_df.to_parquet("data/processed/merged_df.parquet", index=False)
