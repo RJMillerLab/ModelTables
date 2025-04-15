@@ -145,12 +145,14 @@ python -m src.data_gt.step3_gt # build up groundtruth # TODO: add double check f
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
-bash src/data_symlink/ln_scilake_large.sh # symlink 4: dedupled_github_csvs|deduped_hugging_csvs|tables_output|llm_tables
-# when fixed four folders, keep data augmentation by below tricks scripts
-python -m src.data_symlink.trick_aug --mode str # trick: str value in new folder
-python -m src.data_symlink.trick_aug --mode transpose # trick: transpose csv in new folder
-python -m src.data_symlink.trick_aug --mode str_transpose # trick: tr + str value in new folder
-bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
+python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode base # symlink csvs to the target folder
+python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode str
+python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode tr
+python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode str_tr
+# python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode all
+python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode str # trick: header-str(value)
+python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode transpose # trick: permutation
+python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode str_transpose # trick: tr + str 
 ```
 6. Run updated [starmie](https://github.com/DoraDong-2023/starmie_internal) scripts for finetuning and check performance
 ```bash
@@ -198,6 +200,8 @@ python -m src.data_preprocess.step1_parsetags # Parse tags into columns with nam
 bash src/data_symlink/trick_str.sh # too slow
 bash src/data_symlink/trick_tr.sh # too slow
 bash src/data_symlink/trick_tr_str.sh # too slow
+bash src/data_symlink/ln_scilake_large.sh # too slow
+bash src/data_symlink/ln_scilake_final.sh
 ```
 
 

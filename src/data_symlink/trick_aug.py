@@ -7,7 +7,7 @@ Description: This script processes CSV files in a specified folder using differe
 - "transpose": Transposes the CSV data.
 - "str": Converts each cell to the string format "colname-value".
 - "str_transpose": Converts each cell to "colname-value" and then transposes the data.
-Usage: python -m src.data_symlink.trick_aug --mode str
+Usage: python -m src.data_symlink.trick_aug --mode str --repo_root /u4/z6dong/Repo
 """
 
 import os
@@ -154,7 +154,6 @@ def process_folder(mode, folder, repo_root):
     - Prints out statistical information.
     """
     input_folder = os.path.join(repo_root, folder)
-    ######## 根据 mode 固定输出文件夹名称 ########
     if mode == "transpose":
         output_folder = input_folder + "_tr"
     elif mode == "str":
@@ -188,7 +187,6 @@ def process_folder(mode, folder, repo_root):
     num_to_process = len(files_to_process)
     num_skipped = total_files - num_to_process
 
-    ######## 修改打印，区分输入、输出目录 ########
     print(f"Source folder: {input_folder}")  ########
     print(f"Target folder: {output_folder}")  ########
     print(f"  Total original CSV files: {total_files}")
@@ -222,9 +220,9 @@ def main():
     # Parse command-line arguments to choose the processing mode
     parser = argparse.ArgumentParser(description="Process CSV files in different modes")
     parser.add_argument("--mode", type=str, choices=["transpose", "str", "str_transpose"], default="transpose", help="Processing mode")
+    parser.add_argument("--repo_root", type=str, default="/u4/z6dong/Repo", help="Repository root directory.")
     args = parser.parse_args()
-
-    repo_root = "/Users/doradong/Repo"
+    
     folders = [
         "CitationLake/data/processed/deduped_hugging_csvs",
         "CitationLake/data/processed/deduped_github_csvs",
@@ -232,9 +230,9 @@ def main():
         "CitationLake/data/processed/llm_tables"
     ]
     for folder in folders:
-        full_folder = os.path.join(repo_root, folder)
+        full_folder = os.path.join(args.repo_root, folder)
         print(f"\nProcessing folder: {full_folder} with mode {args.mode}")
-        results = process_folder(args.mode, folder, repo_root)
+        results = process_folder(args.mode, folder, args.repo_root)
         if isinstance(results, list):
             for res in results:
                 print(res)
