@@ -27,6 +27,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 import subprocess
 
+
 def extract_annotations(data, key):
     raw_data = data.get("content", {}).get("annotations", {}).get(key, "[]")
     if not raw_data:  # Explicitly handle None values
@@ -37,9 +38,32 @@ def extract_annotations(data, key):
         return []
 
 def extract_references(data, content_text):
+    """Extract tables, figures, captions, and references."""
     extracted_data = {}
     annotations = {
+        "extracted_abstract": "abstract",
+        "extracted_authors": "authors",
+        "extracted_references": "references",
+        "extracted_author_affiliations": "authoraffiliation",
+        "extracted_author_firstnames": "authorfirstname",
+        "extracted_author_lastnames": "authorlastname",
+        "extracted_bib_authors": "bibauthor",
+        "extracted_bib_author_firstnames": "bibauthorfirstname",
+        "extracted_bib_author_lastnames": "bibauthorlastname",
+        "extracted_bib_entries": "bibentry",
+        "extracted_bib_refs": "bibref",
+        "extracted_bib_titles": "bibtitle",
+        "extracted_bib_venues": "bibvenue",
+        "extracted_tablerefs": "tableref",
+        "extracted_tables": "table",
+        "extracted_figures": "figure",
+        "extracted_figure_captions": "figurecaption",
+        "extracted_figurerefs": "figureref",
+        "extracted_formula": "formula",
+        "extracted_publisher": "publisher",
+        "extracted_sectionheader": "sectionheader",
         "extracted_title": "title",
+        "extracted_venue": "venue",
     }
     for key, annotation_key in annotations.items():
         extracted = [
@@ -53,7 +77,8 @@ def extract_references(data, content_text):
             for item in extract_annotations(data, annotation_key)
             if isinstance(item.get("start"), int) and isinstance(item.get("end"), int) and item["start"] < item["end"]
         ]
-        extracted_data[key] = extracted
+        if extracted:
+            extracted_data[key] = extracted
     return extracted_data
 
 def quality_filter_cache(parquet_cache):
@@ -118,11 +143,6 @@ def query_db_by_corpusid(filtered_df, db_path):
     return merged_df
 
 def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
-    import os
-    import subprocess
-    import pandas as pd
-    from joblib import Parallel, delayed
-    from tqdm import tqdm
 
     def extract_lines(filename, indices):
         filepath = os.path.join(data_directory, filename)
@@ -135,11 +155,17 @@ def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
         try:
             output = subprocess.check_output(cmd, shell=True, text=True)
             return output.strip().split('\n')
-        except subprocess.CalledProcessError:
+        except Exception as e:
+            print(f"[sed error] {filepath}: {e}")
             return []
 
     dedup_df = merged_df.drop_duplicates(subset=['filename', 'line_index'], keep='first')
     grouped = list(dedup_df.groupby('filename'))
+
+    os.makedirs(os.path.dirname(temp_parquet), exist_ok=True)
+    if os.path.exists(temp_parquet):
+        os.remove(temp_parquet)
+    
     results = Parallel(n_jobs=n_jobs)(
         delayed(lambda filename, group: (filename, group, extract_lines(filename, group['line_index'].tolist())))(
             filename, group
@@ -153,6 +179,15 @@ def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
             row_dict['raw_json'] = line
             lines_expanded.append(row_dict)
     pd.DataFrame(lines_expanded).to_parquet(temp_parquet, index=False)
+    """records = []
+    for filename, group in tqdm(grouped, total=len(grouped), desc="Extracting lines"):
+        lines = extract_lines(filename, group['line_index'].tolist())
+        group_sorted = group.sort_values('line_index')
+        for (_, row), line in zip(group_sorted.iterrows(), lines):
+            row_dict = row.to_dict()
+            row_dict['raw_json'] = line
+            records.append(row_dict)
+    pd.DataFrame(records).to_parquet(temp_parquet, index=False)"""
 
 def parse_annotations(row):
     try:

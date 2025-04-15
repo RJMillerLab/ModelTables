@@ -149,7 +149,7 @@ def main():
     all_urls = set(df_parquet["extracted_openaccessurl"].dropna().unique())
     print("📄  Loaded", len(df_parquet), "rows from", parquet_path, "with", len(all_urls), "unique URLs.")
 
-    pdf_cache_path = "pdf_download_cache.json"
+    pdf_cache_path = "data/processed/pdf_download_cache.json"
     pdf_cache = load_json_cache(pdf_cache_path)
 
     ######## Detect invalid PDFs even if cached ########

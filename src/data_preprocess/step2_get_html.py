@@ -16,9 +16,9 @@ from urllib.parse import quote
 import requests
 import xml.etree.ElementTree as ET
 
-HTML_CACHE_FILE = "arxiv_html_cache.json"  ########
+HTML_CACHE_FILE = "data/processed/arxiv_html_cache.json"  ########
 HTML_FOLDER = "arxiv_fulltext_html"  ########
-NEW_CACHE_PATH = "title2arxiv_new_cache.json"
+NEW_CACHE_PATH = "data/processed/title2arxiv_new_cache.json"
 
 def normalize_title(title):
     """
@@ -60,7 +60,7 @@ def save_json_cache(data, file_path):
 def search_arxiv_title(title_query, max_results=5):
     base_url = "http://export.arxiv.org/api/query"
     title_query = preprocess_title(title_query)
-    encoded_query = quote(f'"{title_query}"')  
+    encoded_query = quote(title_query) 
     params = {
         "search_query": f"ti:{encoded_query}", 
         "start": 0,
@@ -125,6 +125,28 @@ def fetch_ar5iv_html(arxiv_id):
             return None
         else:
             print(f"[WARN] ar5iv HTML not found for {arxiv_id}, status={resp.status_code}")
+            ######## NEW: if HTML not found, try to fetch the base arXiv ID (without version) ########
+            base_arxiv_id = re.sub(r'v\d+$', '', arxiv_id)  ########
+            if base_arxiv_id != arxiv_id:
+                print(f"[INFO] Fallback: trying base arXiv ID '{base_arxiv_id}' for {arxiv_id}.")  ########
+                base_file_path = os.path.join(HTML_FOLDER, f"{base_arxiv_id}.html")  ########
+                if os.path.exists(base_file_path):
+                    return base_file_path  ########
+                base_url = f"https://ar5iv.labs.arxiv.org/html/{base_arxiv_id}"  ########
+                try:
+                    base_resp = requests.get(base_url, timeout=15)  ########
+                    if base_resp.status_code == 200:
+                        html_text = base_resp.text  ########
+                        os.makedirs(HTML_FOLDER, exist_ok=True)  ########
+                        with open(base_file_path, "w", encoding="utf-8") as f:  ########
+                            f.write(html_text)  ########
+                        return base_file_path  ########
+                    else:
+                        print(f"[WARN] Fallback ar5iv HTML not found for {base_arxiv_id}, status={base_resp.status_code}")  ########
+                        return None  ########
+                except Exception as ex:
+                    print(f"[ERROR] Fallback ar5iv HTML fetch error for {base_arxiv_id}: {ex}")  ########
+                    return None  ########
             return None
     except Exception as e:
         print(f"[ERROR] ar5iv HTML fetch error for {arxiv_id}: {e}")
@@ -144,24 +166,24 @@ def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
         entries = parse_arxiv_atom(xml_text)
         if not entries:
             print(f"[INFO] No Atom entries found for title: {title}")
-            return None, None
+            return None, None, False
     except Exception as e:
         print(f"[ERROR] Atom feed error for '{title}': {e}")
-        return None, None
+        return None, None, False
 
     # 2) Take the first entry as best guess
     arxiv_url = entries[0]["id"]  # e.g., "http://arxiv.org/abs/2101.12345"
     arxiv_id = arxiv_url.split('/')[-1] if arxiv_url else None
     if not arxiv_id:
         print(f"[INFO] Could not parse ID from feed for title: {title}")
-        return None, None
+        return None, None, False
 
     # 3) Fetch HTML from ar5iv
     if arxiv_id in html_cache:
         html_file_path = html_cache[arxiv_id]
         if html_file_path and os.path.isfile(html_file_path):
             print(f"[INFO] HTML already cached for {arxiv_id}: {html_file_path}")
-            return arxiv_id, html_file_path
+            return arxiv_id, html_file_path, False
             #file_size = os.path.getsize(html_file_path)
             #else:
             #file_size = 0
@@ -173,7 +195,7 @@ def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
                 html_cache[arxiv_id] = html_file_path
             else:
                 html_cache[arxiv_id] = ""  # Mark as failed
-            return arxiv_id, html_file_path
+            return arxiv_id, html_file_path, True
         print(f"[INFO] Already in HTML cache: {arxiv_id} (file: {html_file_path})")
     else:
         html_file_path = fetch_ar5iv_html(arxiv_id)
@@ -184,7 +206,7 @@ def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
         else:
             html_cache[arxiv_id] = ""
             print(f"[INFO] No valid HTML for {arxiv_id}. Marked empty in cache.")
-    return arxiv_id, html_file_path
+    return arxiv_id, html_file_path, True
 
 def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
     """
@@ -199,7 +221,7 @@ def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
     new_rows = []
     for t in titles:
         t_stripped = t.strip()
-        arxiv_id, html_file_path = fetch_id_and_html_for_title(t_stripped, max_results=3, html_cache=html_cache)
+        arxiv_id, html_file_path, need_wait = fetch_id_and_html_for_title(t_stripped, max_results=3, html_cache=html_cache)
         new_rows.append((t_stripped, arxiv_id))
         ######## Save HTML cache after each fetch to avoid losing progress ########
         save_json_cache(html_cache, html_cache_path)
@@ -210,7 +232,8 @@ def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
         else:
             size_info = 0
         print(f"[INFO] Title='{t_stripped}' -> ID='{arxiv_id}', HTML file='{html_file_path}', size='{size_info}'")
-        time.sleep(2)
+        if need_wait:
+            time.sleep(3)
     return pd.DataFrame(new_rows, columns=["title", "arxiv_id"])
 
 def main():

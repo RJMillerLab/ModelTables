@@ -14,7 +14,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 
 print('loading the json file')
-with open('arxiv_html_cache.json') as f:
+with open('data/processed/arxiv_html_cache.json') as f:
     data = json.load(f)  # {'2109.13855v3': 'arxiv_fulltext_html/2109.13855v3.html'}
 
 def classify_page(html_path):

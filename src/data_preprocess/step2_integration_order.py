@@ -19,10 +19,10 @@ from src.llm.model import LLM_response
 
 
 # --------------- Fixed Path Constants --------------- #
-TITLE2ARXIV_JSON = "title2arxiv_new_cache.json"             ######## # Mapping: title -> arxiv_id
+TITLE2ARXIV_JSON = "data/processed/title2arxiv_new_cache.json"             ######## # Mapping: title -> arxiv_id
 HTML_TABLE_PARQUET = "data/processed/html_table.parquet"    ######## # Contains: paper_id, html_path, page_type, table_list
 ANNOTATIONS_PARQUET = "data/processed/extracted_annotations.parquet"       ######## # base
-PDF_CACHE_PATH = "pdf_download_cache.json"
+PDF_CACHE_PATH = "data/processed/pdf_download_cache.json"
 FINAL_OUTPUT_CSV = "data/processed/llm_markdown_table_results.parquet"
 BATCH_OUTPUT_PATH = "data/processed/batch_output.jsonl"
 BATCH_INPUT_PATH = "data/processed/batch_input.jsonl"
