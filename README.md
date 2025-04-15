@@ -40,9 +40,10 @@ git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_meta
 
 1. Parse every elements required:
 ```bash
+# Here I -> Input, O -> Output | skip writting data/processed
 python -m src.data_preprocess.step1 # Split readme and tags, parse urls, parse bibtex, 
 # get:  ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
-python -m src.data_preprocess.step1_down_giturl # Download github URL README & HTMLs. Input: modelcard_step1.parquet, Output: data/processed/giturl_info.parquet
+python -m src.data_preprocess.step1_down_giturl # Download github URL README & HTMLs. I: modelcard_step1.parquet, O: giturl_info.parquet
 #python -m src.data_preprocess.step1_down_giturl_fake # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
 find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' # some readme files are too large, we fix this issue
 python -m src.data_preprocess.step1_query_giturl load --query data/downloaded_github_readmes/7166b2cb378b3740c3b212bc0657dd11.md # Input: local path, Output: URL
@@ -77,7 +78,7 @@ python -m src.data_localindexing.build_mini_s2orc_es --mode build --directory /u
 python -m src.data_localindexing.build_mini_s2orc_es --mode query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --query "BioMANIA: Simplifying bioinformatics data analysis through conversation"
 python -m src.data_localindexing.build_mini_s2orc_es --mode test --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
 # batch querying papers_index
-python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file titles.json --cache_file query_cache.json
+python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles.json --cache_file data/processed/query_cache.json
 # getting full tables
 ```
 
@@ -91,82 +92,91 @@ python -m src.data_preprocess.step2_se_url_title # fetching title from bibtex, P
 # I: modelcard_step1.parquet, github_readme_cache.parquet, github_readmes_processed/, pdf_link + github_link URLs → O: modelcard_all_title_list.parquet, github_readme_cache_update.parquet, github_extraction_cache.json, all_links_with_category.csv
 python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
 # I: modelcard_all_title_list.parquet → O: modelcard_dedup_titles.json, modelcard_title_query_results.json, modelcard_all_title_list_mapped.parquet
-bash src/data_localindexing/build_mini_s2orc_es.sh # (batch query command) # build up s2orc and batch querying. 
-# I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
-bash src/data_preprocess/step2_se_url_tab.sh # extract title & openaccessurl | use title to fetch table from semantic scholar dataset
-# I: query_cache.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_extracted_lines.parquet, merged_df.parquet
+ - python -m src.data_preprocess.s2orc_API_query > logs/s2orc_API_query_v3_429.log # choose API to query |
+ # I: modelcard_dedup_titles.json O: s2orc_query_results.parquet, s2orc_citations_cache.parquet, s2orc_references_cache.parquet, s2orc_titles2ids.parquet
+ - python -m src.data_preprocess.s2orc_log_429 # incase some title meet 429 error (API rate error)
+ - python -m src.data_preprocess.s2orc_retry_missing # make up for the missing items
+ - python -m src.data_preprocess.s2orc_merge # parse the references and citations from retrieved results | O: s2orc_rerun.parquet
+
+ - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query |
+  # I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
+ - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext & openaccessurl | use title/id to fetch table from s2orc
+# I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, merged_df.parquet
 python -m src.data_preprocess.step2_get_html # download html
 # I: extracted_annotations.parquet, arxiv_titles_cache.json → O: title2arxiv_new_cache.json, arxiv_html_cache.json, missing_titles_tmp.txt, arxiv_fulltext_html/*.html
 python -m src.data_preprocess.step2_html_parsing # extract tables from html
-# I: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional) → O: html_table.parquet, data/processed/tables_output/*.csv
+# I: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional) → O: html_table.parquet, tables_output/*.csv
 mkdir logs
-python -m src.data_preprocess.step2_integration_order > logs/step2_integration_order_3.log # first html | then PDF? (no) | finally llm polished table text
-# I: title2arxiv_new_cache.json, html_table.parquet, extracted_annotations.parquet, pdf_download_cache.json → O: before_llm_output.parquet, data/processed/batch_input.jsonl, data/processed/batch_output.jsonl, data/processed/llm_markdown_table_results.parquet
+TODO: python -m src.data_preprocess.step2_integration_order > logs/step2_integration_order_0414.log # first html | then PDF? (no) | finally llm polished table text
+# I: title2arxiv_new_cache.json, html_table.parquet, extracted_annotations.parquet, pdf_download_cache.json → O: before_llm_output.parquet, batch_input.jsonl, batch_output.jsonl, llm_markdown_table_results.parquet
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
 #cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results.parquet
 python -m src.data_preprocess.step2_llm_save # save table into local csv
-# I: data/processed/llm_markdown_table_results.parquet → O: data/processed/llm_tables/*.csv, data/processed/final_integration_with_paths.parquet
+# I: llm_markdown_table_results.parquet → O: llm_tables/*.csv, final_integration_with_paths.parquet
 ```
 
 4. Label groundtruth for unionable search baselines:
 
 ```bash
 python -m src.data_gt.step3_pre_merge # merge all the table list into modelid file
-# I: data/processed/final_integration_with_paths.parquet, modelcard_all_title_list.parquet → O: modelcard_step3_merged.parquet
+# I: final_integration_with_paths.parquet, modelcard_all_title_list.parquet → O: modelcard_step3_merged.parquet
 python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
-# (Or Optional) bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph (need extra 300G storage). | Then get citations relation from graph edge .db
+# I: final_integration_with_paths.parquet. O: modelcard_citation_enriched.parquet
+bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph (need extra 300G storage). | Then get citations relation from graph edge .db
 python -m src.data_gt.step3_overlap_rate # paper level: compute each two papers' overlap score
-python -m src.data_analysis.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle files obtained from src.data_gt.step3_overlap_rate
+python -m src.data_analysis.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle from step3_overlap_rate
 ```
-
 Quality Control | Run some analysis
 ```bash
 python -m src.data_analysis.qc_dedup > logs/qc_dedup.log # dedup raw tables, keep dedup in order hugging>github>html>llm | I: modelcard_step3_merged, O: modelcard_step3_dedup.parquet
+python -m src.data_analysis.qc_dedup_fig
 python -m src.data_analysis.qc_stats # stats | I: modelcard_step4_dedup, O: benchmark_results
 python -m src.data_analysis.qc_stats_fig
 # (Optional) python -m src.data_analysis.qc_dc # double check whether the dedup and mapped logic is correct
 bash src/data_analysis/count_files.sh # obtain files count directly from folder | The count above should be smaller than files here.
 ```
-
 Final gt!
 ```bash
 python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
 # I: modelcard_step2.parquet, modelcard_step3_merged.parquet, md_to_csv_mapping.json, hugging_deduped_mapping.json → O: modelcard_step4.parquet + sym_*_csvs_*
-python -m src.data_gt.step3_gt # build up groundtruth
+python -m src.data_gt.step3_gt # build up groundtruth # TODO: add double check for stats
 ```
-
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
 bash src/data_symlink/ln_scilake_large.sh # symlink 4: dedupled_github_csvs|deduped_hugging_csvs|tables_output|llm_tables
 # when fixed four folders, keep data augmentation by below tricks scripts
-bash src/data_symlink/trick_tr.sh # trick: transpose csv in new folder
-bash src/data_symlink/trick_str.sh # trick: str value in new folder
-bash src/data_symlink/trick_tr_str.sh # trick: tr + str value in new folder
+python -m src.data_symlink.trick_aug --mode str # trick: str value in new folder
+python -m src.data_symlink.trick_aug --mode transpose # trick: transpose csv in new folder
+python -m src.data_symlink.trick_aug --mode str_transpose # trick: tr + str value in new folder
 bash src/data_symlink/ln_scilake_final.sh # symlink 12: above all
 ```
-
 6. Run updated [starmie](https://github.com/DoraDong-2023/starmie_internal) scripts for finetuning and check performance
 ```bash
 bash prepare_sample.sh # sample 1000 samples from each resources folder
 bash check_empty.sh # filter out empty files (or low quality files later)
 bash scripts/step1_pretrain.sh # finetune contrastive learning
 bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake items
-bash scripts/step3_search_hnsw.sh # data lake search!
+bash scripts/step3_search_hnsw.sh # data lake search (retrieve)!
+python step4_processmetrics.py # extract metrics based on searched results
+bash scripts/step4_discovery.sh
 ```
 
 Analysis on results
-```bash
+```bash  
 # get top-10 results from step3_search_hnsw
-python -m src.data_analysis.report_generation --json_path /Users/doradong/Repo/tmp/results_starmie/test_hnsw_search_scilake_large_first10.json # generate from results
-# compute the statistics
+python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
+python -m src.data_analysis.starmie_metrics_topk --input ~/Repo/starmie_internal/tmp/metrics_scilake_large_hnsw.json --output metrics_plot.pdf
+# get distribution of groundtruth
+python -m src.data_analysis.gt_distri # get csv with gt list > 1000
+python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log # check the related model of csv
 ```
 
 7. Analyze some statistics
 ```bash
 python -m src.data_preprocess.step1_analysis # get analysis on proportion of different links
-python -m src.data_preprocess.step3_save_starmie_results # analyze searching results of starmie
+python -m src.data_analysis.query_compare_API_local # compare the query results among local and API from s2orc
 TODO: add statistics analysis from dataset_processed.ipynb
 ```
 
@@ -185,6 +195,9 @@ python -m src.data_preprocess.step4 # process groundtruth (work for API, not wor
 python -m src.data_preprocess.step2_Citation_Info
 # (Optional) python -m src.data_preprocess.step3_statistic_table # get statistic tables
 python -m src.data_preprocess.step1_parsetags # Parse tags into columns with name start with `card_tag_xx`
+bash src/data_symlink/trick_str.sh # too slow
+bash src/data_symlink/trick_tr.sh # too slow
+bash src/data_symlink/trick_tr_str.sh # too slow
 ```
 
 
