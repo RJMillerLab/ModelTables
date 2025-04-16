@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-03
-Last Modified: 2025-04-04
+Last Modified: 2025-04-16
 Description:
     Compute the overlap rate of citation and citing papers based on paperId
     with flexible “modes” controlled by a tiny factory layer.
@@ -14,7 +14,7 @@ Description:
     Supported table source modes
     ----------------------------
     • step4_symlink  : use step‑4 parquet + *_sym columns
-    • step3_merged   : use step‑3 parquet + raw columns
+    • step3_dedup   : use step‑3 parquet + raw columns
 
     Outputs
     -------
@@ -24,16 +24,14 @@ Description:
     • ground‑truth benchmark table paths (pickle)
 
 Usage:
-    python -m src.data_gt.step3_gt --rel_mode [overlap_rate, direct_label] --tbl_mode [step4_symlink, step3_merged] (require step4.parquet by create_symlink.py)
+    python -m src.data_gt.step3_gt --rel_mode [overlap_rate, direct_label] --tbl_mode [step4_symlink, step3_dedup] (require step4.parquet by create_symlink.py)
     python -m src.data_gt.step3_gt --rel_mode direct_label --tbl_mode step4_symlink
     python -m src.data_gt.step3_gt --rel_mode overlap_rate --tbl_mode step4_symlink
 """
 
-import os
-import json
+import os, json, gzip, pickle
 import pandas as pd
 import numpy as np
-import pickle
 from tqdm import tqdm
 from enum import Enum
 from collections import defaultdict, Counter
@@ -41,7 +39,6 @@ from typing import Dict, Iterable, Set
 from joblib import Parallel, delayed
 from itertools import combinations, product
 from scipy.sparse import csr_matrix, dok_matrix, save_npz
-
 
 # === Configuration ===
 DATA_DIR = "data/processed"
@@ -58,13 +55,13 @@ CSV_SYMLINK_INDEX_PATH = f"{GT_DIR}/csv_symlink_index.pickle"
 CSV_REAL_ADJ_PATH   = f"{GT_DIR}/csv_real_adjacency.npz"
 CSV_REAL_INDEX_PATH = f"{GT_DIR}/csv_real_index.pickle"
 
+GT_COMBINED_PATH = f"{GT_DIR}/scilake_gt_all_matrices.pkl.gz"
 
 # ---- default files (can be overridden by CLI/kwargs) ----
 FILES = {
-    "overlap_rate": f"{DATA_DIR}/modelcard_citation_overlap_rate.pickle",
-    "direct_label": f"{DATA_DIR}/modelcard_citation_direct_label.pickle",
+    "combined": f"{DATA_DIR}/modelcard_citation_all_matrices.pkl.gz",
     "step4_symlink": f"{DATA_DIR}/modelcard_step4.parquet",
-    "step3_merged": f"{DATA_DIR}/modelcard_step3_merged.parquet",
+    "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup.parquet",
     "integration": f"{DATA_DIR}/final_integration_with_paths.parquet",
     "title_list": f"{DATA_DIR}/modelcard_all_title_list.parquet",
     "symlink_mapping": f"{DATA_DIR}/symlink_mapping.pickle",
@@ -89,18 +86,24 @@ class RelationshipMode(str, Enum):
 
 class TableSourceMode(str, Enum):
     STEP4_SYMLINK = "step4_symlink"
-    STEP3_MERGED = "step3_merged"
+    STEP3_MERGED = "step3_dedup"
 
 
 # ===== FACTORIES =========================================================== #
 def load_relationships(mode: RelationshipMode):
     """Factory loader for paperId‑level relationship graphs."""
-    path = FILES[mode.value]
-    print(f"Loading relationships ({mode.value}) from: {path}")
-    with open(path, "rb") as f:
+    path = FILES["combined"]
+    print(f"Loading relationships (combined) from: {path}")
+    with gzip.open(path, "rb") as f:
         data = pickle.load(f)
     paper_index = data["paper_index"]
-    score_matrix = data["score_matrix"]
+    # Select the proper score matrix from the new keys
+    if mode == RelationshipMode.OVERLAP_RATE:
+        score_matrix = data["max_pr"]                              ########  (use max‑PR by default)
+    elif mode == RelationshipMode.DIRECTED_CITE:
+        score_matrix = data["direct_label"]
+    else:
+        raise ValueError(f"Unsupported relationship mode: {mode}")
     return paper_index, score_matrix
 
 def load_table_source(mode: TableSourceMode):
@@ -136,8 +139,7 @@ def process_model_pair(pair, df_tables, use_symlink=True):
     csv_edges = set()
     for i in range(len(union_csv)):
         for j in range(i + 1, len(union_csv)):
-            edge = (union_csv[i], union_csv[j])
-            csv_edges.add(edge)
+            csv_edges.add((union_csv[i], union_csv[j]))
     return (pair, csv_edges)
 
 def map_csv_edges(result, symlink_map):
@@ -147,11 +149,8 @@ def map_csv_edges(result, symlink_map):
     """
     pair, csv_edges = result
     new_csv_edges = set()
-    for csv_edge in csv_edges:
-        csv1, csv2 = csv_edge
-        real_csv1 = symlink_map[csv1]
-        real_csv2 = symlink_map[csv2]
-        new_csv_edges.add((real_csv1, real_csv2))
+    for csv1, csv2 in csv_edges:
+        new_csv_edges.add((symlink_map[csv1], symlink_map[csv2]))
     return (pair, new_csv_edges)
 
 # ===== BUSINESS LOGIC ====================================================== #
@@ -160,11 +159,16 @@ def extract_csv_list(row: pd.Series, use_symlink: bool):
         cols = ["hugging_table_list_sym", "github_table_list_sym", "html_table_list_sym", "llm_table_list_sym"]
     else:
         cols = ["hugging_table_list_dedup", "github_table_list_dedup", "html_table_list_mapped_dedup", "llm_table_list_mapped_dedup"]
-    csv_list = []
+    csv_list, seen = [], set()
     for col in cols:
         csv_list.extend(row.get(col, []))
-    seen = set()
-    return [csv for csv in csv_list if csv not in seen and not pd.isna(csv)]
+    unique = []
+    for csv in csv_list:
+        if pd.isna(csv) or csv in seen:
+            continue
+        unique.append(csv)
+        seen.add(csv)
+    return unique
 
 def build_csv_matrix(model_adj: csr_matrix, model_index: list, modelId_to_csvs: Dict[str, list]):
     ######## gather all csv
@@ -370,8 +374,8 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
 
     # ---------- Step 4.5: modelId → csv mapping ----------
     ######## modelId_to_csvs
-    df_tables = load_table_source(TableSourceMode.STEP4_SYMLINK)
-    modelId_to_csvs = {mid: extract_csv_list(row, use_symlink=True) for mid, row in df_tables.iterrows()}
+    df_tables = load_table_source(TableSourceMode.STEP4_SYMLINK) # fixed here! tbl_mode
+    modelId_to_csvs = {mid: extract_csv_list(row, use_symlink=True) for mid, row in df_tables.iterrows()} # fixed here! tbl_mode
 
     # ---------- Step 5: Build CSV‑level adjacency ----------
     csv_csv_adj, csv_index = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs)
@@ -396,7 +400,7 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     # ========== Step 5: Save everything to disk ==========
     suffix = f"__{rel_mode.value}"
     # 5.1 Paper adjacency
-    save_npz(PAPER_LEVEL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), paper_paper_adj)
+    """save_npz(PAPER_LEVEL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), paper_paper_adj)
     with open(PAPER_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
         pickle.dump(paper_index, f)
     print(f"Paper-level adjacency saved to {PAPER_LEVEL_ADJ_PATH}{suffix}.npz")
@@ -428,9 +432,7 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     print(f"Real CSV adjacency    → {CSV_REAL_ADJ_PATH}{suffix}.npz")
 
     with open(f"{GT_DIR}/scilake_large_gt{suffix}.pickle", "wb") as f:
-        pickle.dump(csv_real_gt, f)
-    with open(f"{GT_DIR}/scilake_large_gt{suffix}.json", "w") as f:
-        json.dump(csv_real_gt, f, indent=2)
+        pickle.dump(csv_real_gt, f)"""
     
     # ---- extra: save real‑path count adjacency (as dict) ----
     count_dict = defaultdict(dict)
@@ -441,11 +443,26 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
         src = os.path.basename(csv_real_index[i])
         tgt = os.path.basename(csv_real_index[j])
         count_dict[src][tgt] = int(csv_real_adj[i, j])
-    with open(f"{GT_DIR}/scilake_large_gt_count{suffix}.pickle", "wb") as f:
+    """with open(f"{GT_DIR}/scilake_large_gt_count{suffix}.pickle", "wb") as f:
         pickle.dump(dict(count_dict), f)
-    with open(f"{GT_DIR}/scilake_large_gt_count{suffix}.json", "w") as f:
-        json.dump(dict(count_dict), f, indent=2)
-    print(f"CSV count dict saved to scilake_large_gt_count{suffix}.pickle/json")
+    print(f"CSV count dict saved to scilake_large_gt_count{suffix}.pickle/json")"""
+    combined = {                                                   
+        "paper_adj":       paper_paper_adj,                        
+        "paper_index":     paper_index,                            
+        "model_adj":       model_model_adj,                        
+        "model_index":     model_index,                            
+        "csv_adj":         csv_csv_adj,                            
+        "csv_index":       csv_index,                              
+        "csv_symlink_adj": csv_symlink_adj,                        
+        "csv_symlink_index": csv_symlink_index,                    
+        "csv_real_adj":    csv_real_adj,                           
+        "csv_real_index":  csv_real_index,                         
+        "csv_real_gt":     csv_real_gt,                            
+        "csv_real_count":  dict(count_dict),                       
+    }
+    with gzip.open(GT_COMBINED_PATH.replace(".pkl.gz", f"{suffix}.pkl.gz"), "wb") as f:
+        pickle.dump(combined, f)                                   
+    print(f"✔️  All matrices & indices saved to {GT_COMBINED_PATH}{suffix}")
 
     print("✅ Done building matrix-based groundtruth!")
 

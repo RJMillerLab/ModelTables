@@ -127,11 +127,11 @@ python -m src.data_gt.step3_pre_merge # merge all the table list into modelid fi
 # (Optional: only need when build db locally) bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph | Then get citations relation from graph edge .db
 python -m src.data_gt.step3_overlap_rate # paper level: compute paper-pair overlap score | 
 # I: extracted_annotations/modelcard_citation_enriched O: modelcard_rate/label.pickle
-python -m src.data_analysis.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle from step3_overlap_rate
+python -m src.data_gt.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle from step3_overlap_rate
 ```
-Quality Control | Run some analysis
+Quality Control !!! | Run some analysis
 ```bash
-python -m src.data_analysis.qc_dedup > logs/qc_dedup.log # dedup raw tables, keep dedup in order hugging>github>html>llm | I: modelcard_step3_merged, O: modelcard_step3_dedup.parquet
+python -m src.data_analysis.qc_dedup > logs/qc_dedup.log # dedup raw tables, keep dedup in order hugging>github>html>llm | I: modelcard_step3_merged, O: modelcard_step3_dedup
 python -m src.data_analysis.qc_dedup_fig
 python -m src.data_analysis.qc_stats # stats | I: modelcard_step4_dedup, O: benchmark_results
 python -m src.data_analysis.qc_stats_fig
@@ -141,7 +141,7 @@ bash src/data_analysis/count_files.sh # obtain files count directly from folder 
 Final gt!
 ```bash
 python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
-# I: modelcard_step2.parquet, modelcard_step3_merged.parquet, md_to_csv_mapping.json, hugging_deduped_mapping.json → O: modelcard_step4.parquet + sym_*_csvs_*
+# I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
 python -m src.data_gt.step3_gt # build up groundtruth # TODO: add double check for stats
 ```
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*

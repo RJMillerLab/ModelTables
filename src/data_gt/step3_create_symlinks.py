@@ -20,7 +20,7 @@ import pickle
 
 global_symlink_mapping = {}
 
-def create_symlinks_generic(df, processed_base_path, input_col, output_subfolder, link_tag, output_col, use_abspath=False):
+def create_symlinks_generic(df, processed_base_path, input_col, output_subfolder, link_tag, output_col, use_abspath=False, enable_symlink=True):
     """
     Generic function to create symlinks for CSV files.
     
@@ -51,11 +51,12 @@ def create_symlinks_generic(df, processed_base_path, input_col, output_subfolder
             link_path = os.path.join(output_folder, link_filename)
             if os.path.lexists(link_path):
                 os.remove(link_path)
-            try:
-                target_path = os.path.abspath(orig_path) if use_abspath else orig_path
-                os.symlink(target_path, link_path)
-            except Exception as e:
-                print(f"Error creating symlink for {orig_path}: {e}")
+            target_path = os.path.abspath(orig_path) if use_abspath else orig_path
+            if enable_symlink:
+                try:
+                    os.symlink(target_path, link_path)
+                except Exception as e:
+                    print(f"Error creating symlink for {orig_path}: {e}")
             relative_link = link_path[link_path.index("data/processed/"):] if "data/processed/" in link_path else link_path
             symlink_list.append(relative_link)
             global_symlink_mapping[relative_link] = target_path
@@ -64,7 +65,7 @@ def create_symlinks_generic(df, processed_base_path, input_col, output_subfolder
         df.at[i, output_col] = symlink_list
     return df
 
-def symlink_factory(input_col, output_subfolder, link_tag, output_col, use_abspath=False):
+def symlink_factory(input_col, output_subfolder, link_tag, output_col, use_abspath=False, enable_symlink=True):
     """
     Factory function to create a symlink creation function for a specific resource.
     """
@@ -76,17 +77,19 @@ def symlink_factory(input_col, output_subfolder, link_tag, output_col, use_abspa
             output_subfolder=output_subfolder,
             link_tag=link_tag,
             output_col=output_col,
-            use_abspath=use_abspath
+            use_abspath=use_abspath,
+            enable_symlink=enable_symlink
         )
     return create_symlink_func
 
 # Generate symlink creation functions for different resources.
 # For HTML and LLM, we assume the DataFrame already contains the columns:
 # 'html_table_list_mapped' and 'llm_table_list_mapped' respectively.
-create_symlink_hugging = symlink_factory("hugging_table_list_dedup", "sym_hugging_csvs", "hugging_table", "hugging_table_list_sym", False)
-create_symlink_github = symlink_factory("github_table_list_dedup", "sym_github_csvs", "github_table", "github_table_list_sym", False)
-create_symlink_html = symlink_factory("html_table_list_mapped_dedup", "sym_html_csvs", "html_table", "html_table_list_sym", True)
-create_symlink_llm = symlink_factory("llm_table_list_mapped_dedup", "sym_llm_csvs", "llm_table", "llm_table_list_sym", True)
+enable_symlink = False
+create_symlink_hugging = symlink_factory("hugging_table_list_dedup", "sym_hugging_csvs", "hugging_table", "hugging_table_list_sym", False, enable_symlink)
+create_symlink_github = symlink_factory("github_table_list_dedup", "sym_github_csvs", "github_table", "github_table_list_sym", False, enable_symlink)
+create_symlink_html = symlink_factory("html_table_list_mapped_dedup", "sym_html_csvs", "html_table", "html_table_list_sym", True, enable_symlink)
+create_symlink_llm = symlink_factory("llm_table_list_mapped_dedup", "sym_llm_csvs", "llm_table", "llm_table_list_sym", True, enable_symlink)
 
 # Main execution
 if __name__ == "__main__":
