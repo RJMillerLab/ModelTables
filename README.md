@@ -96,7 +96,7 @@ python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
  # I: modelcard_dedup_titles.json O: s2orc_query_results.parquet, s2orc_citations_cache.parquet, s2orc_references_cache.parquet, s2orc_titles2ids.parquet
  - python -m src.data_preprocess.s2orc_log_429 # incase some title meet 429 error (API rate error)
  - python -m src.data_preprocess.s2orc_retry_missing # make up for the missing items
- - python -m src.data_preprocess.s2orc_merge # parse the references and citations from retrieved results | O: s2orc_rerun.parquet
+ - python -m src.data_preprocess.s2orc_merge # parse the references and citations from retrieved results | I: s2orc*.parquet, O: s2orc_rerun.parquet
 
  - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query |
   # I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
@@ -109,10 +109,11 @@ python -m src.data_preprocess.step2_html_parsing # extract tables from html
 mkdir logs
 TODO: python -m src.data_preprocess.step2_integration_order > logs/step2_integration_order_0414.log # first html | then PDF? (no) | finally llm polished table text
 # I: title2arxiv_new_cache.json, html_table.parquet, extracted_annotations.parquet, pdf_download_cache.json → O: before_llm_output.parquet, batch_input.jsonl, batch_output.jsonl, llm_markdown_table_results.parquet
+bash src/data_preprocess/openai_batchjob_status.sh # query batch job status
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
 #cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results.parquet
-python -m src.data_preprocess.step2_llm_save # save table into local csv
+python -m src.data_preprocess.step2_llm_save > logs/step2_llm_save.log # save table into local# csv
 # I: llm_markdown_table_results.parquet → O: llm_tables/*.csv, final_integration_with_paths.parquet
 ```
 
@@ -121,10 +122,11 @@ python -m src.data_preprocess.step2_llm_save # save table into local csv
 ```bash
 python -m src.data_gt.step3_pre_merge # merge all the table list into modelid file
 # I: final_integration_with_paths.parquet, modelcard_all_title_list.parquet → O: modelcard_step3_merged.parquet
-python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
+# (Only need if we not run s2orc_API_query) python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
 # I: final_integration_with_paths.parquet. O: modelcard_citation_enriched.parquet
-bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph (need extra 300G storage). | Then get citations relation from graph edge .db
-python -m src.data_gt.step3_overlap_rate # paper level: compute each two papers' overlap score
+# (Optional: only need when build db locally) bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph | Then get citations relation from graph edge .db
+python -m src.data_gt.step3_overlap_rate # paper level: compute paper-pair overlap score | 
+# I: extracted_annotations/modelcard_citation_enriched O: modelcard_rate/label.pickle
 python -m src.data_analysis.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle from step3_overlap_rate
 ```
 Quality Control | Run some analysis

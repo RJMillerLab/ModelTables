@@ -89,6 +89,46 @@ def populate_github_table_list(df_merged, processed_base_path):
         df_merged.at[i, "github_table_list"] = full_csv_paths
     return df_merged
 
+def map_tables_by_dict(df2, df):
+    """
+    Accelerate the process by using a dictionary mapping:
+    1) Build a mapping from query to (html_table_list, llm_table_list)
+    2) For each row in df2, look up and merge results from all_title_list
+    """
+    # turn comment into english
+    # Turn stringified lists into actual lists
+    df['html_table_list'] = df['html_table_list'].apply(_safe_parse_list)
+    df['llm_table_list']  = df['llm_table_list'].apply(_safe_parse_list)
+    # Build lookup: dict[query] = (html_table_list, llm_table_list)
+    df_lookup = {}
+    for row in df.itertuples(index=False):
+        # row: query, html_table_list, llm_table_list
+        df_lookup[row.query] = (
+            row.html_table_list if isinstance(row.html_table_list, list) else [],
+            row.llm_table_list  if isinstance(row.llm_table_list,  list) else []
+        )
+    # add col to df2：html_table_list_mapped, llm_table_list_mapped
+    df2["html_table_list_mapped"] = [[] for _ in range(len(df2))]
+    df2["llm_table_list_mapped"]  = [[] for _ in range(len(df2))]
+    # loop through df2, for each row, check all_title_list
+    for i, row in df2.iterrows():
+        title_list = row["all_title_list"]
+        if not isinstance(title_list, list):
+            continue
+        combined_html = []
+        combined_llm  = []
+        for title in title_list:
+            if title in df_lookup:
+                hlist, llist = df_lookup[title]
+                combined_html.extend(hlist)
+                combined_llm.extend(llist)
+        # deduplicate
+        combined_html = list(set(combined_html))
+        combined_llm  = list(set(combined_llm))
+        df2.at[i, "html_table_list_mapped"] = combined_html
+        df2.at[i, "llm_table_list_mapped"]  = combined_llm
+    return df2
+
 def merge_table_list_to_df2():
     df = pd.read_parquet(FINAL_INTEGRATION_PARQUET, columns=['query', 'html_table_list', 'llm_table_list']) # , 'corpusid'
     print(f"  df loaded with shape: {df.shape}")
@@ -101,44 +141,43 @@ def merge_table_list_to_df2():
     print(f"  df2 loaded with shape: {df2.shape}")
     print("\nStep 1: Expanding df2 to match df (on df2.all_title_list vs df.query)...")
 
-    all_title_list_key = "all_title_list"
-    df2[all_title_list_key] = df2[all_title_list_key].apply(lambda x: list(dict.fromkeys(x)) if isinstance(x, (list, tuple, np.ndarray)) else x)
-    df2_exploded = df2.explode(all_title_list_key).rename(columns={all_title_list_key: 'explode_title'})
+    mode = 'normal' # accelerated, normal
+    if mode=='accelerated':
+        df2_merged = map_tables_by_dict(df2, df)
+    else:
+        all_title_list_key = "all_title_list"
+        df2[all_title_list_key] = df2[all_title_list_key].apply(lambda x: list(dict.fromkeys(x)) if isinstance(x, (list, tuple, np.ndarray)) else x)
+        df2_exploded = df2.explode(all_title_list_key).rename(columns={all_title_list_key: 'explode_title'})
+        merged = pd.merge(
+            df2_exploded,
+            df,
+            how='left',
+            left_on='explode_title',
+            right_on='query'
+        )
+        print("Step 2: Grouping & assembling lists back by modelId...")
+        grouped = merged.groupby('modelId').agg({
+            'html_table_list': lambda x: _combine_lists(x),
+            'llm_table_list': lambda x: _combine_lists(x),
+        }).reset_index()
+        grouped.rename(columns={
+            'html_table_list': 'html_table_list_mapped',
+            'llm_table_list': 'llm_table_list_mapped'
+        }, inplace=True)
 
-    merged = pd.merge(
-        df2_exploded,
-        df,
-        how='left',
-        left_on='explode_title',
-        right_on='query'
-    )
-
-    print("Step 2: Grouping & assembling lists back by modelId...")
-    grouped = merged.groupby('modelId').agg({
-        'html_table_list': lambda x: _combine_lists(x),
-        'llm_table_list': lambda x: _combine_lists(x),
-    }).reset_index()
-
-    grouped.rename(columns={
-        'html_table_list': 'html_table_list_mapped',
-        'llm_table_list': 'llm_table_list_mapped'
-    }, inplace=True)
-
-    print("Step 3: Merging the grouped columns back into df2...")
-    df2_merged = pd.merge(df2, grouped, on='modelId', how='left')
-    df2_merged['html_table_list_mapped'] = df2_merged['html_table_list_mapped'].apply(
-        lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else []
-    )
-    df2_merged['llm_table_list_mapped'] = df2_merged['llm_table_list_mapped'].apply(
-        lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else []
-    )
-
+        print("Step 3: Merging the grouped columns back into df2...")
+        df2_merged = pd.merge(df2, grouped, on='modelId', how='left')
+        df2_merged['html_table_list_mapped'] = df2_merged['html_table_list_mapped'].apply(
+            lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else []
+        )
+        df2_merged['llm_table_list_mapped'] = df2_merged['llm_table_list_mapped'].apply(
+            lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else []
+        )
     # load side data and merge to df with modelId
     side_df = pd.read_parquet(SIDE_PATH, columns=['modelId', 'readme_path', 'readme_hash'])
     side_df = populate_hugging_table_list(side_df, os.path.dirname(SIDE_PATH))
     side_df = populate_github_table_list(side_df, os.path.dirname(SIDE_PATH))
     df_final = pd.merge(df2_merged, side_df[['modelId', 'github_table_list', 'hugging_table_list']], on='modelId', how='left')
-
     df_final.to_parquet(MERGE_PATH, index=False)
     return df_final
 

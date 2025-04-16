@@ -11,7 +11,7 @@ import json
 from src.data_ingestion.readme_parser import MarkdownHandler
 
 
-def clean_markdown_block(md_block: str) -> str:
+def clean_markdown_block(md_block: str):
     """
     Remove ```markdown and ``` wrappers from the markdown code block.
     """
@@ -21,7 +21,7 @@ def clean_markdown_block(md_block: str) -> str:
         md_block = md_block[:-3].strip()
     return md_block
 
-def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_column: str = "corpusid", skip_if_html_fulltext: bool = True) -> pd.DataFrame:
+def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_column: str = "corpusid", skip_if_html_fulltext: bool = True):
     """
     For each row in df, extract markdown tables from 'llm_response_raw',
     save them as individual CSV files, and collect their paths.
@@ -51,42 +51,6 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
         raw_response = row['llm_response_raw']
         if pd.isna(raw_response) or not raw_response.strip():
             continue
-
-        """try:
-            table_blocks = json.loads(raw_response)
-            if not isinstance(table_blocks, (list, tuple, np.ndarray)):
-                continue
-        except Exception as e:
-            print(f"❌ Failed to parse JSON for row {idx}: {e}")
-            continue"""
-        
-        """pattern = re.compile(r"```markdown\s*(.*?)\s*```", re.DOTALL)  ########
-        table_blocks = pattern.findall(raw_response)  ########
-        if not table_blocks:  ########
-            table_blocks = [raw_response.strip()]  ########
-
-        key_value = row[key_column]
-        if pd.isna(key_value) or not str(key_value).strip():
-            key_value = f"row_{idx}"  ######## fallback ID
-        safe_key = str(key_value).strip().replace(" ", "_").replace("/", "_")
-
-        csv_paths = []
-        for i, block in enumerate(table_blocks):
-            if not isinstance(block, str) or not block.strip():
-                continue
-            markdown_table = clean_markdown_block(block)
-            filename = f"{safe_key}_table{i}.csv"  ########
-            out_csv_path = os.path.join(output_dir, filename)
-            try:
-                tmp_csv_path = MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
-                if tmp_csv_path: # if have output
-                    csv_paths.append(tmp_csv_path)  ######## collect path
-                    print(f"✅ Saved: {tmp_csv_path}")
-            except Exception as e:
-                print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
-                continue
-
-        df.at[idx, "llm_table_list"] = csv_paths  ######## update the row"""
         # updated processing logic
         table_blocks = []
         try:
@@ -118,14 +82,17 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
             markdown_table = clean_markdown_block(block)
             filename = f"{safe_key}_table{i}.csv"
             out_csv_path = os.path.join(output_dir, filename)
-            try:
-                tmp_csv_path = MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
-                if tmp_csv_path:
-                    #csv_paths.append(tmp_csv_path)
-                    csv_paths.append(out_csv_path)
-                    #print(f"✅ Saved: {tmp_csv_path}")
-            except Exception as e:
-                print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
+            if markdown_table:
+                try:
+                    tmp_csv_path = MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
+                    if tmp_csv_path:
+                        csv_paths.append(out_csv_path)
+                except Exception as e:
+                    print('----------------------')
+                    print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
+                    print(markdown_table)
+                    continue
+            else:
                 continue
         df.at[idx, "llm_table_list"] = csv_paths
     return df
