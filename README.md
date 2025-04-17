@@ -127,6 +127,7 @@ python -m src.data_gt.step3_pre_merge # merge all the table list into modelid fi
 # (Optional: only need when build db locally) bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph | Then get citations relation from graph edge .db
 python -m src.data_gt.step3_overlap_rate # paper level: compute paper-pair overlap score | 
 # I: extracted_annotations/modelcard_citation_enriched O: modelcard_rate/label.pickle
+python -m src.data_analysis.overlap_fig # plot stats
 python -m src.data_gt.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle from step3_overlap_rate
 ```
 Quality Control !!! | Run some analysis
@@ -142,19 +143,20 @@ Final gt!
 ```bash
 python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
 # I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
-python -m src.data_gt.step3_gt # build up groundtruth # TODO: add double check for stats
+python -m src.data_gt.step3_gt # build up groundtruth
+python -m src.data_analysis.gt_fig # plot stats
 ```
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
-python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode base # symlink csvs to the target folder
-python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode str
-python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode tr
-python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode str_tr
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base # symlink csvs to the target folder
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str_tr
 # python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode all
-python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode str # trick: header-str(value)
-python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode transpose # trick: permutation
-python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode str_transpose # trick: tr + str 
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str # trick: header-str(value)
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode transpose # trick: permutation
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_transpose # trick: tr + str 
 ```
 6. Run updated [starmie](https://github.com/DoraDong-2023/starmie_internal) scripts for finetuning and check performance
 ```bash

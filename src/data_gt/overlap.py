@@ -5,8 +5,7 @@ Last Modified: 2025-04-06
 Description: Analyze saved overlap scores and direct citation links to evaluate threshold decisions using precision-recall and KDE valley method, then visualize KDE distribution and histogram by class with multiple thresholds.
 """
 
-import os
-import pickle
+import os, json, gzip, pickle
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -18,8 +17,7 @@ from sklearn.metrics import roc_curve
 from scipy.stats import mannwhitneyu, ks_2samp
 
 # === Paths ===
-OVERLAP_RATE = "data/processed/modelcard_citation_overlap_rate.pickle"
-DIRECT_LABEL = "data/processed/modelcard_citation_direct_label.pickle"
+COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"  ######## updated ########
 RESULT_DIR = "results/overlap_fig1"
 os.makedirs(RESULT_DIR, exist_ok=True)
 
@@ -52,52 +50,42 @@ def otsu_threshold(values):
             threshold = (bin_edges[i] + bin_edges[i+1]) / 2
     return threshold
 
-def load_direct_pairs_from_pickle(path):
-    with open(path, "rb") as f:
-        data = pickle.load(f)
-
-    if isinstance(data, dict) and "score_matrix" in data and "paper_index" in data:
-        score_matrix = data["score_matrix"]
-        paper_index = data["paper_index"]
-        rows, cols = score_matrix.nonzero()
-        direct_pairs = set()
-        for i, j in zip(rows, cols):
-            if i >= j:  # avoid duplicates (i,j) and (j,i)
-                continue
-            if score_matrix[i, j] == 1.0:
-                pair = tuple(sorted([paper_index[i], paper_index[j]]))
-                direct_pairs.add(pair)
-        return direct_pairs
-    elif isinstance(data, dict):
-        return {tuple(sorted(k)) for k, v in data.items() if v == 1.0}
-    else:
-        raise ValueError("Unrecognized format in direct label pickle.")
+def load_direct_pairs_from_combined(combined):
+    score_matrix = combined["direct_label"]
+    paper_index = combined["paper_index"]
+    rows, cols = score_matrix.nonzero()
+    direct_pairs = set()
+    for i, j in zip(rows, cols):
+        if i >= j:  # avoid duplicates (i,j) and (j,i)
+            continue
+        if score_matrix[i, j] == 1.0:
+            pair = tuple(sorted([paper_index[i], paper_index[j]]))
+            direct_pairs.add(pair)
+    return direct_pairs
 
 # === Load data ===
-with open(OVERLAP_RATE, "rb") as f:
-    score_map = pickle.load(f)
+with gzip.open(COMBINED_PATH, "rb") as f:
+    combined = pickle.load(f)
 
-with open(DIRECT_LABEL, "rb") as f:
-    direct_map = pickle.load(f)
-
-print("✅ Files loaded successfully\n")
+print("✅ Combined matrix file loaded successfully\n")
 
 # === Create set of direct citation pairs ===
-"""direct_pairs = set()
-for pair, val in direct_map.items():
-    print(pair, val)
-    if val[0] == 1.0: # debug here!!!
-        direct_pairs.add(tuple(sorted(pair)))"""
-
-direct_pairs = load_direct_pairs_from_pickle(DIRECT_LABEL)
+direct_pairs = load_direct_pairs_from_combined(combined)
 
 # === Prepare labels and scores ===
-y_true = []  # 1 if direct, else 0
+y_true = []
 y_scores = []
 score_labels = []
 
-for (a, b), score in score_map.items():
-    pair = tuple(sorted([a, b]))
+score_matrix = combined["max_pr"]
+paper_index = combined["paper_index"]
+
+rows, cols = score_matrix.nonzero()
+for i, j in zip(rows, cols):
+    if i >= j:
+        continue
+    pair = tuple(sorted([paper_index[i], paper_index[j]]))
+    score = score_matrix[i, j]
     is_direct = (pair in direct_pairs)
     y_true.append(1 if is_direct else 0)
     y_scores.append(score)

@@ -68,9 +68,9 @@ def load_paperId_lists(df, mode, influential=False):
 def compute_overlap_matrices(df, influential):
     paperId_to_ref  = load_paperId_lists(df, mode="reference", influential=influential)
     paper_list = sorted(set(df['paperId']))
-    for pid in paper_list:                                     ########
-        if pid not in paperId_to_ref:                          ########
-            paperId_to_ref[pid] = set()                        ########
+    for pid in paper_list:                                    
+        if pid not in paperId_to_ref:                          
+            paperId_to_ref[pid] = set()                      
     paper_index = sorted(paperId_to_ref.keys())
 
     n = len(paper_index)

@@ -180,29 +180,38 @@ def build_csv_matrix(model_adj: csr_matrix, model_index: list, modelId_to_csvs: 
     print(f"Total unique CSVs: {len(csv_index)}")
     csv_adj = dok_matrix((len(csv_index), len(csv_index)), dtype=np.int32)
     print("Building CSV‑level adjacency from model‑level adjacency …")
+    coord_pairs = []
     for u_idx in tqdm(range(model_adj.shape[0]), desc="Model rows"):
         row_start = model_adj.indptr[u_idx]
         row_end   = model_adj.indptr[u_idx+1]
         v_indices = model_adj.indices[row_start:row_end]
-        weights   = model_adj.data[row_start:row_end]
         u_model = model_index[u_idx]
         csv_u   = modelId_to_csvs.get(u_model, [])
-        for v_idx, w in zip(v_indices, weights):
+        u_csv_pos = [csv_pos[c] for c in csv_u if c in csv_pos]
+
+        for v_idx in v_indices:
             v_model = model_index[v_idx]
-            csv_v   = modelId_to_csvs.get(v_model, [])
-            if not csv_u or not csv_v:
+            csv_v = modelId_to_csvs.get(v_model, [])
+            v_csv_pos = [csv_pos[c] for c in csv_v if c in csv_pos]
+
+            if not u_csv_pos or not v_csv_pos:
                 continue
-            ######## Use model‑edge weight on each (csv_u_i, csv_v_j)
-            for cu in csv_u:
-                for cv in csv_v:
-                    i, j = csv_pos[cu], csv_pos[cv]
-                    if i == j:
-                        continue
-                    csv_adj[i, j] = 1
+
+            # vectorized Cartesian product of positions
+            for i in u_csv_pos:
+                for j in v_csv_pos:
+                    if i != j:
+                        coord_pairs.append((i, j))
+    # Convert to sparse matrix
+    if not coord_pairs:
+        return csr_matrix((len(csv_index), len(csv_index))), csv_index
+    rows, cols = zip(*coord_pairs)
+    data = np.ones(len(rows), dtype=np.int8)
+    csv_adj = csr_matrix((data, (rows, cols)), shape=(len(csv_index), len(csv_index)))
     # self-loop
     # for i in range(len(csv_index)):
     #     csv_adj[i, i] = 1
-    return csv_adj.tocsr(), csv_index
+    return csv_adj, csv_index
 
 def map_csv_adj_to_real(csv_adj: csr_matrix, csv_index: list, symlink_map: Dict[str, str]):
     """
@@ -399,40 +408,6 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
 
     # ========== Step 5: Save everything to disk ==========
     suffix = f"__{rel_mode.value}"
-    # 5.1 Paper adjacency
-    """save_npz(PAPER_LEVEL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), paper_paper_adj)
-    with open(PAPER_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
-        pickle.dump(paper_index, f)
-    print(f"Paper-level adjacency saved to {PAPER_LEVEL_ADJ_PATH}{suffix}.npz")
-    print(f"Paper index list saved to {PAPER_INDEX_PATH}{suffix}.pickle")
-
-    # 5.2 Model adjacency
-    save_npz(MODEL_LEVEL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), model_model_adj)
-    with open(MODEL_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
-        pickle.dump(model_index, f)
-    print(f"Model-level adjacency saved to {MODEL_LEVEL_ADJ_PATH}{suffix}.npz")
-    print(f"Model index list saved to {MODEL_INDEX_PATH}{suffix}.pickle") 
-
-    save_npz(CSV_LEVEL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), csv_csv_adj)
-    with open(CSV_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
-        pickle.dump(csv_index, f)
-    print(f"CSV‑level adjacency saved to {CSV_LEVEL_ADJ_PATH}{suffix}.npz")
-    print(f"CSV index list saved to {CSV_INDEX_PATH}{suffix}.pickle")
-
-    # ---- save symlink‑level 0/1 adjacency ----
-    save_npz(CSV_SYMLINK_ADJ_PATH.replace(".npz", f"{suffix}.npz"), csv_symlink_adj)
-    with open(CSV_SYMLINK_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
-        pickle.dump(csv_symlink_index, f)
-    print(f"Symlink CSV adjacency → {CSV_SYMLINK_ADJ_PATH}{suffix}.npz")
-
-    # ---- save real‑path count adjacency ----
-    save_npz(CSV_REAL_ADJ_PATH.replace(".npz", f"{suffix}.npz"), csv_real_adj)
-    with open(CSV_REAL_INDEX_PATH.replace(".pickle", f"{suffix}.pickle"), "wb") as f:
-        pickle.dump(csv_real_index, f)
-    print(f"Real CSV adjacency    → {CSV_REAL_ADJ_PATH}{suffix}.npz")
-
-    with open(f"{GT_DIR}/scilake_large_gt{suffix}.pickle", "wb") as f:
-        pickle.dump(csv_real_gt, f)"""
     
     # ---- extra: save real‑path count adjacency (as dict) ----
     count_dict = defaultdict(dict)
@@ -443,10 +418,7 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
         src = os.path.basename(csv_real_index[i])
         tgt = os.path.basename(csv_real_index[j])
         count_dict[src][tgt] = int(csv_real_adj[i, j])
-    """with open(f"{GT_DIR}/scilake_large_gt_count{suffix}.pickle", "wb") as f:
-        pickle.dump(dict(count_dict), f)
-    print(f"CSV count dict saved to scilake_large_gt_count{suffix}.pickle/json")"""
-    combined = {                                                   
+    combined = {
         "paper_adj":       paper_paper_adj,                        
         "paper_index":     paper_index,                            
         "model_adj":       model_model_adj,                        
