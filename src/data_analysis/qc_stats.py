@@ -170,16 +170,27 @@ def create_combined_results(benchmark_data, resource_stats):
         df = pd.concat([df, unique_row, symlink_row, w_title_row, w_valid_row], ignore_index=True)
     return df
 
-def annotate_bars(ax):
+def annotate_bars(ax, fontsize=16):
     for p in ax.patches:
         height = p.get_height()
         if height > 0:
             ax.annotate(f'{int(height)}',
                         (p.get_x() + p.get_width() / 2, height),
-                        ha='center', va='bottom', fontsize=8, rotation=0)
+                        ha='center', va='bottom', fontsize=fontsize, rotation=0)
 
 def plot_metric(df, metric, filename):
     from matplotlib.patches import Patch
+    fontsize=12
+    plt.rcParams.update({
+        'font.size': 18,           
+        'axes.titlesize': 18,      
+        'axes.labelsize': 18,   
+        'xtick.labelsize': 18,    
+        'ytick.labelsize': 18,     
+        'legend.fontsize': 18,     
+        'figure.titlesize': 18     
+    })
+    figsize=(12, 4)
     
     palette_baseline = ["#8b2e2e", "#b74a3c", "#d96e44", "#f29e4c", "#FFBE5F"]
     palette_resource = ["#486f90", "#4e8094", "#50a89d", "#a5d2bc"]
@@ -220,17 +231,17 @@ def plot_metric(df, metric, filename):
     ]
     xtick_labels = clusters
 
-    fig = plt.figure(figsize=(12, 10))
+    fig = plt.figure(figsize=figsize)
 
     ax = fig.add_axes([0.08, 0.1, 0.7, 0.8])
 
     ax.bar(positions, heights, width=bar_width, color=colors)
     ax.set_yscale('log')
     ax.set_xticks(xtick_positions)
-    ax.set_xticklabels(xtick_labels, fontsize=12)
-    ax.set_ylabel(f"{metric} (log scale)", fontsize=14)
-    ax.set_title(f"{metric}", fontsize=16)
-    annotate_bars(ax)
+    ax.set_xticklabels(xtick_labels) #, fontsize=12
+    ax.set_ylabel(f"{metric} (log scale)")
+    ax.set_title(f"{metric}")
+    annotate_bars(ax, fontsize=fontsize)
 
     handles_baseline = [
         Patch(facecolor=palette_baseline[i], label=BENCHMARK_NAMES[i])

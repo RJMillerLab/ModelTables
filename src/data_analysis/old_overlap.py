@@ -13,7 +13,7 @@ import pandas as pd
 # === Paths ===
 SCORE_PICKLE = "data/processed/modelcard_citation_overlap_by_paperId_score.pickle"
 DIRECT_PICKLE = "data/processed/modelcard_citation_direct_relation.pickle"
-RESULT_DIR = "results/overlap_fig1"
+RESULT_DIR = "data/analysis"
 FIG_PATH = os.path.join(RESULT_DIR, "score_distribution.pdf")
 
 os.makedirs(RESULT_DIR, exist_ok=True)

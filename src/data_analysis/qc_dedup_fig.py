@@ -19,6 +19,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from src.data_analysis.qc_dedup import save_heatmap
 
 OUTPUT_DIR = "data/deduped"
+FIG_DIR = "data/analysis"
 dup_matrix_file = os.path.join(OUTPUT_DIR, "dup_matrix.pkl")
 stats_file = os.path.join(OUTPUT_DIR, "stats.json")
 
@@ -32,4 +33,4 @@ if __name__ == "__main__":
     with open(stats_file, "r") as f:
         stats = json.load(f)
 
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], OUTPUT_DIR)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], FIG_DIR)

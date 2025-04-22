@@ -18,7 +18,7 @@ from scipy.stats import mannwhitneyu, ks_2samp
 
 # === Paths ===
 COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"  ######## updated ########
-RESULT_DIR = "results/overlap_fig1"
+RESULT_DIR = "data/analysis"
 os.makedirs(RESULT_DIR, exist_ok=True)
 
 def otsu_threshold(values):

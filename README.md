@@ -149,7 +149,6 @@ python -m src.data_analysis.gt_fig # plot stats
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
-python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --output scilake_final --mode base # symlink csvs to the target folder
 # python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode all
 python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilake_final_str --mode str # trick: header-str(value)
 python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilake_final_tr --mode transpose # trick: permutation
@@ -158,15 +157,24 @@ python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilak
 python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str
 python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode tr
 python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str_tr
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --output scilake_final --mode base # symlink csvs to the target folder
+# bash src/data_analysis/count_files.sh check whether the symlink path include some files
 ```
+
 6. Run updated [starmie](https://github.com/DoraDong-2023/starmie_internal) scripts for finetuning and check performance
 ```bash
 bash prepare_sample.sh # sample 1000 samples from each resources folder
-bash check_empty.sh # filter out empty files (or low quality files later)
+# or python -m src.data_symlink.prepare_sample_server --root_dir /Users/doradong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 1000 --seed 42
+# another substitution
+python -m src.data_symlink.prepare_sample --root_dir /Users/doradong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42
+# create for tricks augmented files
+python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt
+# Input: scilake_final_filelist.txt ; Output: scilake_final_filelist_{tricks}_filelist.txt, 
+# (deprecate) (already processed in QC step) bash check_empty.sh # filter out empty files (or low quality files later)
 bash scripts/step1_pretrain.sh # finetune contrastive learning
 bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake items
-bash scripts/step3_search_hnsw.sh # data lake search (retrieve)!
-python step4_processmetrics.py # extract metrics based on searched results
+bash scripts/step3_search_hnsw.sh # data lake search (retrieve)! notice we move the gt compare to step3_processmetrics, because we need to compare multiple groundtruth
+bash scripts/step3_processmetrics.sh # extract metrics based on searched results
 bash scripts/step4_discovery.sh
 ```
 
@@ -174,9 +182,9 @@ Analysis on results
 ```bash  
 # get top-10 results from step3_search_hnsw
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
-python -m src.data_analysis.starmie_metrics_topk --input ~/Repo/starmie_internal/tmp/metrics_scilake_large_hnsw.json --output metrics_plot.pdf
+python -m src.data_analysis.starmie_metrics_topk --input ~/Repo/starmie_internal/tmp/metrics_scilake_large_hnsw.json --output data/analysis/metrics_plot.pdf
 # get distribution of groundtruth
-python -m src.data_analysis.gt_distri # get csv with gt list > 1000
+python -m src.data_analysis.gt_distri # get csv with gt list > 1000 # Input: /Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__direct_label.pickle # Output: figures
 python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log # check the related model of csv
 ```
 

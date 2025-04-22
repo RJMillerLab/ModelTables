@@ -37,6 +37,7 @@ INVALID_FILES = set()
 INPUT_DIR = "data/processed"
 INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_merged.parquet")
 OUTPUT_DIR = "data/deduped"
+FIG_DIR = "data/analysis"
 # Ensure the output directory exists.
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_dedup.parquet")
@@ -328,6 +329,18 @@ class BiasedLogNorm(LogNorm):
         return np.power(scaled, self.bias)
 
 def save_heatmap(dup_matrix, unique_counts, output_dir):
+    fontsize=18
+    plt.rcParams.update({
+        'font.size': 18,           
+        'axes.titlesize': 18,      
+        'axes.labelsize': 18,   
+        'xtick.labelsize': 18,    
+        'ytick.labelsize': 18,     
+        'legend.fontsize': 18,     
+        'figure.titlesize': 18     
+    })
+    figsize=(12, 4)
+
     # Step 1: prepare plotting matrix using the original values
     dup_matrix_plot = dup_matrix.copy()
     dup_matrix_plot[dup_matrix_plot < 10] = 10
@@ -365,7 +378,7 @@ def save_heatmap(dup_matrix, unique_counts, output_dir):
             res,
             ha='center',
             va='bottom',
-            fontsize=12
+            fontsize=fontsize
         )
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "heatmap_overlap.png"))
@@ -487,7 +500,7 @@ def main():
     dup_matrix.to_pickle(dup_matrix_file)
     print(f"Dup matrix saved to {dup_matrix_file}")
 
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], OUTPUT_DIR)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], FIG_DIR)
 
 if __name__ == "__main__":
     main()
