@@ -149,14 +149,15 @@ python -m src.data_analysis.gt_fig # plot stats
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base # symlink csvs to the target folder
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str_tr
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --output scilake_final --mode base # symlink csvs to the target folder
 # python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode all
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str # trick: header-str(value)
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode transpose # trick: permutation
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_transpose # trick: tr + str 
+python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilake_final_str --mode str # trick: header-str(value)
+python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilake_final_tr --mode transpose # trick: permutation
+python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilake_final_str_tr --mode str_transpose # trick: tr + str 
+
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode tr
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str_tr
 ```
 6. Run updated [starmie](https://github.com/DoraDong-2023/starmie_internal) scripts for finetuning and check performance
 ```bash

@@ -75,12 +75,14 @@ def main():
                     "Only repository root and mode need to be provided."
     )
     parser.add_argument("--repo_root", type=str, default="/u4/z6dong/Repo", help="Repository root directory.")
+    parser.add_argument("--output", type=str, default="starmie_internal/data/scilake_large/datalake",
+                        help="Target directory for symbolic links (relative to repo root).")
     parser.add_argument("--mode", type=str, choices=["base", "str", "tr", "str_tr", "all"], default="base",
                         help="Mode for processing to determine target folder naming. Use 'all' to process all modes.")
     args = parser.parse_args()
 
     # Define fixed target directory base and source folder list relative to the repository root
-    target_dir_base = os.path.join(args.repo_root, "starmie_internal", "data", "scilake_large", "datalake")
+    target_dir_base = os.path.join(args.repo_root, "starmie_internal", "data", args.output, "datalake")
     folders = [
         os.path.join(args.repo_root, "CitationLake", "data", "processed", "deduped_hugging_csvs"),
         os.path.join(args.repo_root, "CitationLake", "data", "processed", "deduped_github_csvs"),

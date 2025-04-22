@@ -178,13 +178,12 @@ def batch_get_details_for_ids(mapping_df, batch_size=500, sleep_time=1, timeout=
     print(f"💾 Batch results saved to {cache_file}")
     return merge_df
 
-def get_single_citations_row(paper_id, sleep_time=1, timeout=60, cache_file=CITATIONS_CACHE_FILE):
+def get_single_citations_row(paper_id, sleep_time=1, timeout=60, cache_file=CITATIONS_CACHE_FILE, force_refresh=False):
     """
-    Query the /paper/{paper_id}/citations endpoint for a single paper and save the result as a single row record.
-    The record includes paperId, original_response (full JSON string), and parsed_response (JSON string containing "citing_papers": [...]).
-    All single citations are saved in one parquet file.
+    Query the /paper/{paper_id}/citations endpoint for all citations using pagination.
+    Each page retrieves up to 100 records. All citations are merged into a single response.
     """
-    if os.path.exists(cache_file):
+    if not force_refresh and os.path.exists(cache_file):
         df_cache = pd.read_parquet(cache_file)
         if paper_id in df_cache["paperId"].astype(str).tolist():
             print(f"🔄 Cached citations for paper_id {paper_id} found in {cache_file}")
@@ -192,44 +191,55 @@ def get_single_citations_row(paper_id, sleep_time=1, timeout=60, cache_file=CITA
             return record
     else:
         df_cache = pd.DataFrame(columns=["paperId", "original_response", "parsed_response"])
-    
-    url = CITATION_URL_TEMPLATE.format(paper_id=paper_id)
-    params = {
-        "fields": "citingPaper.title,citingPaper.abstract,contexts,intents,isInfluential",
-        "limit": 100
-    }
-    print(f"🔍 Querying citations for paper_id: {paper_id} ...")
-    time.sleep(sleep_time)
-    try:
-        response = requests.get(url, headers=HEADERS, params=params, timeout=timeout)
-    except requests.exceptions.Timeout:
-        print(f"❌ Timeout error on citations query for paper_id: {paper_id}")
-        return {}
-    if response.status_code == 200:
-        data = response.json()
-        original_response = json.dumps(data)
-        parsed_response = json.dumps({"citing_papers": data.get("data", [])})
-        new_record = {
-            "paperId": paper_id,
-            "original_response": original_response,
-            "parsed_response": parsed_response
-        }
-        df_new = pd.DataFrame([new_record])
-        df_cache = pd.concat([df_cache, df_new], ignore_index=True)
-        df_cache.to_parquet(cache_file, index=False)
-        print(f"💾 Updated citations cache saved to {cache_file}")
-        return new_record
-    else:
-        print(f"❌ HTTP error {response.status_code} on citations query: {response.text}")
-        return {}
 
-def get_single_references_row(paper_id, sleep_time=1, timeout=60, cache_file=REFERENCES_CACHE_FILE):
+    url = CITATION_URL_TEMPLATE.format(paper_id=paper_id)
+    all_data = []
+    offset = 0
+    limit = 100
+    while True:
+        params = {
+            "fields": "citingPaper.title,citingPaper.abstract,contexts,intents,isInfluential",
+            "limit": limit,
+            "offset": offset  ######## Add offset for pagination ########
+        }
+        print(f"🔍 Querying citations for paper_id: {paper_id} (offset={offset}) ...")
+        time.sleep(sleep_time)
+        try:
+            response = requests.get(url, headers=HEADERS, params=params, timeout=timeout)
+        except requests.exceptions.Timeout:
+            print(f"❌ Timeout error on citations query for paper_id: {paper_id}")
+            return {}
+        if response.status_code == 200:
+            data = response.json()
+            page_data = data.get("data", [])
+            if not page_data:
+                break
+            all_data.extend(page_data)
+            offset += limit
+        else:
+            print(f"❌ HTTP error {response.status_code} on citations query: {response.text}")
+            return {}
+
+    original_response = json.dumps({"data": all_data})
+    parsed_response = json.dumps({"citing_papers": all_data})
+    new_record = {
+        "paperId": paper_id,
+        "original_response": original_response,
+        "parsed_response": parsed_response
+    }
+    df_new = pd.DataFrame([new_record])
+    df_cache = pd.concat([df_cache, df_new], ignore_index=True)
+    df_cache.to_parquet(cache_file, index=False)
+    print(f"💾 Updated citations cache saved to {cache_file}")
+    return new_record
+
+
+def get_single_references_row(paper_id, sleep_time=1, timeout=60, cache_file=REFERENCES_CACHE_FILE, force_refresh=False):
     """
-    Query the /paper/{paper_id}/references endpoint for a single paper and save the result as a single row record.
-    The record includes paperId, original_response, and parsed_response (JSON string containing "cited_papers": [...]).
-    All single references are saved in one parquet file.
+    Query the /paper/{paper_id}/references endpoint for all references using pagination.
+    Each page retrieves up to 100 records. All references are merged into a single response.
     """
-    if os.path.exists(cache_file):
+    if not force_refresh and os.path.exists(cache_file):
         df_cache = pd.read_parquet(cache_file)
         if paper_id in df_cache["paperId"].astype(str).tolist():
             print(f"🔄 Cached references for paper_id {paper_id} found in {cache_file}")
@@ -237,38 +247,49 @@ def get_single_references_row(paper_id, sleep_time=1, timeout=60, cache_file=REF
             return record
     else:
         df_cache = pd.DataFrame(columns=["paperId", "original_response", "parsed_response"])
-    
-    url = REFERENCE_URL_TEMPLATE.format(paper_id=paper_id)
-    params = {
-        "fields": "citedPaper.title,citedPaper.abstract,contexts,intents,isInfluential",
-        "limit": 100
-    }
-    print(f"🔍 Querying references for paper_id: {paper_id} ...")
-    time.sleep(sleep_time)
-    try:
-        response = requests.get(url, headers=HEADERS, params=params, timeout=timeout)
-    except requests.exceptions.Timeout:
-        print(f"❌ Timeout error on references query for paper_id: {paper_id}")
-        return {}
-    if response.status_code == 200:
-        data = response.json()
-        original_response = json.dumps(data)
-        parsed_response = json.dumps({"cited_papers": data.get("data", [])})
-        new_record = {
-            "paperId": paper_id,
-            "original_response": original_response,
-            "parsed_response": parsed_response
-        }
-        df_new = pd.DataFrame([new_record])
-        df_cache = pd.concat([df_cache, df_new], ignore_index=True)
-        df_cache.to_parquet(cache_file, index=False)
-        print(f"💾 Updated references cache saved to {cache_file}")
-        return new_record
-    else:
-        print(f"❌ HTTP error {response.status_code} on references query: {response.text}")
-        return {}
 
-def update_all_single_citations(paper_ids, sleep_time=1, timeout=60):
+    url = REFERENCE_URL_TEMPLATE.format(paper_id=paper_id)
+    all_data = []
+    offset = 0
+    limit = 100
+    while True:
+        params = {
+            "fields": "citedPaper.title,citedPaper.abstract,contexts,intents,isInfluential",
+            "limit": limit,
+            "offset": offset  ######## Add offset for pagination ########
+        }
+        print(f"🔍 Querying references for paper_id: {paper_id} (offset={offset}) ...")
+        time.sleep(sleep_time)
+        try:
+            response = requests.get(url, headers=HEADERS, params=params, timeout=timeout)
+        except requests.exceptions.Timeout:
+            print(f"❌ Timeout error on references query for paper_id: {paper_id}")
+            return {}
+        if response.status_code == 200:
+            data = response.json()
+            page_data = data.get("data", [])
+            if not page_data:
+                break
+            all_data.extend(page_data)
+            offset += limit
+        else:
+            print(f"❌ HTTP error {response.status_code} on references query: {response.text}")
+            return {}
+
+    original_response = json.dumps({"data": all_data})
+    parsed_response = json.dumps({"cited_papers": all_data})
+    new_record = {
+        "paperId": paper_id,
+        "original_response": original_response,
+        "parsed_response": parsed_response
+    }
+    df_new = pd.DataFrame([new_record])
+    df_cache = pd.concat([df_cache, df_new], ignore_index=True)
+    df_cache.to_parquet(cache_file, index=False)
+    print(f"💾 Updated references cache saved to {cache_file}")
+    return new_record
+
+def update_all_single_citations(paper_ids, sleep_time=1, timeout=60, force_refresh=False):
     """
     For each paper_id in the list, call get_single_citations_row to update the citations cache.
     All records are saved to a single parquet file (CITATIONS_CACHE_FILE).
@@ -278,11 +299,11 @@ def update_all_single_citations(paper_ids, sleep_time=1, timeout=60):
     """
     results = {}
     for pid in paper_ids:
-        record = get_single_citations_row(pid, sleep_time=sleep_time, timeout=timeout)
+        record = get_single_citations_row(pid, sleep_time=sleep_time, timeout=timeout, force_refresh=force_refresh)
         results[pid] = record
     return results
 
-def update_all_single_references(paper_ids, sleep_time=1, timeout=60):
+def update_all_single_references(paper_ids, sleep_time=1, timeout=60, force_refresh=False):
     """
     For each paper_id in the list, call get_single_references_row to update the references cache.
     All records are saved to a single parquet file (REFERENCES_CACHE_FILE).
@@ -292,7 +313,7 @@ def update_all_single_references(paper_ids, sleep_time=1, timeout=60):
     """
     results = {}
     for pid in paper_ids:
-        record = get_single_references_row(pid, sleep_time=sleep_time, timeout=timeout)
+        record = get_single_references_row(pid, sleep_time=sleep_time, timeout=timeout, force_refresh=force_refresh)
         results[pid] = record
     return results
 
@@ -361,14 +382,16 @@ if __name__ == "__main__":
     # 2. Batch query paper details and merge with titles mapping.
     #batch_df = batch_get_details_for_ids(mapping_df, batch_size=500, sleep_time=1, timeout=60, cache_file=BATCH_CACHE_FILE)
     #print("\n💾 Batch query results saved.")
+
+    force_refresh = True
     
     # 3. Update all single citations for all paperIds from mapping.
     paper_ids = mapping_df["paperId"].tolist()
-    update_all_single_citations(paper_ids, sleep_time=1, timeout=60)
+    update_all_single_citations(paper_ids, sleep_time=1, timeout=60, force_refresh=force_refresh)
     print(f"\n💾 All single citations queries have been processed and saved to {CITATIONS_CACHE_FILE}.")
     
     # 4. Update all single references for all paperIds from mapping.
-    update_all_single_references(paper_ids, sleep_time=1, timeout=60)
+    update_all_single_references(paper_ids, sleep_time=1, timeout=60, force_refresh=force_refresh)
     print(f"\n💾 All single references queries have been processed and saved to {REFERENCES_CACHE_FILE}.")
     
     # 5. Merge all caches into one consolidated parquet file.
