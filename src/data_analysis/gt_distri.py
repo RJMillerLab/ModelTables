@@ -18,13 +18,13 @@ from scipy.stats import gaussian_kde
 from tqdm import tqdm
 
 plt.rcParams.update({
-    'font.size': 50,     
-    'axes.titlesize': 50,
-    'axes.labelsize': 50,
-    'xtick.labelsize': 40,
-    'ytick.labelsize': 40,       
-    'legend.fontsize': 40,       
-    'figure.titlesize': 50     
+    'font.size': 22,     
+    'axes.titlesize': 22,
+    'axes.labelsize': 22,
+    'xtick.labelsize': 22,
+    'ytick.labelsize': 22,       
+    'legend.fontsize': 22,       
+    'figure.titlesize': 22     
 })
 
 # Output directory for saving figures
@@ -33,9 +33,9 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Teal gradient-inspired color palette
 TEAL_PALETTE = {
-    "scilake": "#4e8094",
-    "santos": "#50a89d",
-    "tus": "#a5d2bc"
+    "Ours": "#4e8094",
+    "SANTOS": "#50a89d",
+    "TUS": "#a5d2bc"
 }
 NEW_PALETTE = {
     "scilake_direct": "#8b2e2e",
@@ -154,9 +154,9 @@ def plot_kde(length_data, palette, title, output_prefix):
 # ================= Original single-file pickles =================
 GT_FILE = "data/gt/scilake_gt_all_matrices__overlap_rate.pkl.gz"            ########
 PICKLE_PATHS_1 = {
-    "scilake": (GT_FILE, "csv_real_gt"),
-    "santos": "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",
-    "tus": "/Users/doradong/Repo/santos/groundtruth/tusUnionBenchmark.pickle"
+    "Ours": (GT_FILE, "csv_real_gt"),
+    "SANTOS": "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",
+    "TUS": "/Users/doradong/Repo/santos/groundtruth/tusUnionBenchmark.pickle"
 }
 print_large_keys(PICKLE_PATHS_1, threshold=1000)
 length_data_1 = load_all_lengths(PICKLE_PATHS_1)

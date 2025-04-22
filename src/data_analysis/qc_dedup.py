@@ -329,17 +329,27 @@ class BiasedLogNorm(LogNorm):
         return np.power(scaled, self.bias)
 
 def save_heatmap(dup_matrix, unique_counts, output_dir):
-    fontsize=18
+    fontsize = 18
     plt.rcParams.update({
         'font.size': 18,           
         'axes.titlesize': 18,      
         'axes.labelsize': 18,   
-        'xtick.labelsize': 18,    
-        'ytick.labelsize': 18,     
+        'xtick.labelsize': 17,    
+        'ytick.labelsize': 17,     
         'legend.fontsize': 18,     
         'figure.titlesize': 18     
     })
-    figsize=(12, 4)
+    figsize = (12, 6)
+
+    # ---- Rename resources for better labels ---- ########
+    name_map = {
+        "hugging": "Hugging",
+        "github": "GitHub",
+        "html": "HTML",
+        "llm": "S2ORC"
+    }
+    dup_matrix = dup_matrix.rename(index=name_map, columns=name_map) ########
+    unique_counts = {name_map[k]: v for k, v in unique_counts.items()} ########
 
     # Step 1: prepare plotting matrix using the original values
     dup_matrix_plot = dup_matrix.copy()
@@ -381,9 +391,9 @@ def save_heatmap(dup_matrix, unique_counts, output_dir):
             fontsize=fontsize
         )
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "heatmap_overlap.png"))
     plt.savefig(os.path.join(output_dir, "heatmap_overlap.pdf"))
-    print("Heatmap saved to", output_dir)
+    print("Heatmap saved to", os.path.join(output_dir, "heatmap_overlap.pdf"))
+
 
 def main():
     # --- Step 1: get the linked set (some files exist in local but not linked to model) ---
