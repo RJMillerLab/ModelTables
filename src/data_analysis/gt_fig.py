@@ -4,6 +4,9 @@ import seaborn as sns
 from scipy.sparse import csr_matrix
 import numpy as np
 
+from scipy.sparse import load_npz
+import os
+
 print("🔄 Loading GT pickle ...")
 GT_PATH = "data/gt/scilake_gt_all_matrices__overlap_rate.pkl.gz"
 
@@ -11,12 +14,20 @@ with gzip.open(GT_PATH, "rb") as f:
     gt_data = pickle.load(f)
 print("✅ GT loaded!")
 
+# add fig for extra modellevel citation graph
+MODEL_REL_PATH = "data/tmp/model_relation_adjacency.npz"
+print("🔄 Loading Model Relation adjacency ...")
+model_rel = load_npz(MODEL_REL_PATH)
+print("✅ Model Relation adjacency loaded!")
+
+
 matrix_keys = [
     ("paper_adj", gt_data["paper_adj"]),
     ("model_adj", gt_data["model_adj"]),
     ("csv_adj", gt_data["csv_adj"]),
     ("csv_symlink_adj", gt_data["csv_symlink_adj"]),
     ("csv_real_adj", gt_data["csv_real_adj"]),
+    ("model_relation", model_rel),
 ]
 
 n_cols = 3

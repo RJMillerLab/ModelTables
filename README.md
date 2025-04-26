@@ -132,6 +132,7 @@ python -m src.data_gt.overlap # check whether thresholding for overlapping rate 
 ```
 Quality Control !!! | Run some analysis
 ```bash
+# this must be run before gt
 python -m src.data_analysis.qc_dedup > logs/qc_dedup.log # dedup raw tables, keep dedup in order hugging>github>html>llm | I: modelcard_step3_merged, O: modelcard_step3_dedup
 python -m src.data_analysis.qc_dedup_fig
 python -m src.data_analysis.qc_stats # stats | I: modelcard_step4_dedup, O: benchmark_results
@@ -144,6 +145,7 @@ Final gt!
 python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
 # I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
 python -m src.data_gt.step3_gt # build up groundtruth
+python -m src.data_gt.modelcard_matrix # (add modelcard level citation graph)
 python -m src.data_analysis.gt_fig # plot stats
 ```
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
