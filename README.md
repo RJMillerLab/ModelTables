@@ -145,7 +145,9 @@ Final gt!
 python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
 # I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
 python -m src.data_gt.step3_gt # build up groundtruth
-python -m src.data_gt.modelcard_matrix # (add modelcard level citation graph)
+python -m src.data_gt.modelcard_matrix --stats 0 # (add modelcard level citation graph)
+python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
+
 python -m src.data_analysis.gt_fig # plot stats
 ```
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
