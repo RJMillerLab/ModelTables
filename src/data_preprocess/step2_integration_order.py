@@ -32,8 +32,8 @@ TOKEN_BUFFER = 300 # for symbol like ```markdown ```
 MODEL_NAME = "gpt-4o-mini"
 
 # Debug: if the below is set is False, we just update FINAL_OUTPUT_CSV file
-RUN_LLM = True ##### whether we re-run llm, set to False if we want to skip the LLM call and use previous results
-RUN_REBUILD_BATCHINPUT = True ### whether we want to rebuild the batch input file
+RUN_LLM = False ##### whether we re-run llm, set to False if we want to skip the LLM call and use previous results
+RUN_REBUILD_BATCHINPUT = False ### whether we want to rebuild the batch input file
 # ---------------------- Imports ---------------------- #
 
 
@@ -327,6 +327,7 @@ def main():
     # Optionally, drop the redundant 'openaccessurl' column from df_pdf 
     df_final.drop(columns=["openaccessurl"], inplace=True)
     print("📝 After merging PDF info, final shape:", df_final.shape)
+    df_final['orig_index'] = df_final.index
 
     # --- Step 9: Stats ---
     df_html_items = df_final[(df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext")]
@@ -371,7 +372,8 @@ def main():
         if RUN_REBUILD_BATCHINPUT:
             print("⚙️ Preparing data/processed/batch_input.jsonl ...")
             ######## Build list of (index, prompt, max_tokens)
-            batch_entries = df_final[["llm_prompt_truncated", "adaptive_max_tokens"]].to_dict(orient="index")
+            #batch_entries = df_final[["llm_prompt_truncated", "adaptive_max_tokens"]].to_dict(orient="index")
+            batch_entries = df_final.set_index('orig_index')[["llm_prompt_truncated", "adaptive_max_tokens"]].to_dict(orient="index")
             
             print("⚙️ Building JSONL lines in parallel with splitting...")
             all_entries = Parallel(n_jobs=-1)(
@@ -429,6 +431,10 @@ def main():
         
         # 6) Merge results back into df_final
         df_final["llm_response_raw"] = df_extracted["llm_response_raw"]
+        #df_final.to_parquet(FINAL_OUTPUT_CSV, index=False)
+        df_final = df_final.sort_values('orig_index')
+        df_final.reset_index(drop=True, inplace=True) 
+        df_final.drop(columns=['orig_index'], inplace=True)
         df_final.to_parquet(FINAL_OUTPUT_CSV, index=False)
         print(f"✅ LLM results saved to {FINAL_OUTPUT_CSV}")
     else:

@@ -153,24 +153,23 @@ python -m src.data_analysis.gt_fig # plot stats
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
-# python -m src.data_symlink.ln_scilake --repo_root /Users/doradong/Repo --mode all
-python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilake_final_str --mode str # trick: header-str(value)
-python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilake_final_tr --mode transpose # trick: permutation
-python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --output scilake_final_str_tr --mode str_transpose # trick: tr + str 
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str # trick: header-str(value)
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode transpose # trick: permutation
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_transpose # trick: tr + str 
 
-python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str
-python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode tr
-python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str_tr
-python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --output scilake_final --mode base # symlink csvs to the target folder
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str_tr
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base # symlink csvs to the target folder
 # bash src/data_analysis/count_files.sh check whether the symlink path include some files
 ```
 
 6. Run updated [starmie](https://github.com/DoraDong-2023/starmie_internal) scripts for finetuning and check performance
 ```bash
 bash prepare_sample.sh # sample 1000 samples from each resources folder
-# or python -m src.data_symlink.prepare_sample_server --root_dir /Users/doradong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 1000 --seed 42
+# or python -m src.data_symlink.prepare_sample_server --root_dir /u4/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42
 # another substitution
-python -m src.data_symlink.prepare_sample --root_dir /Users/doradong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42
+python -m src.data_symlink.prepare_sample --root_dir /u1/z6dong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42
 # create for tricks augmented files
 python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt
 # Input: scilake_final_filelist.txt ; Output: scilake_final_filelist_{tricks}_filelist.txt, 
