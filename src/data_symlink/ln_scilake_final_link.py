@@ -25,26 +25,25 @@ def generate_variant_filelists(filelist_path: str):
     #    '_t'  : f"{base_name}_t{ext}",
     #    '_s_t': f"{base_name}_s_t{ext}",
     #}
+    # Determine output filenames, preserving _val in list name but not in content suffix
     if base_name.endswith('_val'):
+        # root without '_val'
         root = base_name[:-4]
-        variants = {
-            '_s_val'  : f"{root}_s_val{ext}",   
-            '_t_val'  : f"{root}_t_val{ext}",   
-            '_s_t_val': f"{root}_s_t_val{ext}", 
-        }
+        content_suffixes = ['_s', '_t', '_s_t']
+        variants = {}
+        for cs in content_suffixes:
+            # output name keeps _val after suffix
+            variants[cs] = f"{root}{cs}_val{ext}"
     else:
-        variants = {
-            '_s'    : f"{base_name}_s{ext}",
-            '_t'    : f"{base_name}_t{ext}",
-            '_s_t'  : f"{base_name}_s_t{ext}",
-        }
-
+        content_suffixes = ['_s', '_t', '_s_t']
+        variants = {cs: f"{base_name}{cs}{ext}" for cs in content_suffixes}
     # 3) Write new list
     for suffix, output_name in variants.items():
         output_path = os.path.join(dir_path, output_name)
         with open(output_path, 'w', encoding='utf-8') as fout:
             for filename in lines:
                 name, file_ext = os.path.splitext(filename)
+                # only add content suffix (no '_val')
                 fout.write(f"{name}{suffix}{file_ext}\n")
         print(f"[OK] Generated {output_path} ({len(lines)} entries)")
 

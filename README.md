@@ -153,9 +153,9 @@ python -m src.data_analysis.gt_fig # plot stats
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str # trick: header-str(value)
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode transpose # trick: permutation
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_transpose # trick: tr + str 
+python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode str # trick: header-str(value)
+python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode transpose # trick: permutation
+python -m src.data_symlink.trick_aug --repo_root /Users/doradong/Repo --mode str_transpose # trick: tr + str 
 
 python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str
 python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr
@@ -171,7 +171,7 @@ bash prepare_sample.sh # sample 1000 samples from each resources folder
 # another substitution
 python -m src.data_symlink.prepare_sample --root_dir /Users/doradong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42
 # create for tricks augmented files
-python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt
+#python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt
 # Input: scilake_final_filelist.txt ; Output: scilake_final_filelist_{tricks}_filelist.txt, 
 python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt # create other 3 files
 # (deprecate) (already processed in QC step) bash check_empty.sh # filter out empty files (or low quality files later)

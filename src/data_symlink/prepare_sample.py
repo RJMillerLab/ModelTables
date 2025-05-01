@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import csv
 import argparse
 import random
 
@@ -9,6 +10,15 @@ def collect_files_from_dir(directory, limit, seed=None):
     for fname in os.listdir(directory):
         full_path = os.path.join(directory, fname)
         if os.path.isfile(full_path):  # accept both symlinks and regular files
+            #files.append(fname)
+            try:                     
+                with open(full_path, newline='', encoding='utf-8') as f:  
+                    reader = csv.reader(f)                                
+                    header = next(reader, None)                          
+                if not header or len(header) <= 1:                        
+                    continue                                              
+            except Exception:                                           
+                continue                                                  
             files.append(fname)
     if seed is not None:
         random.seed(seed)
@@ -55,6 +65,7 @@ def main():
                 val_f.write(fname + '\n')
 
     print(f"Generated {args.output_file}")
+    print(f"Generated {val_output_file}")
 
 if __name__ == '__main__':
     main()
