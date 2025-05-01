@@ -31,17 +31,28 @@ def main():
         "CitationLake/data/processed/tables_output"
     ]
 
-    with open(args.output_file, 'w') as out_f:
+    #with open(args.output_file, 'w') as out_f:
+    # Derive validation output filename 
+    val_output_file = args.output_file.replace('.txt', '_val.txt') 
+    with open(args.output_file, 'w') as train_f, open(val_output_file, 'w') as val_f: 
         for subdir in subdirs:
             abs_path = os.path.join(args.root_dir, subdir)
             if not os.path.exists(abs_path):
                 print(f"Warning: {abs_path} does not exist. Skipping.")
                 continue
-            sampled_files = collect_files_from_dir(abs_path, args.limit, args.seed)
-            for fname in sampled_files:
+            #sampled_files = collect_files_from_dir(abs_path, args.limit, args.seed)
+            #for fname in sampled_files:
                 #out_f.write(os.path.join(subdir, fname) + '\n')
-                #out_f.write(os.path.join(args.root_dir, subdir, fname) + '\n')  ########
-                out_f.write(fname + '\n')
+                #out_f.write(os.path.join(args.root_dir, subdir, fname) + '\n')  
+            #    out_f.write(fname + '\n')
+            # Sample twice the limit and split into train/val 
+            sampled_files = collect_files_from_dir(abs_path, args.limit * 2, args.seed)
+            train_samples = sampled_files[:args.limit]
+            val_samples = sampled_files[args.limit:]
+            for fname in train_samples:
+                train_f.write(fname + '\n')
+            for fname in val_samples:
+                val_f.write(fname + '\n')
 
     print(f"Generated {args.output_file}")
 

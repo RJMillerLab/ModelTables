@@ -169,10 +169,11 @@ python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base # 
 bash prepare_sample.sh # sample 1000 samples from each resources folder
 # or python -m src.data_symlink.prepare_sample_server --root_dir /u4/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42
 # another substitution
-python -m src.data_symlink.prepare_sample --root_dir /u1/z6dong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42
+python -m src.data_symlink.prepare_sample --root_dir /Users/doradong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42
 # create for tricks augmented files
 python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt
 # Input: scilake_final_filelist.txt ; Output: scilake_final_filelist_{tricks}_filelist.txt, 
+python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt # create other 3 files
 # (deprecate) (already processed in QC step) bash check_empty.sh # filter out empty files (or low quality files later)
 bash scripts/step1_pretrain.sh # finetune contrastive learning
 bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake items
