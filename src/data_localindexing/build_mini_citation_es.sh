@@ -13,7 +13,7 @@ echo "========Stopping any existing Elasticsearch processes on this node..."
 
 echo "========Removing stale lock files from shared directories..."
 rm -f /u4/z6dong/shared_data/elasticsearch-8.11.1/data/_state/write.lock
-rm -f /u4/z6dong/shared_data/elasticsearch-8.11.1/data/snapshot_cache/write.lock
+rm -rf /u4/z6dong/shared_data/elasticsearch-8.11.1/data/snapshot_cache
 rm -f /u4/z6dong/shared_data/es_data_persistent/node.lock
 
 # Set lower JVM heap settings to avoid excessive memory usage
@@ -22,6 +22,9 @@ export ES_JAVA_OPTS="-Xms4g -Xmx4g"
 # Set up a local data directory to ensure exclusive usage
 #ES_DATA_DIR="/tmp/elasticsearch_data_${SLURM_JOB_ID}"
 ES_DATA_DIR="/u4/z6dong/shared_data/es_data_persistent"
+rm -f ${ES_DATA_DIR}/node.lock
+rm -rf ${ES_DATA_DIR}/snapshot_cache
+rm -rf ${ES_DATA_DIR}/_state
 #rm -rf ${ES_DATA_DIR}
 #mkdir -p ${ES_DATA_DIR} && 
 chmod 700 ${ES_DATA_DIR}
@@ -78,7 +81,7 @@ echo "========Running bulk import..."
 #python build_mini_citation_es.py --mode query --index_name citations_index --id 150223110
 #python build_mini_citation_es.py --mode test --index_name citations_index
 #python build_mini_citation_es.py --mode update --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
-python build_mini_citation_es.py --mode prepare_ids
+#python build_mini_citation_es.py --mode prepare_ids
 python build_mini_citation_es.py --mode batch --index_name citations_index --input_file tmp_local_ids.txt --output_file batch_results.parquet
 
 

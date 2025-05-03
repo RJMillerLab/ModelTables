@@ -5,7 +5,7 @@ Usage:
     python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index_full --fields full
     python build_mini_citation_es.py --mode query --index_name citations_index --id 8982892
     python build_mini_citation_es.py --mode test --index_name citations_index
-    python build_mini_citation_es.py --mode batch --input_file paper_ids.txt --index_name citations_index_full
+    python build_mini_citation_es.py --mode batch --input_file corpusIds.txt --index_name citations_index_full
     python build_mini_citation_es.py --mode update --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
 
 Notes:
@@ -19,6 +19,7 @@ import json, time, os, re, glob, warnings
 from tqdm import tqdm
 import pandas as pd
 from elasticsearch import Elasticsearch, helpers
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore")
 
@@ -29,6 +30,8 @@ ES_PASSWORD = "6KdUGb=SifNeWOy__lEz"
 
 # Batch size for bulk import.
 BATCH_SIZE = 2000
+
+SEARCH_BATCH = 50
 
 def create_citations_index(es, index_name):
     """
@@ -250,7 +253,7 @@ def query_citations(es, paper_index, citations_index, title):
             }
         }
     }
-    response = es.search(index=citations_index, body=query_body, size=50)
+    response = es.search(index=citations_index, body=query_body, size=10000)
     hits = response["hits"]["hits"]
     if not hits:
         print(f"No citation edges found for paper id: {paper_id}")
@@ -276,8 +279,8 @@ def query_citations_by_id_mini(es, citations_index, target_id):
             "term": {"citedcorpusid": target_id}
         }
     }
-    response_citing = es.search(index=citations_index, body=query_citing, size=50)
-    response_cited = es.search(index=citations_index, body=query_cited, size=50)
+    response_citing = es.search(index=citations_index, body=query_citing, size=SEARCH_BATCH)
+    response_cited = es.search(index=citations_index, body=query_cited, size=SEARCH_BATCH)
     hits_citing = response_citing.get("hits", {}).get("hits", [])
     hits_cited = response_cited.get("hits", {}).get("hits", [])
     
@@ -314,7 +317,7 @@ def query_citations_by_id(es, citations_index, target_id):
     # Query records where target_id is in citingcorpusid (target paper is doing the citing,
     # so the other side is a cited paper)
     query_from = {"query": {"term": {"citingcorpusid": target_id}}}
-    resp_from = es.search(index=citations_index, body=query_from, size=50)
+    resp_from = es.search(index=citations_index, body=query_from, size=SEARCH_BATCH)
     hits_from = resp_from.get("hits", {}).get("hits", [])
     cited_papers = []
     for hit in hits_from:
@@ -333,7 +336,7 @@ def query_citations_by_id(es, citations_index, target_id):
     # Query records where target_id is in citedcorpusid (target paper is being cited,
     # so the other side is a citing paper)
     query_to = {"query": {"term": {"citedcorpusid": target_id}}}
-    resp_to = es.search(index=citations_index, body=query_to, size=50)
+    resp_to = es.search(index=citations_index, body=query_to, size=SEARCH_BATCH)
     hits_to = resp_to.get("hits", {}).get("hits", [])
     citing_papers = []
     for hit in hits_to:
@@ -355,7 +358,7 @@ def batch_query(es, citations_index, input_file, output_file):
     """
     Batch query mode: Process an input file containing a list of paper IDs (one per line),
     display progress and elapsed time, and save non-empty results to a parquet file with columns:
-      - paper_id
+      - corpusId
       - cited_papers
       - citing_papers
     Only papers with at least one citing or cited entry are saved.
@@ -364,37 +367,54 @@ def batch_query(es, citations_index, input_file, output_file):
         print(f"Error: Input file {input_file} does not exist.")
         return
     with open(input_file, "r", encoding="utf-8") as f:
-        paper_ids = [line.strip() for line in f if line.strip()]
+        corpusIds = [line.strip() for line in f if line.strip()]
     
-    total = len(paper_ids)
+    total = len(corpusIds)
     print(f"🚀 Starting batch query for {total} paper IDs...")
     start_time = time.time()
 
     results = []
-    found = 0
-    skipped = 0
-    for pid in tqdm(paper_ids, desc="Batch querying", total=total):
-        res = query_citations_by_id(es, citations_index, pid)
-        cited = res.get("cited_papers", []) or []
-        citing = res.get("citing_papers", []) or []
+    for pid in corpusIds:
+        cited = []
+        citing = []
+        for src in scan_citations(es, citations_index, pid):
+            if src["citingcorpusid"] == pid:
+                cited.append(src)
+            else:
+                citing.append(src)
         if cited or citing:
-            print(f"✅ Found {len(cited)} cited and {len(citing)} citing for {pid}")
             results.append({
-                "paper_id": pid,
+                "corpusId": pid,
                 "cited_papers": cited,
                 "citing_papers": citing
             })
-            found += 1
-        else:
-            skipped += 1
     elapsed = time.time() - start_time
     if results:
-        df = pd.DataFrame(results).set_index("paper_id")
+        df = pd.DataFrame(results)
         df.to_parquet(output_file, index=False)
-        print(f"💾 Batch results saved to {output_file} with {found} records")
+        # —— add visualization for the count histogram —— #
+        ref_counts = df["cited_papers"].apply(len)
+        cit_counts = df["citing_papers"].apply(len)
+
+        plt.figure()
+        plt.hist(ref_counts, bins=50, color="#add8e6")
+        plt.title("Distribution of References per Paper")
+        plt.xlabel("Number of References")
+        plt.ylabel("Frequency")
+        plt.savefig("references_histogram.png")
+
+        plt.figure()
+        plt.hist(cit_counts, bins=50, color="#ffcc99")
+        plt.title("Distribution of Citations per Paper")
+        plt.xlabel("Number of Citations")
+        plt.ylabel("Frequency")
+        plt.savefig("citations_histogram.png")
+
+        print(f"💾 Batch results saved to {output_file} and histograms generated")
+     
     else:
         print("⚠️ No records to save; all results empty.")
-    print(f"⏱ Total time: {elapsed:.2f}s for {total} queries ({found} found, {skipped} skipped)")
+    print(f"⏱ Total time: {elapsed:.2f}s for {total} queries")
 
 def test_index(es, index_name):
     """
@@ -406,6 +426,30 @@ def test_index(es, index_name):
     print("Sample citation documents:")
     for hit in response["hits"]["hits"]:
         print(hit["_source"])
+
+def scan_citations(es, citations_index, pid):
+    # only do one compound query, scan all citingcorpusid or citedcorpusid=pid
+    query = {
+        "query": {
+            "bool": {
+                "should": [
+                    {"term": {"citingcorpusid": pid}},
+                    {"term": {"citedcorpusid": pid}}
+                ],
+                "minimum_should_match": 1
+            }
+        }
+    }
+    # helpers.scan will automatically handle the scroll context and fetch all data
+    for hit in helpers.scan(
+        client=es,
+        index=citations_index,
+        query=query,
+        scroll="5m",       # scroll context time
+        size=1000          # get 1000 records at a time
+    ):
+        yield hit["_source"]
+
 
 def main():
     parser = argparse.ArgumentParser(description="Elasticsearch Citation Graph Loader & Query Tool")
@@ -426,6 +470,14 @@ def main():
         basic_auth=(ES_USER, ES_PASSWORD),
         verify_certs=False
     )
+    """es.indices.put_settings(
+        index="citations_index",
+        body={
+            "index": {
+                "max_result_window": 50
+            }
+        }
+    )"""
     #es = Elasticsearch(["http://{}:9200".format(ES_HOST)], verify_certs=False)
 
     if args.mode == "build":
