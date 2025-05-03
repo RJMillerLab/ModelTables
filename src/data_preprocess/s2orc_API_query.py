@@ -88,15 +88,19 @@ def update_titles_to_paper_ids(new_titles, sleep_time=1, cache_file=TITLES_CACHE
                     retrieved_title = paper.get("title")
                     if paperId is not None:
                         pid = f"CorpusID:{corpusId}" if corpusId is not None else paperId
-                        new_rows.append({
+                        new_row = {
                             "query_title": query_title,
                             "retrieved_title": retrieved_title,
                             "paperId": paperId,
                             "corpusId": corpusId,
                             "paper_identifier": pid
-                        })
+                        }
+                        new_rows.append(new_row)
                         success_count += 1  ######## Increment success count
                         print(f"✅ For '{query_title}': paperId={paperId}, corpusId={corpusId}, retrieved_title='{retrieved_title}'")
+                        # Incremental checkpoint after each successful query
+                        df_cache = pd.concat([df_cache, pd.DataFrame([new_row])], ignore_index=True)  ########
+                        df_cache.to_parquet(cache_file, index=False)  ########
                     else:
                         print(f"⚠️ No paperId found for title: {query_title}")
                         failure_count += 1  ######## Increment failure count if no paperId
@@ -108,11 +112,11 @@ def update_titles_to_paper_ids(new_titles, sleep_time=1, cache_file=TITLES_CACHE
                 failure_count += 1  ######## Increment failure count for HTTP errors
             time.sleep(sleep_time)
         print(f"\n📊 Processing Complete: {len(titles_to_query)} titles processed, {success_count} successful, {failure_count} failed.")
-        if new_rows:
+        """if new_rows:
             df_new = pd.DataFrame(new_rows)
             df_cache = pd.concat([df_cache, df_new], ignore_index=True)
             df_cache.to_parquet(cache_file, index=False)
-            print(f"💾 Updated title mapping saved to {cache_file} (total {len(df_cache)} records)")
+            print(f"💾 Updated title mapping saved to {cache_file} (total {len(df_cache)} records)")"""
     else:
         print("🔄 All titles are already in cache.")
     return df_cache
@@ -178,7 +182,7 @@ def batch_get_details_for_ids(mapping_df, batch_size=500, sleep_time=1, timeout=
     print(f"💾 Batch results saved to {cache_file}")
     return merge_df
 
-def get_single_citations_row(paper_id, sleep_time=1, timeout=60, cache_file=CITATIONS_CACHE_FILE, force_refresh=False):
+def get_single_citations_row(paper_id, sleep_time=1.5, timeout=60, cache_file=CITATIONS_CACHE_FILE, force_refresh=False):
     """
     Query the /paper/{paper_id}/citations endpoint for all citations using pagination.
     Each page retrieves up to 100 records. All citations are merged into a single response.
@@ -366,6 +370,7 @@ def merge_all_results(titles_cache=TITLES_CACHE_FILE,
     return df_merged
 
 if __name__ == "__main__":
+    skip_title_update = True
     ######## Load titles from the JSON file defined in TITLES_JSON_FILE
     if os.path.exists(TITLES_JSON_FILE):
         with open(TITLES_JSON_FILE, "r", encoding="utf-8") as f:
@@ -374,9 +379,17 @@ if __name__ == "__main__":
         print(f"❌ Titles file {TITLES_JSON_FILE} does not exist.")
         TITLES = []
     ######## End of loading titles
-    
+
     # 1. Update titles mapping and cache to parquet.
-    mapping_df = update_titles_to_paper_ids(TITLES, sleep_time=1, cache_file=TITLES_CACHE_FILE)
+    if skip_title_update:
+        if os.path.exists(TITLES_CACHE_FILE):
+            print(f"🔄 Skip title Updating, directly load cache {TITLES_CACHE_FILE}")
+            mapping_df = pd.read_parquet(TITLES_CACHE_FILE)
+        else:
+            print(f"❌ Cache file {TITLES_CACHE_FILE} not exists!")
+            mapping_df = update_titles_to_paper_ids(TITLES, sleep_time=1, cache_file=TITLES_CACHE_FILE)
+    else:
+        mapping_df = update_titles_to_paper_ids(TITLES, sleep_time=1, cache_file=TITLES_CACHE_FILE)
     print("\n💾 Titles mapping updated and saved.")
     
     # 2. Batch query paper details and merge with titles mapping.

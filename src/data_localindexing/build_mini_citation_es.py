@@ -417,6 +417,9 @@ def main():
             return
         build_citations_index(es, args.directory, args.index_name, args.fields)
     elif args.mode == "query":
+        all_indices = es.indices.get_alias("*").keys()
+        print("Available indices in the cluster:", list(all_indices))
+
         result = query_citations_by_id(es, args.index_name, args.id)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.mode == "test":
