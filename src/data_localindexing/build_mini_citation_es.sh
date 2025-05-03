@@ -75,9 +75,12 @@ echo "========Running bulk import..."
 
 #python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index --fields minimal
 #python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index_full --fields full
-python build_mini_citation_es.py --mode query --index_name citations_index --id 150223110
+#python build_mini_citation_es.py --mode query --index_name citations_index --id 150223110
 #python build_mini_citation_es.py --mode test --index_name citations_index
 #python build_mini_citation_es.py --mode update --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
+python build_mini_citation_es.py --mode prepare_ids
+python build_mini_citation_es.py --mode batch --index_name citations_index --input_file tmp_local_ids.txt --output_file batch_results.parquet
+
 
 echo "========Bulk import completed."
 

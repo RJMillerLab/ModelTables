@@ -15,11 +15,7 @@ Notes:
 """
 
 import argparse
-import json
-import os
-import warnings
-import glob
-import re
+import json, time, os, re, glob, warnings
 from tqdm import tqdm
 import pandas as pd
 from elasticsearch import Elasticsearch, helpers
@@ -355,30 +351,50 @@ def query_citations_by_id(es, citations_index, target_id):
     
     return {"cited_papers": cited_papers, "citing_papers": citing_papers}
     
-def batch_query(es, citations_index, input_file):
+def batch_query(es, citations_index, input_file, output_file):
     """
-    Batch query mode: Process an input file containing a list of paper IDs (one per line)
-    and return a DataFrame where the index is the paper ID and there are two columns:
-      - "cited_papers": JSON list of papers that are cited by the target paper.
-      - "citing_papers": JSON list of papers that cite the target paper.
-    The DataFrame is printed as a JSON string.
+    Batch query mode: Process an input file containing a list of paper IDs (one per line),
+    display progress and elapsed time, and save non-empty results to a parquet file with columns:
+      - paper_id
+      - cited_papers
+      - citing_papers
+    Only papers with at least one citing or cited entry are saved.
     """
     if not os.path.exists(input_file):
         print(f"Error: Input file {input_file} does not exist.")
         return
     with open(input_file, "r", encoding="utf-8") as f:
         paper_ids = [line.strip() for line in f if line.strip()]
+    
+    total = len(paper_ids)
+    print(f"🚀 Starting batch query for {total} paper IDs...")
+    start_time = time.time()
+
     results = []
-    for pid in paper_ids:
+    found = 0
+    skipped = 0
+    for pid in tqdm(paper_ids, desc="Batch querying", total=total):
         res = query_citations_by_id(es, citations_index, pid)
-        results.append({
-            "paper_id": pid,
-            "cited_papers": res.get("cited_papers"),
-            "citing_papers": res.get("citing_papers")
-        })
-    df = pd.DataFrame(results).set_index("paper_id")
-    # Print the DataFrame as a JSON string.
-    print(df.to_json(orient="index", force_ascii=False, indent=2))
+        cited = res.get("cited_papers", []) or []
+        citing = res.get("citing_papers", []) or []
+        if cited or citing:
+            print(f"✅ Found {len(cited)} cited and {len(citing)} citing for {pid}")
+            results.append({
+                "paper_id": pid,
+                "cited_papers": cited,
+                "citing_papers": citing
+            })
+            found += 1
+        else:
+            skipped += 1
+    elapsed = time.time() - start_time
+    if results:
+        df = pd.DataFrame(results).set_index("paper_id")
+        df.to_parquet(output_file, index=False)
+        print(f"💾 Batch results saved to {output_file} with {found} records")
+    else:
+        print("⚠️ No records to save; all results empty.")
+    print(f"⏱ Total time: {elapsed:.2f}s for {total} queries ({found} found, {skipped} skipped)")
 
 def test_index(es, index_name):
     """
@@ -393,7 +409,7 @@ def test_index(es, index_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Elasticsearch Citation Graph Loader & Query Tool")
-    parser.add_argument("--mode", choices=["build", "query", "test", "batch", "update"], required=True,
+    parser.add_argument("--mode", choices=["build", "query", "test", "batch", "update", "prepare_ids"], required=True,
                         help="build: import citation data; query: search by paper title; test: show index samples")
     parser.add_argument("--directory", type=str, help="Directory with NDJSON citation files (for build mode)")
     parser.add_argument("--index_name", type=str, default="citations_index",
@@ -402,6 +418,7 @@ def main():
                         help="Store full fields or only minimal fields (citationid, citingcorpusid, citedcorpusid)")
     parser.add_argument("--id", type=str, default="150223110", help="Paper id to search for (query mode)")
     parser.add_argument("--input_file", type=str, default="tmp.txt", help="Input file with paper IDs for batch query mode")
+    parser.add_argument("--output_file", type=str, default="batch_results.parquet", help="Input file with paper IDs for batch query mode")
     args = parser.parse_args()
 
     es = Elasticsearch(
@@ -428,12 +445,21 @@ def main():
         if not args.input_file:
             print("Error: --input_file is required for batch mode.")
             return
-        batch_query(es, args.index_name, args.input_file)
+        batch_query(es, args.index_name, args.input_file, args.output_file)
     elif args.mode == "update":
         if not args.directory:
             print("Error: --directory is required in update mode.")
             return
         update_index_mini2full(es, args.directory, args.index_name)
+    elif args.mode == "prepare_ids":                                        
+        # load all paperId from titles cache, write to tmp_ids.txt
+        TITLES_CACHE_FILE = "./s2orc_titles2ids.parquet"
+        df = pd.read_parquet(TITLES_CACHE_FILE)
+        ids = df["corpusId"].drop_duplicates().astype(str).tolist()
+        tmp_file = "tmp_local_ids.txt"
+        with open(tmp_file, "w") as f:
+            f.write("\n".join(ids))
+        print(f"🎉 Saved {len(ids)} paper IDs to {tmp_file}")
 
 if __name__ == "__main__":
     main()
