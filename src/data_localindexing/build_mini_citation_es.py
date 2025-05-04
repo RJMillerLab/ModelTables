@@ -16,6 +16,11 @@ Notes:
 
 import argparse
 import json, time, os, re, glob, warnings
+#import time, os, re, glob, warnings
+import multiprocessing as mp
+from functools import partial
+
+#import orjson as json
 from tqdm import tqdm
 import pandas as pd
 from elasticsearch import Elasticsearch, helpers
@@ -30,7 +35,7 @@ ES_USER = "elastic"
 ES_PASSWORD = "6KdUGb=SifNeWOy__lEz"
 
 # Batch size for bulk import.
-BATCH_SIZE = 5000
+BATCH_SIZE = 8000
 
 SEARCH_BATCH = 10000
 
@@ -169,146 +174,44 @@ def build_citations_index(es, directory, index_name, fields_mode):
         es.indices.put_settings(
             index=index_name,
             body={"index": {"refresh_interval": "-1", "number_of_replicas": 0}}
-        )  ########
+        )
+    files = sorted(f for f in glob.glob(os.path.join(directory, "step*_file"))
+                   if f not in checkpoint["processed_files"])
 
-    """files = glob.glob(os.path.join(directory, "step*_file"))
-    total_docs = 0
-    for file_path in files:
-        if file_path in checkpoint["processed_files"]:
-            print(f"Skipping already processed file: {file_path}")
-            continue
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                file_line_count = sum(1 for _ in f)
-        except Exception:
-            file_line_count = 0
-        print(f"Processing file: {file_path} (approx {file_line_count} lines)")
-        pbar = tqdm(total=file_line_count, desc=os.path.basename(file_path), leave=False)
-        for batch in process_ndjson_file(file_path):
-            actions = []
-            for rec in batch:
-                if fields_mode == "minimal":
-                    new_rec = {
-                        "citationid": rec.get("citationid"),
-                        "citingcorpusid": rec.get("citingcorpusid"),
-                        "citedcorpusid": rec.get("citedcorpusid")
-                    }
-                else:
-                    # In full mode, copy all fields and perform optional conversion for nested fields.
-                    new_rec = rec.copy()
-                    if new_rec.get("contexts") is not None:
-                        new_rec["contexts"] = json.dumps(new_rec["contexts"])
-                    if new_rec.get("intents") is not None:
-                        new_rec["intents"] = json.dumps(new_rec["intents"])
-                actions.append({
-                    "_index": index_name,
-                    "_id": rec.get("citationid"),
-                    "_source": new_rec
-                })
-            #helpers.bulk(es, actions, request_timeout=300)
-            # Use parallel_bulk for concurrent indexing ########
-            for ok, info in parallel_bulk(
-                client=es,
-                actions=actions,
-                thread_count=4,      # adjust thread count ########
-                chunk_size=BATCH_SIZE,  # use your BATCH_SIZE constant ########
-                request_timeout=300
-            ):
-                #pbar.update(1) ########
-                pass
-            total_docs += len(batch)
-            pbar.update(len(actions))
-        pbar.close()
-        checkpoint["processed_files"].append(file_path)
-        with open(checkpoint_file, "w", encoding="utf-8") as f:
-            json.dump(checkpoint, f)
-        """
-        # —— build one big generator over all files —— #
-    def all_actions():
-        for file_path in glob.glob(os.path.join(directory, "step*_file")):
-            if file_path in checkpoint["processed_files"]:
-                continue
-            for batch in process_ndjson_file(file_path):
-                for rec in batch:
-                    src = prepare_record(rec, fields_mode)
-                    yield {"_index": index_name,
-                           "_id": rec["citationid"],
-                           "_source": src}
+    # ---------------- 多进程索引 -----------------
+    def index_one(file_path, host, idx, mode, bs):
+        es_local = Elasticsearch(host, verify_certs=False)
+        actions = (
+            {
+                "_index": idx,
+                "_id": rec["citationid"],
+                "_source": prepare_record(rec, mode)
+            }
+            for batch in process_ndjson_file(file_path, bs)
+            for rec  in batch
+        )
+        helpers.bulk(es_local, actions,
+                     chunk_size=bs,
+                     request_timeout=300,
+                     refresh=False)
+        return file_path
 
-    """
-    # row level update tqdm
-    total = count_lines_in_dir(directory, pattern="step*_file")
-    pbar = tqdm(total=total, desc="Importing all citations", ncols=80)
-    for ok, info in parallel_bulk(
-        client=es,
-        actions=all_actions(),
-        thread_count=2,
-        chunk_size=5000,
-        request_timeout=300
-    ):
-        pbar.update(1)
-    pbar.close()"""
-    # total = count_lines_in_dir(directory, pattern="step*_file")
-    # pbar = tqdm(total=total, desc="Importing all citations", ncols=80)
-
-    # file level update tqdm
-    """files = glob.glob(os.path.join(directory, "step*_file"))
-    pbar = tqdm(total=len(files), desc="Processed files", leave=False)
-    for file_path in files:
-        def file_actions():
-            for batch in process_ndjson_file(file_path):
-                for rec in batch:
-                    yield {
-                        "_index": index_name,
-                        "_id": rec["citationid"],
-                        "_source": prepare_record(rec, fields_mode)
-                    }
-
-        for ok, info in parallel_bulk(
-            client=es,
-            actions=file_actions(),
-            thread_count=2,
-            chunk_size=10000,
-            request_timeout=300
-        ):
-            pass
-        pbar.update(1)
-    pbar.close()"""
-    files = sorted(glob.glob(os.path.join(directory, "step*_file")))
-    # Skip already-done files and count them in the bar
-    files = [f for f in files if f not in checkpoint["processed_files"]]
-    pbar = tqdm(total=len(files), desc="Files imported", leave=False)
-    total_docs = 0
-
-    for file_path in files:
-        # Index this file in one go via parallel_bulk
-        def file_actions():
-            for batch in process_ndjson_file(file_path):
-                for rec in batch:
-                    yield {
-                        "_index": index_name,
-                        "_id": rec["citationid"],
-                        "_source": prepare_record(rec, fields_mode)
-                    }
-
-        for ok, info in parallel_bulk(
-            client=es,
-            actions=file_actions(),
-            thread_count=2,      # reduced threads for steady throughput
-            chunk_size=10000,    # enlarged batch size for fewer HTTP calls
-            request_timeout=300
-        ):
-            total_docs += 1
-
-        # Mark this file done immediately
-        checkpoint["processed_files"].append(file_path)
-        with open(checkpoint_file, "w", encoding="utf-8") as f:
-            json.dump(checkpoint, f)
-
-        pbar.update(1)
-    pbar.close()
+    pool_sz = 8 or mp.cpu_count()
+    with mp.Pool(processes=pool_sz) as pool, \
+         tqdm(total=len(files), desc="Files imported") as pbar:
+        for done_file in pool.imap_unordered(
+                partial(index_one,
+                        host=ES_HOST,
+                        idx=index_name,
+                        mode=fields_mode,
+                        bs=BATCH_SIZE),
+                files):
+            checkpoint["processed_files"].append(done_file)
+            with open(checkpoint_file, "w", encoding="utf-8") as f:
+                json.dump(checkpoint, f)
+            pbar.update(1)
     
-    print(f"Bulk import completed. Total citation documents imported: {total_docs}")
+    print(f"Bulk import completed.")
     # Restore settings & force one refresh ########
     es.indices.put_settings(
         index=index_name,
@@ -511,7 +414,7 @@ def batch_query(es, citations_index, input_file, output_file):
     start_time = time.time()
 
     results = []
-    for pid in corpusIds:
+    for pid in tqdm(corpusIds, desc="Querying papers"):
         cited = []
         citing = []
         for src in scan_citations(es, citations_index, pid):
@@ -623,11 +526,11 @@ def main():
             return
         build_citations_index(es, args.directory, args.index_name, args.fields)
     elif args.mode == "query":
-        all_indices = es.indices.get_alias("*").keys()
-        print("Available indices in the cluster:", list(all_indices))
+        #all_indices = es.indices.get_alias("*").keys()
+        #print("Available indices in the cluster:", list(all_indices))
 
         result = query_citations_by_id(es, args.index_name, args.id)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        print(json.dumps(result, indent=2))
     elif args.mode == "test":
         test_index(es, args.index_name)
     elif args.mode == "batch":

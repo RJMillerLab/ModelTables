@@ -80,7 +80,23 @@ echo "========Running bulk import..."
 #python build_mini_citation_es.py --mode test --index_name citations_index
 #python build_mini_citation_es.py --mode update --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
 #python build_mini_citation_es.py --mode prepare_ids
-python build_mini_citation_es.py --mode batch --index_name citations_index_full --input_file tmp_local_ids.txt --output_file batch_results.parquet
+#python build_mini_citation_es.py --mode batch --index_name citations_index --input_file tmp_local_ids.txt --output_file batch_results.parquet
+#curl -XDELETE "http://localhost:9200/citations_index_full"
+
+python build_mini_citation_es.py --mode batch --index_name citations_index --input_file tmp_local_ids.txt --output_file batch_results.parquet
+echo "======== Step 2: Export citationid column to hit_ids.txt ========"
+python - <<'PY'
+import pandas as pd
+df = pd.read_parquet("batch_results.parquet")
+ids = set()
+for col in ("cited_papers", "citing_papers"):
+    ids.update(str(d["citationid"]) for lst in df[col] for d in lst)
+with open("hit_ids.txt", "w") as f:
+    f.write("\n".join(ids))
+print(f"→ Exported {len(ids)} citation IDs to hit_ids.txt")
+PY
+echo "======== Step 3: Extract full JSON records by citation ID ========"
+python extract_full_records.py --ids hit_ids.txt --src_dir /u4/z6dong/shared_data/se_citations_250218 --out full_hits.jsonl
 
 
 echo "========Bulk import completed."
