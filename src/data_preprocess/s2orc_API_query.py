@@ -349,7 +349,8 @@ def update_all_single_references(paper_ids, sleep_time=1, timeout=60, force_refr
 def merge_all_results(titles_cache=TITLES_CACHE_FILE,
                       citations_cache=CITATIONS_CACHE_FILE,
                       references_cache=REFERENCES_CACHE_FILE,
-                      output_file=MERGED_RESULTS_FILE):
+                      output_file=MERGED_RESULTS_FILE,
+                      MERGE_KEY = "corpusId"):
     """
     Merge the titles mapping, single citations, and single references parquet files into one consolidated parquet.
     The merge is performed by paperId. The columns from the citations data are renamed with suffix _citations,
@@ -361,10 +362,13 @@ def merge_all_results(titles_cache=TITLES_CACHE_FILE,
       - original_response and parsed_response from references (with suffix _references)
     The merged result is saved to output_file.
     """
+    
     if not os.path.exists(titles_cache):
         print("Titles cache not found.")
         return
     df_titles = pd.read_parquet(titles_cache)
+
+    df_titles[MERGE_KEY] = df_titles[MERGE_KEY].astype(str)
     
     if os.path.exists(citations_cache):
         df_citations = pd.read_parquet(citations_cache)
@@ -374,7 +378,7 @@ def merge_all_results(titles_cache=TITLES_CACHE_FILE,
             "parsed_response": "parsed_response_citations"
         })
     else:
-        df_citations = pd.DataFrame(columns=["paperId", "original_response_citations", "parsed_response_citations"])
+        df_citations = pd.DataFrame(columns=[MERGE_KEY, "original_response_citations", "parsed_response_citations"])
     
     if os.path.exists(references_cache):
         df_references = pd.read_parquet(references_cache)
@@ -384,11 +388,11 @@ def merge_all_results(titles_cache=TITLES_CACHE_FILE,
             "parsed_response": "parsed_response_references"
         })
     else:
-        df_references = pd.DataFrame(columns=["paperId", "original_response_references", "parsed_response_references"])
+        df_references = pd.DataFrame(columns=[MERGE_KEY, "original_response_references", "parsed_response_references"])
     
     # Merge titles with citations and references using left join on paperId
-    df_merged = pd.merge(df_titles, df_citations, on="paperId", how="left")
-    df_merged = pd.merge(df_merged, df_references, on="paperId", how="left")
+    df_merged = pd.merge(df_titles, df_citations, on=MERGE_KEY, how="left")
+    df_merged = pd.merge(df_merged, df_references, on=MERGE_KEY, how="left")
     
     df_merged.to_parquet(output_file, index=False)
     print(f"💾 Merged results saved to {output_file}")
@@ -436,5 +440,6 @@ if __name__ == "__main__":
     merged_df = merge_all_results(titles_cache=TITLES_CACHE_FILE,
                                   citations_cache=CITATIONS_CACHE_FILE,
                                   references_cache=REFERENCES_CACHE_FILE,
-                                  output_file=MERGED_RESULTS_FILE)
+                                  output_file=MERGED_RESULTS_FILE,
+                                  MERGE_KEY = "paperId")
     print("\n💾 Merge process complete.")

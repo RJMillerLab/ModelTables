@@ -19,6 +19,8 @@ from glob import glob
 DATA_FOLDER = "data/processed"
 OUTPUT_FILE = f"{DATA_FOLDER}/s2orc_rerun.parquet"
 
+MERGE_KEY = "corpusId"
+
 def print_key_stats(df, key, df_name):
     """
     Print basic statistics of a DataFrame column.
@@ -40,8 +42,8 @@ def print_key_stats(df, key, df_name):
 def merge_dataframes(query_results, titles2ids, citations_cache, references_cache):
     """
     Merge four DataFrames with query_results as the primary table (preserving its row count).
-    For query_results and titles2ids (which may have duplicate 'paperId' values),
-    an occurrence counter ('occ') is added to perform a one-to-one merge using (paperId, occ).
+    For query_results and titles2ids (which may have duplicate),
+    an occurrence counter ('occ') is added to perform a one-to-one merge using (occ).
     The other two DataFrames have unique keys, so suffixes '_citation' and '_reference'
     are added to differentiate their fields.
 
@@ -56,41 +58,42 @@ def merge_dataframes(query_results, titles2ids, citations_cache, references_cach
     Returns:
         pd.DataFrame: The merged DataFrame.
     """
-    print_key_stats(query_results, "paperId", "query_results")
-    print_key_stats(titles2ids, "paperId", "titles2ids")
-    print_key_stats(citations_cache, "paperId", "citations_cache")
-    print_key_stats(references_cache, "paperId", "references_cache")
+    print_key_stats(query_results, MERGE_KEY, "query_results")
+    print_key_stats(titles2ids, MERGE_KEY, "titles2ids")
+    print_key_stats(citations_cache, MERGE_KEY, "citations_cache")
+    print_key_stats(references_cache, MERGE_KEY, "references_cache")
 
     # Merge query_results and titles2ids using an occurrence counter to ensure one-to-one mapping
     query_results = query_results.copy()
-    query_results["occ"] = query_results.groupby("paperId").cumcount()
-    titles2ids = titles2ids.copy()
-    titles2ids["occ"] = titles2ids.groupby("paperId").cumcount()
-    merged_main = pd.merge(query_results, titles2ids, on=["paperId", "occ"],
-                           suffixes=("", "_titles"), how="left")
+    query_results["occ"] = query_results.groupby(MERGE_KEY).cumcount()
+    query_results[MERGE_KEY] = query_results[MERGE_KEY].astype(str)
+    titles2ids[MERGE_KEY] = titles2ids[MERGE_KEY].astype(str)
+    titles2ids["occ"] = titles2ids.groupby(MERGE_KEY).cumcount()
+    merged_main = pd.merge(query_results, titles2ids, on=[MERGE_KEY, "occ"], suffixes=("", "_titles"), how="left")
     merged_main = merged_main.drop(columns=["occ"])
 
     # Merge the two unique-key DataFrames; add distinct suffixes to differentiate their fields
-    merged_aux = pd.merge(citations_cache, references_cache, on="paperId",
-                          suffixes=("_citation", "_reference"), how="outer")
+    citations_cache[MERGE_KEY] = citations_cache[MERGE_KEY].astype(str)
+    references_cache[MERGE_KEY] = references_cache[MERGE_KEY].astype(str)
+    merged_aux = pd.merge(citations_cache, references_cache, on=MERGE_KEY, suffixes=("_citation", "_reference"), how="outer")
 
-    # Merge the auxiliary data into the main table (using paperId only)
-    final_df = pd.merge(merged_main, merged_aux, on="paperId", how="left")
+    # Merge the auxiliary data into the main table
+    final_df = pd.merge(merged_main, merged_aux, on=MERGE_KEY, how="left")
 
     # Remove redundant fields inherited from the primary query_results and title mapping
-    redundant_cols = [
+    """redundant_cols = [
         "original_response_citations",
         "parsed_response_citations",
         "original_response_references",
         "parsed_response_references"
     ]
-    final_df = final_df.drop(columns=redundant_cols, errors="ignore")
+    final_df = final_df.drop(columns=redundant_cols, errors="ignore")"""
     final_df = final_df.drop(columns=[col for col in final_df.columns if col.endswith('_titles')])
     
     print("Final merged DataFrame shape:", final_df.shape)
     return final_df
 
-def parse_cited_papers(json_str):
+def parse_cit_papers(json_str):
     """
     Parse the input JSON string and extract cited paper details by intent.
     
@@ -117,48 +120,70 @@ def parse_cited_papers(json_str):
     result_contexts = []
     overall_ids = []
     overall_contexts = []
+    none_ids = []
+    none_contexts = []
     
     if pd.isna(json_str) or not isinstance(json_str, str):
-        return (method_ids, method_contexts, 
-                background_ids, background_contexts, 
-                result_ids, result_contexts, 
+        return (method_ids, method_contexts,
+                background_ids, background_contexts,
+                result_ids, result_contexts,
                 overall_ids, overall_contexts)
-    try:
+    #try:
+    if True:
         data = json.loads(json_str)
-        cited_papers = data.get("cited_papers", [])
-        for item in cited_papers:
-            intents = item.get("intents", [])
-            contexts = item.get("contexts", [])
-            citedPaper = item.get("citedPaper", {})
-            paperId = citedPaper.get("paperId", None)
-            if paperId is None:
+        #print("Parsed JSON:", data)  # Debugging line
+        cit_papers = data.get("cited_papers", []) or data.get("citing_papers", [])
+        for item in cit_papers:
+            #print(item)
+            paper_id = item["citedcorpusid"]
+            intents_nested = item["intents"]
+            contexts = item["contexts"]
+
+            if paper_id is None or not intents_nested or not contexts:
                 continue
-            if "methodology" in intents:
-                method_ids.append(paperId)
-                method_contexts.append(contexts)
-            if "background" in intents:
-                background_ids.append(paperId)
-                background_contexts.append(contexts)
-            if "result" in intents:
-                result_ids.append(paperId)
-                result_contexts.append(contexts)
-            if intents:
-                overall_ids.append(paperId)
-                overall_contexts.append(contexts)
-    except Exception as e:
-        print(f"Error parsing JSON: {e}")
+            
+            # Flatten: intents_nested = [['methodology'], ['result']] -> ['methodology', 'result']
+            intents_flat = [i for sub in intents_nested for i in (sub if isinstance(sub, list) else [sub])]
+
+            if len(intents_flat) == len(contexts):
+                pairs = zip(intents_flat, contexts)
+            else:
+                # fallback: align all intents with a combined context string
+                joined_context = " ".join(contexts)
+                pairs = zip(intents_flat, [joined_context] * len(intents_flat))
+
+            for intent, ctx in pairs:
+                if intent == "methodology":
+                    method_ids.append(paper_id)
+                    method_contexts.append(ctx)
+                elif intent == "background":
+                    background_ids.append(paper_id)
+                    background_contexts.append(ctx)
+                elif intent == "result":
+                    result_ids.append(paper_id)
+                    result_contexts.append(ctx)
+                elif not intent:
+                    none_ids.append(paper_id)
+                    none_contexts.append(ctx)
+                else:
+                    raise ValueError(f"Unknown intent: {intent}")
+                # All intents contribute to overall
+                overall_ids.append(paper_id)
+                overall_contexts.append(ctx)
+    #except Exception as e:
+    #    print(f"Error parsing JSON: {e}")
     return (method_ids, method_contexts, 
             background_ids, background_contexts, 
             result_ids, result_contexts, 
             overall_ids, overall_contexts)
 
-def count_intents(final_df, col_name="parsed_response_reference"):
+def count_intents(final_df, col_name="parsed_response_references"):
     """
     Count the occurrences of each intent in the specified JSON column of the DataFrame.
     
     Parameters:
         final_df (pd.DataFrame): DataFrame containing the JSON strings.
-        col_name (str): The column name with JSON strings (default is "parsed_response_reference").
+        col_name (str): The column name with JSON strings (default is "parsed_response_references").
     
     Returns:
         Counter: A Counter object with intent counts.
@@ -167,10 +192,11 @@ def count_intents(final_df, col_name="parsed_response_reference"):
     for json_str in final_df[col_name].dropna():
         try:
             data = json.loads(json_str)
-            cited_papers = data.get("cited_papers", [])
-            for item in cited_papers:
-                intents = item.get("intents", [])
-                counter.update(intents)
+            cit_papers = data.get("cited_papers", []) or data.get("citing_papers", [])
+            for item in cit_papers:
+                intents = item["intents"]
+                flat_intents = [i for sub in intents for i in (sub if isinstance(sub, list) else [sub])]
+                counter.update(flat_intents)
         except Exception as e:
             print(f"Error parsing JSON in count_intents: {e}")
     return counter
@@ -189,8 +215,8 @@ def analyze_intent_influential_correlation(json_series):
     for json_str in json_series.dropna():
         try:
             data = json.loads(json_str)
-            cited_papers = data.get("cited_papers", [])
-            for item in cited_papers:
+            cit_papers = data.get("cited_papers", []) or data.get("citing_papers", [])
+            for item in cit_papers:
                 influential = item.get("isInfluential", None)
                 if influential is None:
                     continue
@@ -217,19 +243,27 @@ if __name__ == "__main__":
     # Load original citations and references caches (including _429 versions)
     citations_cache_main = load_and_concat("s2orc_citations_cache*.parquet")  ######## Concat multiple citations cache files
     references_cache_main = load_and_concat("s2orc_references_cache*.parquet")  ######## Concat multiple references cache files
-    # Load missing citations and references caches (including _429 versions)
-    citations_missing = load_and_concat("s2orc_citations_missing*.parquet")  ######## Concat missing citations files
-    references_missing = load_and_concat("s2orc_references_missing*.parquet")  ######## Concat missing references files
-    # Combine original and missing caches for final merge
-    citations_cache = pd.concat([citations_cache_main, citations_missing], ignore_index=True)  ######## Combined citations
-    references_cache = pd.concat([references_cache_main, references_missing], ignore_index=True)  ######## Combined references
+
+    add_missing = False
+    if add_missing:
+        # Load missing citations and references caches (including _429 versions)
+        citations_missing = load_and_concat("s2orc_citations_missing*.parquet")  ######## Concat missing citations files
+        references_missing = load_and_concat("s2orc_references_missing*.parquet")  ######## Concat missing references files
+        # Combine original and missing caches for final merge
+        citations_cache = pd.concat([citations_cache_main, citations_missing], ignore_index=True)  ######## Combined citations
+        references_cache = pd.concat([references_cache_main, references_missing], ignore_index=True)  ######## Combined references
+    else:
+        citations_cache = citations_cache_main
+        references_cache = references_cache_main
     query_results = load_and_concat("s2orc_query_results*.parquet")  ######## Concat multiple query results files
     titles2ids = load_and_concat("s2orc_titles2ids*.parquet")  ######## Concat multiple titles mapping files
 
     final_merged_df = merge_dataframes(query_results, titles2ids, citations_cache, references_cache)
-    new_cols = final_merged_df["parsed_response_reference"].apply(
+    print('-'*20)
+    print(final_merged_df.keys())
+    new_cols = final_merged_df["parsed_response_references"].apply(
         lambda x: pd.Series(
-            parse_cited_papers(x),
+            parse_cit_papers(x),
             index=[
                 "cited_papers_methodology_ids", "cited_papers_methodology_contexts",
                 "cited_papers_background_ids", "cited_papers_background_contexts",
@@ -242,13 +276,13 @@ if __name__ == "__main__":
     final_merged_df.to_parquet(OUTPUT_FILE)
     
     # Compute and print the intents counter statistics
-    intents_counter = count_intents(final_merged_df)
+    intents_counter = count_intents(final_merged_df, col_name="parsed_response_references")
     print("Intent Counter Stats:")
     for intent, count in intents_counter.items():
         print(f"{intent}: {count}")
     
     # Compute and print the co-occurrence statistics of intents and the isInfluential flag
-    intent_influential_stats = analyze_intent_influential_correlation(final_merged_df["parsed_response_reference"])
+    intent_influential_stats = analyze_intent_influential_correlation(final_merged_df["parsed_response_references"])
     print("\nIntent and isInfluential Co-occurrence Stats:")
     for intent, stats in intent_influential_stats.items():
         print(f"{intent}: {stats}")
@@ -256,19 +290,19 @@ if __name__ == "__main__":
     
     ######## New Block: Identify missing citations/references based on titles2ids parquet ########
     # Retrieve paper IDs from citations cache (English: get paper IDs from citations_cache)
-    citations_ids = set(citations_cache["paperId"].unique())  ######## English: Retrieve paper IDs from citations cache
+    citations_ids = set(citations_cache[MERGE_KEY].unique())  ######## English: Retrieve paper IDs from citations cache
     # Retrieve paper IDs from references cache (English: get paper IDs from references_cache)
-    references_ids = set(references_cache["paperId"].unique())  ######## English: Retrieve paper IDs from references cache
+    references_ids = set(references_cache[MERGE_KEY].unique())  ######## English: Retrieve paper IDs from references cache
     
     # Filter titles2ids DataFrame for rows whose paperId is missing in either citations or references caches
-    missing_df = titles2ids[~(titles2ids["paperId"].isin(citations_ids)) | ~(titles2ids["paperId"].isin(references_ids))]  ######## English: Find missing paper IDs
+    missing_df = titles2ids[~(titles2ids[MERGE_KEY].isin(citations_ids)) | ~(titles2ids[MERGE_KEY].isin(references_ids))]  ######## English: Find missing paper IDs
     
     if not missing_df.empty:
         print("\nMissing Items that require re-query (based on titles2ids parquet):")
         for _, row in missing_df.iterrows():
-            missing_citation = row["paperId"] not in citations_ids  ######## English: Flag missing citation
-            missing_reference = row["paperId"] not in references_ids  ######## English: Flag missing reference
-            print("PaperId:", row.get("paperId"))
+            missing_citation = row[MERGE_KEY] not in citations_ids  ######## English: Flag missing citation
+            missing_reference = row[MERGE_KEY] not in references_ids  ######## English: Flag missing reference
+            print("PaperId:", row.get(MERGE_KEY))
             print("Query:", row.get("query", "N/A"))  ######## English: Print query if available
             print("Retrieved Title:", row.get("retrieved_title", "N/A"))  ######## English: Print retrieved title if available
             print("Missing Citation:", missing_citation)

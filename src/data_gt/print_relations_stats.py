@@ -1,4 +1,7 @@
 """
+Author: Zhengyuan Dong
+Created: 2025-04-28
+Last Edited: 2025-04-28
 Print statistics for the four adjacency matrices saved by modelcard_matrix.py.
 
 Usage

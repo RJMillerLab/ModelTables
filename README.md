@@ -98,6 +98,10 @@ python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
  - python -m src.data_preprocess.s2orc_retry_missing # make up for the missing items
  - python -m src.data_preprocess.s2orc_merge # parse the references and citations from retrieved results | I: s2orc*.parquet, O: s2orc_rerun.parquet
 
+ - bash src/data_localindexing/build_mini_citation_es.sh # (Optional: build up citation graph locally | Then query | batch query | index query from database)
+ - python -m src.data_localindexing.extract_full_records_to_merge
+ - python -m src.data_preprocess.s2orc_merge
+
  - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query |
   # I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
  - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext & openaccessurl | use title/id to fetch table from s2orc
@@ -124,7 +128,7 @@ python -m src.data_gt.step3_pre_merge # merge all the table list into modelid fi
 # I: final_integration_with_paths.parquet, modelcard_all_title_list.parquet → O: modelcard_step3_merged.parquet
 # (Only need if we not run s2orc_API_query) python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
 # I: final_integration_with_paths.parquet. O: modelcard_citation_enriched.parquet
-# (Optional: only need when build db locally) bash src/data_localindexing/build_mini_citation_es.sh # build up citation graph | Then get citations relation from graph edge .db
+
 python -m src.data_gt.step3_overlap_rate # paper level: compute paper-pair overlap score | 
 # I: extracted_annotations/modelcard_citation_enriched O: modelcard_rate/label.pickle
 python -m src.data_analysis.overlap_fig # plot stats
