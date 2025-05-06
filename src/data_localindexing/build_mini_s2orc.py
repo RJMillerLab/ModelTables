@@ -165,6 +165,34 @@ def query_paper_info(title, data_directory, db_path=DATABASE_FILE):
             print(f"❌ Error decoding JSON for '{title}' at {filename}:{line_index}")
             return None
 
+def query_paper_by_corpusid(corpusid, data_directory, db_path=DATABASE_FILE):  
+    conn = sqlite3.connect(db_path)                                            
+    cur  = conn.cursor()                                                       
+    cur.execute("""SELECT title, filename, line_index                          
+                  FROM papers WHERE corpusid = ?""", (corpusid,))             
+    result = cur.fetchone()                                                   
+    conn.close()                                                              
+                                                                               
+    if not result:                                                            
+        print(f"❌ CorpusID {corpusid} not found!")                            
+        return None                                                           
+                                                                               
+    title, filename, line_index = result                                      
+    filepath = os.path.join(data_directory, filename)                         
+    print(f"✅ Found corpusid {corpusid} in {filename} at line {line_index}")  
+                                                                               
+    if not os.path.exists(filepath):                                          
+        print(f"❌ File {filename} missing in {data_directory}")               
+        return None                                                           
+                                                                               
+    with open(filepath, "r", encoding="utf-8") as fh:                         
+        lines = fh.readlines()                                                
+        if line_index >= len(lines):                                          
+            print(f"❌ Line {line_index} out of range!")                       
+            return None                                                       
+        paper = json.loads(lines[line_index].strip())                         
+    return paper                                                              
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build/query paper index with extraction & checkpointing")
     subparsers = parser.add_subparsers(dest="mode", required=True)
@@ -176,6 +204,12 @@ if __name__ == "__main__":
     query_parser.add_argument("--title", type=str, required=True, help="Paper title to query")
     query_parser.add_argument("--directory", type=str, required=True, help="Directory containing stepXX_file")
 
+    cid_parser = subparsers.add_parser("query_cid")                                
+    cid_parser.add_argument("--corpusid", type=int, required=True,                
+                            help="CorpusID to query")                              
+    cid_parser.add_argument("--directory", type=str, required=True,               
+                            help="Directory containing stepXX_file")              
+
     args = parser.parse_args()
 
     if args.mode == "build":
@@ -184,4 +218,8 @@ if __name__ == "__main__":
         paper = query_paper_info(args.title, args.directory)
         if paper:
             print(json.dumps(paper, indent=2, ensure_ascii=False))
+    elif args.mode == "query_cid":                                                  
+        paper = query_paper_by_corpusid(args.corpusid, args.directory)            
+        if paper:                                                                 
+            print(json.dumps(paper, indent=2, ensure_ascii=False))                
 

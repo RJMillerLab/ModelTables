@@ -139,6 +139,8 @@ def query_db_by_corpusid(filtered_df, db_path):
                 """
         db_df = pd.read_sql(query, conn, params=list(corpusids))
     # Merge on corpusid only
+    filtered_df['corpusid'] = filtered_df['corpusid'].astype(str).str.lower().str.strip()
+    db_df['corpusid'] = db_df['corpusid'].astype(str).str.lower().str.strip()
     merged_df = filtered_df.merge(db_df, on='corpusid', how='left')
     return merged_df
 
@@ -147,13 +149,16 @@ def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
     def extract_lines(filename, indices):
         filepath = os.path.join(data_directory, filename)
         if not os.path.exists(filepath):
+            tqdm.write(f"❌ Missing file: {filepath}")
             return []
         #sed_cmd = ";".join(f"{idx+1}p" for idx in indices)
-        sed_cmd = ";".join(f"{int(idx)+1}p" for idx in indices)  ######## 强制转为整数 ########
+        sed_cmd = ";".join(f"{int(idx)+1}p" for idx in indices)
 
         cmd = f"sed -n '{sed_cmd}' '{filepath}'"
         try:
             output = subprocess.check_output(cmd, shell=True, text=True)
+            if not output.strip():                                   ########
+                tqdm.write(f"⚠️  Empty sed result {filepath}")       ########
             return output.strip().split('\n')
         except Exception as e:
             print(f"[sed error] {filepath}: {e}")
@@ -246,6 +251,8 @@ def main():
     # Step 2: Query the SQLite database using corpusid from the filtered data. ########
     merged_df = query_db_by_corpusid(filtered_df, args.db_path)
     merged_df.to_parquet("data/processed/merged_df.parquet", index=False)
+
+    merged_df = pd.read_parquet("data/processed/merged_df.parquet")
     # Step 3: Extract specific lines from NDJSON files and write to a temporary Parquet file.
     extract_lines_to_parquet(merged_df, args.directory, args.temp_parquet, args.n_jobs)
     # Step 4: Parse annotations from the extracted lines and write final annotated data to output Parquet.

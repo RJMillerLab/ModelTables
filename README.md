@@ -55,6 +55,7 @@ python -m src.data_preprocess.step1_query_giturl load --query data/downloaded_gi
 # Requirement: cd to the path of downloaded dataset, e.g.: cd ~/shared_data/se_s2orc_250218
 python -m src.data_localindexing.build_mini_s2orc build --directory /u4/z6dong/shared_data/se_s2orc_250218/ # After downloading semantic scholar dataset, build database based on it.
 python -m src.data_localindexing.build_mini_s2orc query --title "BioMANIA: Simplifying bioinformatics data analysis through conversation" --directory /u4/z6dong/shared_data/se_s2orc_250218/ # After building up database, query title based on db file.
+python -m src.data_localindexing.build_mini_s2orc query_cid --corpusid 248779963 --directory /u4/z6dong/shared_data/se_s2orc_250218
 
 # issue: citation edge is hard to store, it is too much ... Solution: I think we better using the API to query citation relationship? Or use cypher to query over graph condensely
 # python -m src.data_localindexing.build_complete_citation build --directory ./ # build db for citation dataset
@@ -104,6 +105,7 @@ python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
 
  - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query |
   # I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
+
  - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext & openaccessurl | use title/id to fetch table from s2orc
 # I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, merged_df.parquet
 python -m src.data_preprocess.step2_get_html # download html
