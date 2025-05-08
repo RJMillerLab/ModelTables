@@ -27,41 +27,18 @@ SAVE_THRESHOLD_OVERLAP = True
 MODE = "reference"  # or "citation"
 
 def load_paperId_lists(df, mode, influential=False):
-    empty_id_list = []
     paperId_to_ids = {}
-    if "parsed_response" in df.columns:
-        col_name = "parsed_response"
-    elif mode == "reference":
-        col_name = "original_response_reference"
-    else:
-        col_name = "original_response_citation"
-    for _, row in df.iterrows():
-        pid = row["paperId"]
-        assert not pd.isna(pid)
-        try:
-            parsed = json.loads(row[col_name])
-        except Exception as e:
-            print(f"Error parsing JSON for paper {pid}: {e}")
-            parsed = {}
-        paper_list = []
-        if isinstance(parsed, dict) and "data" in parsed:
-            for item in parsed["data"]:
-                if influential and not item.get("isInfluential", False):  ######## only keep influential if flagged
-                    continue
-                if mode == "reference" and "citedPaper" in item:
-                    paper_list.append(item["citedPaper"])
-                elif mode == "citation" and "citingPaper" in item:
-                    paper_list.append(item["citingPaper"])
-        else: # old format
-            key = "cited_papers" if mode == "reference" else "citing_papers"
-            if key in parsed:
-                paper_list = parsed[key]
-        if not paper_list:
-            #print(f"Warning: No papers found for {pid} in mode {mode}.")
-            #paperId_to_ids[pid] = set()
-            empty_id_list.append(pid)
+    if mode == "reference":
+        if influential:                                               
+            paperId_to_ids[pid] = set(row["ref_papers_overall_infl_ids"])  
         else:
-            paperId_to_ids[pid] = {p["paperId"] for p in paper_list if "paperId" in p}
+            paperId_to_ids[pid] = set(row["ref_papers_overall_ids"])   
+    elif mode == "citation":
+        if influential:                                               
+            paperId_to_ids[pid] = set(row["cit_papers_overall_infl_ids"])  
+        else:
+            paperId_to_ids[pid] = set(row["cit_papers_overall_ids"])   
+    #print(f"{'[Influential] ' if influential else ''}Empty lists: {len(empty_id_list)}, Non-empty: {len(paperId_to_ids)}")
     print(f"{'[Influential] ' if influential else ''}Empty lists: {len(empty_id_list)}, Non-empty: {len(paperId_to_ids)}")
     return paperId_to_ids
 

@@ -105,7 +105,7 @@ def quality_filter_cache(parquet_cache):
     eligible_matches = df_es[(df_es['score'] >= min_score) & (df_es['rank'] == 1)].copy()
     return eligible_matches
 
-def query_db_by_corpusid(filtered_df, db_path):
+def query_db_by_corpusid(filtered_df, db_path, batch_size=1000):
     """
     Query the SQLite database using corpusid values from the filtered ES query cache.
 
@@ -129,15 +129,20 @@ def query_db_by_corpusid(filtered_df, db_path):
         .dropna()
         .unique()
     )
-    placeholders = ','.join(['?'] * len(corpusids))
+    # batch querying
+    frames = []
     with sqlite3.connect(db_path) as conn:
-        # Query the database using corpusid instead of title 
-        query = f"""
-                SELECT corpusid, filename, line_index, LOWER(TRIM(title)) as title
-                FROM papers
-                WHERE corpusid IN ({placeholders})
-                """
-        db_df = pd.read_sql(query, conn, params=list(corpusids))
+        for i in range(0, len(corpusids), batch_size):
+            batch = corpusids[i:i + batch_size]
+            placeholders = ','.join(['?'] * len(batch))
+            query = (
+                "SELECT corpusid, filename, line_index, "              
+                "LOWER(TRIM(title)) AS title "                         
+                "FROM papers "                                         
+                f"WHERE corpusid IN ({placeholders})"
+            )
+            frames.append(pd.read_sql(query, conn, params=list(batch)))
+    db_df = pd.concat(frames, ignore_index=True)
     # Merge on corpusid only
     filtered_df['corpusid'] = filtered_df['corpusid'].astype(str).str.lower().str.strip()
     db_df['corpusid'] = db_df['corpusid'].astype(str).str.lower().str.strip()
@@ -265,12 +270,14 @@ def main():
     else:
         filtered_df = preprocess_custom_parquet(args.parquet_cache)
     # Step 2: Query the SQLite database using corpusid from the filtered data. 
-    merged_df = query_db_by_corpusid(filtered_df, args.db_path)
+    merged_df = query_db_by_corpusid(filtered_df, args.db_path, batch_size=1000)
     merged_df.to_parquet(args.merged_df, index=False)
+    print('merged_df saved to', args.merged_df)
     # Step 3: Extract specific lines from NDJSON files and write to a temporary Parquet file.
     extract_lines_to_parquet(args.merged_df, args.directory, args.temp_parquet, args.n_jobs)
     # Step 4: Parse annotations from the extracted lines and write final annotated data to output Parquet.
     merge_full_df(args.merged_df, args.temp_parquet, args.output_parquet)
+    print('output_parquet saved to', args.output_parquet)
 
 if __name__ == "__main__":
     main()

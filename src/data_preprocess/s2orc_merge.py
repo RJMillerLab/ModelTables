@@ -39,60 +39,6 @@ def print_key_stats(df, key, df_name):
         print(df[key].value_counts()[df[key].value_counts() > 1])
     print("-" * 40)
 
-def merge_dataframes(query_results, titles2ids, citations_cache, references_cache):
-    """
-    Merge four DataFrames with query_results as the primary table (preserving its row count).
-    For query_results and titles2ids (which may have duplicate),
-    an occurrence counter ('occ') is added to perform a one-to-one merge using (occ).
-    The other two DataFrames have unique keys, so suffixes '_citation' and '_reference'
-    are added to differentiate their fields.
-
-    Finally, duplicate fields from query_results and the title mapping are dropped.
-    
-    Parameters:
-        query_results (pd.DataFrame): Primary query results table.
-        titles2ids (pd.DataFrame): DataFrame mapping titles to IDs.
-        citations_cache (pd.DataFrame): Response DataFrame with one set of details.
-        references_cache (pd.DataFrame): Response DataFrame with another set of details.
-    
-    Returns:
-        pd.DataFrame: The merged DataFrame.
-    """
-    print_key_stats(query_results, MERGE_KEY, "query_results")
-    print_key_stats(titles2ids, MERGE_KEY, "titles2ids")
-    print_key_stats(citations_cache, MERGE_KEY, "citations_cache")
-    print_key_stats(references_cache, MERGE_KEY, "references_cache")
-
-    # Merge query_results and titles2ids using an occurrence counter to ensure one-to-one mapping
-    query_results = query_results.copy()
-    query_results["occ"] = query_results.groupby(MERGE_KEY).cumcount()
-    query_results[MERGE_KEY] = query_results[MERGE_KEY].astype(str)
-    titles2ids[MERGE_KEY] = titles2ids[MERGE_KEY].astype(str)
-    titles2ids["occ"] = titles2ids.groupby(MERGE_KEY).cumcount()
-    merged_main = pd.merge(query_results, titles2ids, on=[MERGE_KEY, "occ"], suffixes=("", "_titles"), how="left")
-    merged_main = merged_main.drop(columns=["occ"])
-
-    # Merge the two unique-key DataFrames; add distinct suffixes to differentiate their fields
-    citations_cache[MERGE_KEY] = citations_cache[MERGE_KEY].astype(str)
-    references_cache[MERGE_KEY] = references_cache[MERGE_KEY].astype(str)
-    merged_aux = pd.merge(citations_cache, references_cache, on=MERGE_KEY, suffixes=("_citation", "_reference"), how="outer")
-
-    # Merge the auxiliary data into the main table
-    final_df = pd.merge(merged_main, merged_aux, on=MERGE_KEY, how="left")
-
-    # Remove redundant fields inherited from the primary query_results and title mapping
-    """redundant_cols = [
-        "original_response_citations",
-        "parsed_response_citations",
-        "original_response_references",
-        "parsed_response_references"
-    ]
-    final_df = final_df.drop(columns=redundant_cols, errors="ignore")"""
-    final_df = final_df.drop(columns=[col for col in final_df.columns if col.endswith('_titles')])
-    
-    print("Final merged DataFrame shape:", final_df.shape)
-    return final_df
-
 def parse_cit_papers(json_str, id_key = "citingcorpusid"):
     """
     Parse the input JSON string and extract cited paper details by intent.
@@ -122,11 +68,23 @@ def parse_cit_papers(json_str, id_key = "citingcorpusid"):
     overall_ids = []
     none_ids = []
     
+    method_infl_ids = []
+    method_infl_ctxs = []
+    background_infl_ids = []
+    background_infl_ctxs = []
+    result_infl_ids = []
+    result_infl_ctxs = []
+    overall_infl_ids = []
+
     if pd.isna(json_str) or not isinstance(json_str, str):
         return (method_ids, method_contexts,
                 background_ids, background_contexts,
                 result_ids, result_contexts,
-                overall_ids)
+                overall_ids,
+                method_infl_ids, method_infl_ctxs,                   
+                background_infl_ids, background_infl_ctxs,           
+                result_infl_ids, result_infl_ctxs,                   
+                overall_infl_ids)
     #try:
     if True:
         data = json.loads(json_str)
@@ -149,29 +107,51 @@ def parse_cit_papers(json_str, id_key = "citingcorpusid"):
                 # fallback: align all intents with a combined context string
                 joined_context = " ".join(contexts)
                 pairs = zip(intents_flat, [joined_context] * len(intents_flat))
-
+            influential = item["isinfluential"]
             for intent, ctx in pairs:
                 if intent == "methodology":
                     method_ids.append(paper_id)
                     method_contexts.append(ctx)
+                    if influential:
+                        method_infl_ids.append(paper_id)
+                        method_infl_ctxs.append(ctx)
                 elif intent == "background":
                     background_ids.append(paper_id)
                     background_contexts.append(ctx)
+                    if influential:
+                        background_infl_ids.append(paper_id)
+                        background_infl_ctxs.append(ctx)
                 elif intent == "result":
                     result_ids.append(paper_id)
                     result_contexts.append(ctx)
+                    if influential:
+                        result_infl_ids.append(paper_id)
+                        result_infl_ctxs.append(ctx)
                 elif intent in ["None", "none", None]:
                     none_ids.append(paper_id)
                 else:
                     raise ValueError(f"Unknown intent: {intent}")
                 # All intents contribute to overall
                 overall_ids.append(paper_id)
-    #except Exception as e:
-    #    print(f"Error parsing JSON: {e}")
-    return (method_ids, method_contexts,
-            background_ids, background_contexts,
-            result_ids, result_contexts,
-            overall_ids)
+                if influential:
+                    overall_infl_ids.append(paper_id)
+    # make them unique
+    method_ids        = list(dict.fromkeys(method_ids))
+    background_ids    = list(dict.fromkeys(background_ids))
+    result_ids        = list(dict.fromkeys(result_ids))          
+    overall_ids       = list(dict.fromkeys(overall_ids))         
+    method_infl_ids   = list(dict.fromkeys(method_infl_ids))     
+    background_infl_ids = list(dict.fromkeys(background_infl_ids)) 
+    result_infl_ids   = list(dict.fromkeys(result_infl_ids))     
+    overall_infl_ids  = list(dict.fromkeys(overall_infl_ids))    
+    return (method_ids,
+            background_ids, 
+            result_ids, 
+            overall_ids,
+            method_infl_ids, 
+            background_infl_ids, 
+            result_infl_ids, 
+            overall_infl_ids)
 
 def count_intents(final_df, col_name="original_response_references", cit_key="data"):
     """
@@ -267,10 +247,14 @@ if __name__ == "__main__":
         lambda x: pd.Series(
             parse_cit_papers(x, id_key="citingcorpusid"),
             index=[
-                "cit_papers_methodology_ids", "cit_papers_methodology_contexts",
-                "cit_papers_background_ids", "cit_papers_background_contexts",
-                "cit_papers_result_ids", "cit_papers_result_contexts",
-                "cit_papers_overall_ids"
+                "cit_papers_methodology_ids", 
+                "cit_papers_background_ids",
+                "cit_papers_result_ids", 
+                "cit_papers_overall_ids",
+                "cit_papers_methodology_infl_ids", 
+                "cit_papers_background_infl_ids", 
+                "cit_papers_result_infl_ids",
+                "cit_papers_overall_infl_ids"
             ]
         )
     )
@@ -278,10 +262,14 @@ if __name__ == "__main__":
         lambda x: pd.Series(
             parse_cit_papers(x, id_key="citedcorpusid"),
             index=[
-                "ref_papers_methodology_ids", "ref_papers_methodology_contexts",
-                "ref_papers_background_ids", "ref_papers_background_contexts",
-                "ref_papers_result_ids", "ref_papers_result_contexts",
-                "ref_papers_overall_ids"
+                "ref_papers_methodology_ids",
+                "ref_papers_background_ids", 
+                "ref_papers_result_ids", 
+                "ref_papers_overall_ids",
+                "ref_papers_methodology_infl_ids",
+                "ref_papers_background_infl_ids",
+                "ref_papers_result_infl_ids", 
+                "ref_papers_overall_infl_ids"
             ]
         )
     )

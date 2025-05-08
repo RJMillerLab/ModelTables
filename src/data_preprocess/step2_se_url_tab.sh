@@ -1,4 +1,8 @@
 #!/bin/bash
+#SBATCH --job-name=step2_se_url_tab            
+#SBATCH --output=slurm-%j.out                  
+#SBATCH --mem=32G                              
+#SBATCH --cpus-per-task=4                      
 python src/data_preprocess/step2_se_url_tab.py \
 --directory /u4/z6dong/shared_data/se_s2orc_250218 \
 --db_path /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db \
