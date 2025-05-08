@@ -19,6 +19,7 @@ ID_LIST_TXT       = DATA_DIR / "tmp_local_ids.txt"        # ← whitelist
 CITATIONS_PQ      = DATA_DIR / "s2orc_citations_cache.parquet"
 REFERENCES_PQ     = DATA_DIR / "s2orc_references_cache.parquet"
 QUERY_RESULTS_PQ  = DATA_DIR / "s2orc_query_results.parquet"
+TITLES_CACHE_FILE = DATA_DIR / "s2orc_titles2ids.parquet"
 
 if __name__ == "__main__":
     # ---------- ❷ Read whitelist ----------
@@ -33,25 +34,24 @@ if __name__ == "__main__":
         for line in f:
             rec = json.loads(line)
             try:
-                citing = str(rec["citingcorpusid"])   ######## ← no get()
-                cited  = str(rec["citedcorpusid"])    ######## ← no get()
+                citing = str(rec["citingcorpusid"])
+                cited  = str(rec["citedcorpusid"])
             except KeyError as e:
                 miss_count += 1
                 continue
             if citing in WL_set:
-                cit_bucket[citing].append(rec)
+                ref_bucket[citing].append(rec)
             if cited in WL_set:
-                ref_bucket[cited].append(rec)
+                cit_bucket[cited].append(rec)
     print(f"❗ missed corpusId count = {miss_count}")
     # ---------- ❹ Convert to dataframe ----------
     def build_cache(bucket: dict, key_name: str):
         rows = []
         for cid in WL:
-            lst = bucket[cid]  
+            lst = bucket[cid]
             rows.append({
                 "corpusId": str(cid),
-                "original_response": json.dumps({"data": lst}, ensure_ascii=False),
-                "parsed_response":  json.dumps({key_name: lst}, ensure_ascii=False)
+                "original_response": json.dumps({"data": lst}, ensure_ascii=False)
             })
         return pd.DataFrame(rows)
     df_cit = build_cache(cit_bucket, "citing_papers")
@@ -62,15 +62,10 @@ if __name__ == "__main__":
     print("✅  references rows =", len(df_ref),  "→", REFERENCES_PQ)
     # ---------- ❺ stub: keep one empty row per whitelist id ----------
     # File paths
-    prefix = "" #"_429"
-    TITLES_CACHE_FILE = f"data/processed/s2orc_titles2ids{prefix}.parquet"  ######## Cache file for titles mapping
-    CITATIONS_CACHE_FILE = f"data/processed/s2orc_citations_cache{prefix}.parquet"  ######## Cache file for citations
-    REFERENCES_CACHE_FILE = f"data/processed/s2orc_references_cache{prefix}.parquet"  ######## Cache file for references
-    MERGED_RESULTS_FILE = f"data/processed/s2orc_query_results{prefix}.parquet"  ######## Output file for merged results
     from src.data_preprocess.s2orc_API_query import merge_all_results
     stub = merge_all_results(titles_cache=TITLES_CACHE_FILE,
-                                    citations_cache=CITATIONS_CACHE_FILE,
-                                    references_cache=REFERENCES_CACHE_FILE,
-                                    output_file=MERGED_RESULTS_FILE,
+                                    citations_cache=CITATIONS_PQ,
+                                    references_cache=REFERENCES_PQ,
+                                    output_file=QUERY_RESULTS_PQ,
                                     MERGE_KEY = "corpusId")
-    print("✅  stub rows =", len(stub), "→", MERGED_RESULTS_FILE)
+    print("✅  stub rows =", len(stub), "→", QUERY_RESULTS_PQ)

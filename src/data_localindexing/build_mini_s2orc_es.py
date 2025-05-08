@@ -31,6 +31,7 @@ import warnings
 import re
 import json
 from elasticsearch import Elasticsearch, helpers
+from elasticsearch.helpers import parallel_bulk
 from elasticsearch.helpers import streaming_bulk
 from tqdm import tqdm
 
@@ -61,19 +62,19 @@ def stream_from_db(db_file, index_name):
     cur = conn.cursor()
     cur.execute("SELECT corpusid, title FROM papers")
     while True:
-        row = cur.fetchone()
-        if row is None:
+        rows = cur.fetchmany(10000)
+        if not rows:
             break
-        corpusid, title = row
-        orig_title = title.strip()
-        yield {
-            "_index": index_name,
-            "_id": corpusid,
-            "_source": {
-                "title": orig_title,
-                "corpusid": corpusid
+        for corpusid, title in rows:
+            orig_title = title.strip()
+            yield {
+                "_index": index_name,
+                "_id": corpusid,
+                "_source": {
+                    "title": orig_title,
+                    "corpusid": corpusid
+                }
             }
-        }
     conn.close()
 
 def build_index(es, db_file, index_name):
@@ -120,40 +121,51 @@ def build_index(es, db_file, index_name):
     es.indices.create(index=index_name, body=index_body)
     print(f"Index {index_name} created.")
 
+    # 2. Temporarily disable refresh & replicas ########
+    es.indices.put_settings(
+        index=index_name,
+        body={"index": {"refresh_interval": "-1", "number_of_replicas": 0}}
+    )                                                       ########
+
     total_rows = count_rows(db_file)
     print(f"Total rows to import: {total_rows}")
     actions = stream_from_db(db_file, index_name)
-    success_count = 0
-    fail_count = 0
-    fail_print_count = 0
 
+    # 3. Use parallel_bulk for concurrency ########
+    success = fail = 0
     with tqdm(total=total_rows, desc="Importing rows", ncols=80) as pbar:
-        for ok, info in streaming_bulk(
+        for ok, info in parallel_bulk(
             client=es,
             actions=actions,
-            chunk_size=2000,
+            thread_count=4,            # number of worker threads ########
+            chunk_size=2000,           # tweak to find your sweet spot ########
             raise_on_error=False,
             request_timeout=300
         ):
             pbar.update(1)
             if ok:
-                success_count += 1
+                success += 1
             else:
-                fail_count += 1
-                if fail_print_count < 5:
-                    print(f"Error indexing document: {info}")
-                    fail_print_count += 1
+                fail += 1
+                if fail < 5:
+                    print("Error:", info)
 
-    print(f"Bulk import completed. Success: {success_count}, Failures: {fail_count}")
+    print(f"Bulk import completed. Success: {success}, Failures: {fail}")
 
-    # Debug: Analyze a sample title.
-    sample_title = "BioMANIA: Simplifying bioinformatics data analysis through conversation"
-    analysis = es.indices.analyze(index=index_name, body={
-        "analyzer": "processed_analyzer",
-        "text": sample_title
-    })
-    tokens = [tok["token"] for tok in analysis["tokens"]]
-    print(f"Analyzed tokens for sample title: {tokens}")
+    # 4. Restore settings & force one refresh ########
+    es.indices.put_settings(
+        index=index_name,
+        body={"index": {"refresh_interval": "30s", "number_of_replicas": 1}}
+    )                                                       ########
+    es.indices.refresh(index=index_name)                    ########
+
+    # 5. (Optional) sample‐token analysis...
+    sample = "BioMANIA: Simplifying bioinformatics data analysis through conversation"
+    analysis = es.indices.analyze(
+        index=index_name,
+        body={"analyzer": "processed_analyzer", "text": sample}
+    )
+    print("Tokens:", [t["token"] for t in analysis["tokens"]])
 
 def query_index(es, index_name, query_title):
     """Single query mode: Execute a combined bool query on the 'title' field."""

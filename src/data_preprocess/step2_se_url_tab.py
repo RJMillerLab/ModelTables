@@ -111,7 +111,7 @@ def query_db_by_corpusid(filtered_df, db_path):
 
     Extracts unique corpusid values from the filtered DataFrame, queries the database 
     to retrieve corresponding records, and then merges the DB results with the filtered data.
-    (Updated to use corpusid instead of title) ########
+    (Updated to use corpusid instead of title) 
 
     Args:
         filtered_df (DataFrame): The filtered Elasticsearch query cache DataFrame.
@@ -120,7 +120,7 @@ def query_db_by_corpusid(filtered_df, db_path):
     Returns:
         DataFrame: Merged DataFrame containing both ES data and the corresponding DB records.
     """
-    # Extract unique corpusid values, converting to lowercase and stripping spaces ########
+    # Extract unique corpusid values, converting to lowercase and stripping spaces 
     #corpusids = filtered_df['corpusid'].str.lower().str.strip().unique()
     corpusids = (
         filtered_df['corpusid']
@@ -131,7 +131,7 @@ def query_db_by_corpusid(filtered_df, db_path):
     )
     placeholders = ','.join(['?'] * len(corpusids))
     with sqlite3.connect(db_path) as conn:
-        # Query the database using corpusid instead of title ########
+        # Query the database using corpusid instead of title 
         query = f"""
                 SELECT corpusid, filename, line_index, LOWER(TRIM(title)) as title
                 FROM papers
@@ -144,8 +144,7 @@ def query_db_by_corpusid(filtered_df, db_path):
     merged_df = filtered_df.merge(db_df, on='corpusid', how='left')
     return merged_df
 
-def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
-
+def extract_lines_to_parquet(merged_df_parquet, data_directory, temp_parquet, n_jobs):
     def extract_lines(filename, indices):
         filepath = os.path.join(data_directory, filename)
         if not os.path.exists(filepath):
@@ -157,13 +156,14 @@ def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
         cmd = f"sed -n '{sed_cmd}' '{filepath}'"
         try:
             output = subprocess.check_output(cmd, shell=True, text=True)
-            if not output.strip():                                   ########
-                tqdm.write(f"⚠️  Empty sed result {filepath}")       ########
+            if not output.strip():                                   
+                tqdm.write(f"⚠️  Empty sed result {filepath}")       
             return output.strip().split('\n')
         except Exception as e:
             print(f"[sed error] {filepath}: {e}")
             return []
-
+    
+    merged_df = pd.read_parquet(merged_df_parquet, columns=['filename', 'line_index'])
     dedup_df = merged_df.drop_duplicates(subset=['filename', 'line_index'], keep='first')
     grouped = list(dedup_df.groupby('filename'))
 
@@ -183,16 +183,14 @@ def extract_lines_to_parquet(merged_df, data_directory, temp_parquet, n_jobs):
             row_dict = row.to_dict()
             row_dict['raw_json'] = line
             lines_expanded.append(row_dict)
-    pd.DataFrame(lines_expanded).to_parquet(temp_parquet, index=False)
-    """records = []
-    for filename, group in tqdm(grouped, total=len(grouped), desc="Extracting lines"):
-        lines = extract_lines(filename, group['line_index'].tolist())
-        group_sorted = group.sort_values('line_index')
-        for (_, row), line in zip(group_sorted.iterrows(), lines):
-            row_dict = row.to_dict()
-            row_dict['raw_json'] = line
-            records.append(row_dict)
-    pd.DataFrame(records).to_parquet(temp_parquet, index=False)"""
+    print('now parsing annotations')
+    df_temp = pd.DataFrame(lines_expanded)
+    parsed_data = Parallel(n_jobs=n_jobs)(
+        delayed(parse_annotations)(row)
+        for _, row in tqdm(df_temp.iterrows(), total=len(df_temp), desc="Parsing annotations")
+    )
+    df_parsed = pd.DataFrame([item for item in parsed_data if item])
+    df_parsed.to_parquet(temp_parquet, index=False)
 
 def parse_annotations(row):
     try:
@@ -211,7 +209,16 @@ def parse_annotations(row):
         return new_row
     except Exception as e:
         print(f"Error: {e}")
-        return None
+        placeholder = dict(row)
+        placeholder.update({
+            "extracted_openaccessurl": None,                 
+            "extracted_tables": [],                          
+            "extracted_tablerefs": [],                       
+            "extracted_figures": [],                         
+            "extracted_figure_captions": [],                 
+            "extracted_figurerefs": []                       
+        })
+        return placeholder
 
 def preprocess_custom_parquet(parquet_path):
     df = pd.read_parquet(parquet_path)
@@ -223,14 +230,22 @@ def preprocess_custom_parquet(parquet_path):
     df['score'] = 1000
     return df
 
-def final_annotation_extraction(temp_parquet, output_parquet, n_jobs):
-    df_temp = pd.read_parquet(temp_parquet)
-    parsed_data = Parallel(n_jobs=n_jobs)(
-        delayed(parse_annotations)(row)
-        for _, row in tqdm(df_temp.iterrows(), total=len(df_temp), desc="Parsing annotations")
+def merge_full_df(merged_df_parquet, temp_parquet, output_parquet):
+    merged_df = pd.read_parquet(merged_df_parquet)
+    df_extracted = pd.read_parquet(temp_parquet)
+    merged_full = merged_df.merge(
+        df_extracted[['filename', 'line_index',
+                      'raw_json',
+                      'extracted_openaccessurl',
+                      'extracted_tables',
+                      'extracted_tablerefs',
+                      'extracted_figures',
+                      'extracted_figure_captions',
+                      'extracted_figurerefs']],
+        on=['filename', 'line_index'],
+        how='left'
     )
-    parsed_data_clean = [item for item in parsed_data if item]
-    pd.DataFrame(parsed_data_clean).to_parquet(output_parquet, index=False)
+    merged_full.to_parquet(output_parquet, index=False)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -239,6 +254,7 @@ def main():
     parser.add_argument("--parquet_cache", required=True, help="Input Parquet cache")
     parser.add_argument("--output_parquet", default="data/processed/extracted_annotations.parquet", help="Output Parquet path")
     parser.add_argument("--temp_parquet", default="data/processed/tmp_extracted_lines.parquet", help="Temporary Parquet path")
+    parser.add_argument("--merged_df", default="data/processed/merged_df.parquet", help="Merged DataFrame path")
     parser.add_argument("--n_jobs", default=-1, type=int, help="Parallel jobs")
 
     args = parser.parse_args()
@@ -248,15 +264,13 @@ def main():
         filtered_df = quality_filter_cache(args.parquet_cache)
     else:
         filtered_df = preprocess_custom_parquet(args.parquet_cache)
-    # Step 2: Query the SQLite database using corpusid from the filtered data. ########
+    # Step 2: Query the SQLite database using corpusid from the filtered data. 
     merged_df = query_db_by_corpusid(filtered_df, args.db_path)
-    merged_df.to_parquet("data/processed/merged_df.parquet", index=False)
-
-    merged_df = pd.read_parquet("data/processed/merged_df.parquet")
+    merged_df.to_parquet(args.merged_df, index=False)
     # Step 3: Extract specific lines from NDJSON files and write to a temporary Parquet file.
-    extract_lines_to_parquet(merged_df, args.directory, args.temp_parquet, args.n_jobs)
+    extract_lines_to_parquet(args.merged_df, args.directory, args.temp_parquet, args.n_jobs)
     # Step 4: Parse annotations from the extracted lines and write final annotated data to output Parquet.
-    final_annotation_extraction(args.temp_parquet, args.output_parquet, args.n_jobs)
+    merge_full_df(args.merged_df, args.temp_parquet, args.output_parquet)
 
 if __name__ == "__main__":
     main()

@@ -17,9 +17,9 @@ from collections import Counter, defaultdict
 from glob import glob
 
 DATA_FOLDER = "data/processed"
-OUTPUT_FILE = f"{DATA_FOLDER}/s2orc_rerun.parquet"
-
 MERGE_KEY = "corpusId"
+MERGED_RESULTS_FILE = f"{DATA_FOLDER}/s2orc_query_results.parquet"
+OUTPUT_FILE = f"{DATA_FOLDER}/s2orc_rerun.parquet"
 
 def print_key_stats(df, key, df_name):
     """
@@ -93,7 +93,7 @@ def merge_dataframes(query_results, titles2ids, citations_cache, references_cach
     print("Final merged DataFrame shape:", final_df.shape)
     return final_df
 
-def parse_cit_papers(json_str):
+def parse_cit_papers(json_str, id_key = "citingcorpusid"):
     """
     Parse the input JSON string and extract cited paper details by intent.
     
@@ -112,6 +112,7 @@ def parse_cit_papers(json_str):
             overall_ids, overall_contexts
       )
     """
+    cit_key = "data" # "cited_papers" or "citing_papers"
     method_ids = []
     method_contexts = []
     background_ids = []
@@ -119,29 +120,26 @@ def parse_cit_papers(json_str):
     result_ids = []
     result_contexts = []
     overall_ids = []
-    overall_contexts = []
     none_ids = []
-    none_contexts = []
     
     if pd.isna(json_str) or not isinstance(json_str, str):
         return (method_ids, method_contexts,
                 background_ids, background_contexts,
                 result_ids, result_contexts,
-                overall_ids, overall_contexts)
+                overall_ids)
     #try:
     if True:
         data = json.loads(json_str)
-        #print("Parsed JSON:", data)  # Debugging line
-        cit_papers = data.get("cited_papers", []) or data.get("citing_papers", [])
+        cit_papers = data[cit_key]
         for item in cit_papers:
-            #print(item)
-            paper_id = item["citedcorpusid"]
+            paper_id = item[id_key]
             intents_nested = item["intents"]
             contexts = item["contexts"]
-
-            if paper_id is None or not intents_nested or not contexts:
+            if paper_id is None or not intents_nested:
+                none_ids.append(paper_id)
+                overall_ids.append(paper_id)
+                #print(f"Missing paper_id or intents_nested or contexts: {item}")
                 continue
-            
             # Flatten: intents_nested = [['methodology'], ['result']] -> ['methodology', 'result']
             intents_flat = [i for sub in intents_nested for i in (sub if isinstance(sub, list) else [sub])]
 
@@ -162,28 +160,26 @@ def parse_cit_papers(json_str):
                 elif intent == "result":
                     result_ids.append(paper_id)
                     result_contexts.append(ctx)
-                elif not intent:
+                elif intent in ["None", "none", None]:
                     none_ids.append(paper_id)
-                    none_contexts.append(ctx)
                 else:
                     raise ValueError(f"Unknown intent: {intent}")
                 # All intents contribute to overall
                 overall_ids.append(paper_id)
-                overall_contexts.append(ctx)
     #except Exception as e:
     #    print(f"Error parsing JSON: {e}")
-    return (method_ids, method_contexts, 
-            background_ids, background_contexts, 
-            result_ids, result_contexts, 
-            overall_ids, overall_contexts)
+    return (method_ids, method_contexts,
+            background_ids, background_contexts,
+            result_ids, result_contexts,
+            overall_ids)
 
-def count_intents(final_df, col_name="parsed_response_references"):
+def count_intents(final_df, col_name="original_response_references", cit_key="data"):
     """
     Count the occurrences of each intent in the specified JSON column of the DataFrame.
     
     Parameters:
         final_df (pd.DataFrame): DataFrame containing the JSON strings.
-        col_name (str): The column name with JSON strings (default is "parsed_response_references").
+        col_name (str): The column name with JSON strings (default is "original_response_references").
     
     Returns:
         Counter: A Counter object with intent counts.
@@ -192,16 +188,19 @@ def count_intents(final_df, col_name="parsed_response_references"):
     for json_str in final_df[col_name].dropna():
         try:
             data = json.loads(json_str)
-            cit_papers = data.get("cited_papers", []) or data.get("citing_papers", [])
+            cit_papers = data.get(cit_key, [])
             for item in cit_papers:
                 intents = item["intents"]
-                flat_intents = [i for sub in intents for i in (sub if isinstance(sub, list) else [sub])]
-                counter.update(flat_intents)
+                if intents:
+                    flat_intents = [i for sub in intents for i in (sub if isinstance(sub, list) else [sub])]
+                    counter.update(flat_intents)
+                else:
+                    counter.update(["None"])
         except Exception as e:
             print(f"Error parsing JSON in count_intents: {e}")
     return counter
 
-def analyze_intent_influential_correlation(json_series):
+def analyze_intent_influential_correlation(json_series, cit_key="data"):
     """
     Analyze the co-occurrence of each intent with the 'isInfluential' flag from a Series of JSON strings.
     
@@ -215,7 +214,7 @@ def analyze_intent_influential_correlation(json_series):
     for json_str in json_series.dropna():
         try:
             data = json.loads(json_str)
-            cit_papers = data.get("cited_papers", []) or data.get("citing_papers", [])
+            cit_papers = data.get(cit_key, [])
             for item in cit_papers:
                 influential = item.get("isInfluential", None)
                 if influential is None:
@@ -228,85 +227,77 @@ def analyze_intent_influential_correlation(json_series):
             print(f"Error parsing JSON in analyze_intent_influential_correlation: {e}")
     return dict(result)
 
-# MAIN EXECUTION BLOCK
-if __name__ == "__main__":
-    data_path = Path(DATA_FOLDER)  ######## Define data_path using Path
-    prefix = ""  ######## Define prefix as needed (here empty; modify if needed)
-    
-    def load_and_concat(pattern):
-        ######## Helper function to concatenate files by pattern
-        files = list(data_path.glob(pattern))
-        if not files:
-            raise FileNotFoundError(f"No files found matching pattern: {pattern}")
-        return pd.concat([pd.read_parquet(file) for file in files], ignore_index=True)
-    
-    # Load original citations and references caches (including _429 versions)
-    citations_cache_main = load_and_concat("s2orc_citations_cache*.parquet")  ######## Concat multiple citations cache files
-    references_cache_main = load_and_concat("s2orc_references_cache*.parquet")  ######## Concat multiple references cache files
+def load_and_concat(pattern, data_path):
+    ######## Helper function to concatenate files by pattern
+    files = list(data_path.glob(pattern))
+    if not files:
+        raise FileNotFoundError(f"No files found matching pattern: {pattern}")
+    return pd.concat([pd.read_parquet(file) for file in files], ignore_index=True)
 
-    add_missing = False
+def remerge_multiple_files(data_path, add_missing=False):
+    """
+    This function loads multiple files and concatenates them.
+    It also loads missing files and concatenates them if add_missing is True.
+    It then merges the citations and references caches with the query results and titles mapping.
+    """
+    # Load original citations and references caches (including _429 versions)
+    citations_cache_main = load_and_concat("s2orc_citations_cache*.parquet", data_path)  ######## Concat multiple citations cache files
+    references_cache_main = load_and_concat("s2orc_references_cache*.parquet", data_path)  ######## Concat multiple references cache files
     if add_missing:
         # Load missing citations and references caches (including _429 versions)
-        citations_missing = load_and_concat("s2orc_citations_missing*.parquet")  ######## Concat missing citations files
-        references_missing = load_and_concat("s2orc_references_missing*.parquet")  ######## Concat missing references files
+        citations_missing = load_and_concat("s2orc_citations_missing*.parquet", data_path)  ######## Concat missing citations files
+        references_missing = load_and_concat("s2orc_references_missing*.parquet", data_path)  ######## Concat missing references files
         # Combine original and missing caches for final merge
         citations_cache = pd.concat([citations_cache_main, citations_missing], ignore_index=True)  ######## Combined citations
         references_cache = pd.concat([references_cache_main, references_missing], ignore_index=True)  ######## Combined references
     else:
         citations_cache = citations_cache_main
         references_cache = references_cache_main
-    query_results = load_and_concat("s2orc_query_results*.parquet")  ######## Concat multiple query results files
-    titles2ids = load_and_concat("s2orc_titles2ids*.parquet")  ######## Concat multiple titles mapping files
+    query_results = load_and_concat("s2orc_query_results*.parquet", data_path)  ######## Concat multiple query results files
+    titles2ids = load_and_concat("s2orc_titles2ids*.parquet", data_path)  ######## Concat multiple titles mapping files
 
-    final_merged_df = merge_dataframes(query_results, titles2ids, citations_cache, references_cache)
-    print('-'*20)
-    print(final_merged_df.keys())
-    new_cols = final_merged_df["parsed_response_references"].apply(
+    from src.data_preprocess.s2orc_API_query import merge_cit_ref
+    final_merged_df = merge_cit_ref(query_results, titles2ids, citations_cache, references_cache)
+    return final_merged_df
+
+if __name__ == "__main__":
+    data_path = Path(DATA_FOLDER)  ######## Define data_path using Path
+    final_merged_df = pd.read_parquet(MERGED_RESULTS_FILE)
+    cit_new_cols = final_merged_df["original_response_citations"].apply(
         lambda x: pd.Series(
-            parse_cit_papers(x),
+            parse_cit_papers(x, id_key="citingcorpusid"),
             index=[
-                "cited_papers_methodology_ids", "cited_papers_methodology_contexts",
-                "cited_papers_background_ids", "cited_papers_background_contexts",
-                "cited_papers_result_ids", "cited_papers_result_contexts",
-                "cited_papers_overall_ids", "cited_papers_overall_contexts"
+                "cit_papers_methodology_ids", "cit_papers_methodology_contexts",
+                "cit_papers_background_ids", "cit_papers_background_contexts",
+                "cit_papers_result_ids", "cit_papers_result_contexts",
+                "cit_papers_overall_ids"
             ]
         )
     )
-    final_merged_df = pd.concat([final_merged_df, new_cols], axis=1)
+    ref_new_cols = final_merged_df["original_response_references"].apply(
+        lambda x: pd.Series(
+            parse_cit_papers(x, id_key="citedcorpusid"),
+            index=[
+                "ref_papers_methodology_ids", "ref_papers_methodology_contexts",
+                "ref_papers_background_ids", "ref_papers_background_contexts",
+                "ref_papers_result_ids", "ref_papers_result_contexts",
+                "ref_papers_overall_ids"
+            ]
+        )
+    )
+    final_merged_df = pd.concat([final_merged_df, cit_new_cols, ref_new_cols], axis=1)
     final_merged_df.to_parquet(OUTPUT_FILE)
     
     # Compute and print the intents counter statistics
-    intents_counter = count_intents(final_merged_df, col_name="parsed_response_references")
+    intents_counter = count_intents(final_merged_df, col_name="original_response_references")
     print("Intent Counter Stats:")
     for intent, count in intents_counter.items():
         print(f"{intent}: {count}")
     
     # Compute and print the co-occurrence statistics of intents and the isInfluential flag
-    intent_influential_stats = analyze_intent_influential_correlation(final_merged_df["parsed_response_references"])
+    intent_influential_stats = analyze_intent_influential_correlation(final_merged_df["original_response_references"])
     print("\nIntent and isInfluential Co-occurrence Stats:")
     for intent, stats in intent_influential_stats.items():
         print(f"{intent}: {stats}")
     print('Save merged dataframe to', OUTPUT_FILE)
     
-    ######## New Block: Identify missing citations/references based on titles2ids parquet ########
-    # Retrieve paper IDs from citations cache (English: get paper IDs from citations_cache)
-    citations_ids = set(citations_cache[MERGE_KEY].unique())  ######## English: Retrieve paper IDs from citations cache
-    # Retrieve paper IDs from references cache (English: get paper IDs from references_cache)
-    references_ids = set(references_cache[MERGE_KEY].unique())  ######## English: Retrieve paper IDs from references cache
-    
-    # Filter titles2ids DataFrame for rows whose paperId is missing in either citations or references caches
-    missing_df = titles2ids[~(titles2ids[MERGE_KEY].isin(citations_ids)) | ~(titles2ids[MERGE_KEY].isin(references_ids))]  ######## English: Find missing paper IDs
-    
-    if not missing_df.empty:
-        print("\nMissing Items that require re-query (based on titles2ids parquet):")
-        for _, row in missing_df.iterrows():
-            missing_citation = row[MERGE_KEY] not in citations_ids  ######## English: Flag missing citation
-            missing_reference = row[MERGE_KEY] not in references_ids  ######## English: Flag missing reference
-            print("PaperId:", row.get(MERGE_KEY))
-            print("Query:", row.get("query", "N/A"))  ######## English: Print query if available
-            print("Retrieved Title:", row.get("retrieved_title", "N/A"))  ######## English: Print retrieved title if available
-            print("Missing Citation:", missing_citation)
-            print("Missing Reference:", missing_reference)
-            print("-" * 40)
-    else:
-        print("\nNo missing items found in citation or reference caches based on titles2ids parquet.")
