@@ -441,18 +441,8 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build SciLake union benchmark tables.")
-    parser.add_argument(
-        "--rel_mode",
-        choices=[m.value for m in RelationshipMode],
-        default=RelationshipMode.OVERLAP_RATE.value,
-        help="Relationship graph mode.",
-    )
-    parser.add_argument(
-        "--tbl_mode",
-        choices=[m.value for m in TableSourceMode],
-        default=TableSourceMode.STEP4_SYMLINK.value,
-        help="Table source mode.",
-    )
+    parser.add_argument("--rel_mode", choices=[m.value for m in RelationshipMode], default=RelationshipMode.OVERLAP_RATE.value, help="Relationship graph mode.")
+    parser.add_argument("--tbl_mode", choices=[m.value for m in TableSourceMode], default=TableSourceMode.STEP4_SYMLINK.value, help="Table source mode.")
     args = parser.parse_args()
 
     build_ground_truth(

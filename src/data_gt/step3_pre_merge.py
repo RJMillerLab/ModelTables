@@ -18,8 +18,8 @@ from collections import defaultdict
 
 FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths.parquet"
 ALL_TITLE_PATH              = "data/processed/modelcard_all_title_list.parquet"
-MERGE_PATH                  = "data/processed/modelcard_step3_merged.parquet" ########
-SIDE_PATH                   = "data/processed/modelcard_step2.parquet" ########
+MERGE_PATH                  = "data/processed/modelcard_step3_merged.parquet"
+SIDE_PATH                   = "data/processed/modelcard_step2.parquet" 
 
 def _combine_lists(series):
     """
@@ -33,11 +33,11 @@ def _combine_lists(series):
             pass
     return list(set(all_items))
 
-def _safe_parse_list(val):  ########
+def _safe_parse_list(val):
     """Parse list-like strings into actual list, or return as-is."""
     if isinstance(val, str) and val.startswith("[") and val.endswith("]"):
         try:
-            parsed = ast.literal_eval(val.replace('\n', '').replace('\r', ''))  ########
+            parsed = ast.literal_eval(val.replace('\n', '').replace('\r', ''))
             if isinstance(parsed, (list, tuple, np.ndarray)):
                 return list(parsed)
         except Exception:

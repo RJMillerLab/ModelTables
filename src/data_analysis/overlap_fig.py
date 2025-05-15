@@ -10,6 +10,10 @@ uploaded_path = "data/processed/modelcard_citation_all_matrices.pkl.gz"
 with gzip.open(uploaded_path, "rb") as f:
     data = pickle.load(f)
 
+for k, v in data.items():
+    if isinstance(v, csr_matrix):
+        print(f"{k}: shape={v.shape}, nnz={v.nnz}")
+
 matrix_keys = [k for k, v in data.items() if isinstance(v, csr_matrix)]
 
 # === Layout configuration ===
@@ -34,7 +38,7 @@ for idx, key in enumerate(matrix_keys[:n_cols * n_rows]):
 
     # --- Histogram with 0s included ---
     ax_hist = axes[row_idx + 1, col_idx]
-    full_dense = matrix.toarray().astype(np.float32).flatten()  ######## Fix here ########
+    full_dense = matrix.toarray().astype(np.float32).flatten()
     ax_hist.hist(full_dense, bins=50, color="blue")
     ax_hist.set_yscale("log")
     ax_hist.set_title(f"Score dist (incl. 0) of {key}", fontsize=8)

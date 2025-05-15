@@ -2,10 +2,10 @@
 Author: Zhengyuan Dong
 Created: 2025-04-03
 Last Modified: 2025-04-16
-Description: Compute the overlap rate of citation and citing papers based on paperId, and save:
+Description: Compute the overlap rate of citation and citing papers based on Id, and save:
 - pairwise overlap scores
 - thresholded related paper pairs
-- direct citation links (if paperId appears in references of another)
+- direct citation links (if Id appears in references of another)
 """
 
 import os, json, gzip, pickle
@@ -26,39 +26,40 @@ THRESHOLD = 0.1
 SAVE_THRESHOLD_OVERLAP = True
 MODE = "reference"  # or "citation"
 
-def load_paperId_lists(df, mode, influential=False):
-    paperId_to_ids = {}
-    if mode == "reference":
-        if influential:                                               
-            paperId_to_ids[pid] = set(row["ref_papers_overall_infl_ids"])  
-        else:
-            paperId_to_ids[pid] = set(row["ref_papers_overall_ids"])   
-    elif mode == "citation":
-        if influential:                                               
-            paperId_to_ids[pid] = set(row["cit_papers_overall_infl_ids"])  
-        else:
-            paperId_to_ids[pid] = set(row["cit_papers_overall_ids"])   
-    #print(f"{'[Influential] ' if influential else ''}Empty lists: {len(empty_id_list)}, Non-empty: {len(paperId_to_ids)}")
-    print(f"{'[Influential] ' if influential else ''}Empty lists: {len(empty_id_list)}, Non-empty: {len(paperId_to_ids)}")
-    return paperId_to_ids
+def load_Id_lists(df, mode, influential=False):
+    Id_to_ids = {}
+    for index, row in df.iterrows():
+        pid = row["corpusid"]
+        if mode == "reference":
+            if influential:
+                Id_to_ids[pid] = set(row["ref_papers_overall_infl_ids"])
+            else:
+                Id_to_ids[pid] = set(row["ref_papers_overall_ids"])
+        elif mode == "citation":
+            if influential:
+                Id_to_ids[pid] = set(row["cit_papers_overall_infl_ids"])
+            else:
+                Id_to_ids[pid] = set(row["cit_papers_overall_ids"])
+    print(f"{'[Influential] ' if influential else ''}, Non-empty: {len(Id_to_ids)}")
+    return Id_to_ids
 
 def compute_overlap_matrices(df, influential):
-    paperId_to_ref  = load_paperId_lists(df, mode="reference", influential=influential)
-    paper_list = sorted(set(df['paperId']))
+    Id_to_ref  = load_Id_lists(df, mode="reference", influential=influential)
+    paper_list = sorted(set(df['corpusid']))
     for pid in paper_list:                                    
-        if pid not in paperId_to_ref:                          
-            paperId_to_ref[pid] = set()                      
-    paper_index = sorted(paperId_to_ref.keys())
+        if pid not in Id_to_ref:                          
+            Id_to_ref[pid] = set()                      
+    paper_index = sorted(Id_to_ref.keys())
 
     n = len(paper_index)
     maxpr_matrix = np.zeros((n, n), dtype=np.float32)
     jaccard_matrix = np.zeros((n, n), dtype=np.float32)
     dice_matrix = np.zeros((n, n), dtype=np.float32)
     for i in tqdm(range(n), desc="Computing overlap matrices"):
-        refs_i = set(paperId_to_ref[paper_index[i]])
+        refs_i = set(Id_to_ref[paper_index[i]])
         len_i = len(refs_i)
         for j in range(i, n):
-            refs_j = set(paperId_to_ref[paper_index[j]])
+            refs_j = set(Id_to_ref[paper_index[j]])
             len_j = len(refs_j)
             intersection = len(refs_i & refs_j)
             # jaccard: intersection / (len_i + len_j - intersection)
@@ -86,19 +87,20 @@ def compute_overlap_matrices(df, influential):
 
 def compute_direct_matrix(df, influential):  ######## added `influential` flag
     # load references & citations with optional isInfluential filter
-    paperId_to_ref  = load_paperId_lists(df, mode="reference", influential=influential)
-    paperId_to_cite = load_paperId_lists(df, mode="citation",  influential=influential)
-    #all_pids = sorted(set(paperId_to_ref) | set(paperId_to_cite))
-    all_pids = sorted(set(df["paperId"]))
+    Id_to_ref  = load_Id_lists(df, mode="reference", influential=influential)
+    Id_to_cite = load_Id_lists(df, mode="citation",  influential=influential)
+    print(len(Id_to_ref), len(Id_to_cite))
+    #all_pids = sorted(set(Id_to_ref) | set(Id_to_cite))
+    all_pids = sorted(set(df["corpusid"]))
     n = len(all_pids)
 
     mat = lil_matrix((n, n), dtype=np.bool_)  ######## store as sparse boolean
     for i in tqdm(range(n), desc=f"{'[Influential] ' if influential else ''}Computing direct matrix"):
         pid_i  = all_pids[i]
-        refs_i = paperId_to_ref.get(pid_i, set()) | paperId_to_cite.get(pid_i, set())
+        refs_i = Id_to_ref.get(pid_i, set()) | Id_to_cite.get(pid_i, set())
         for j in range(i, n):
             pid_j  = all_pids[j]
-            refs_j = paperId_to_ref.get(pid_j, set()) | paperId_to_cite.get(pid_j, set())
+            refs_j = Id_to_ref.get(pid_j, set()) | Id_to_cite.get(pid_j, set())
             if pid_j in refs_i or pid_i in refs_j:
                 mat[i, j] = True
                 mat[j, i] = True                           ######## mirror in one step
