@@ -41,7 +41,6 @@ def load_Id_lists(df, mode, influential=False):
                 Id_to_ids[pid] = set(row["cit_papers_overall_infl_ids"])
             else:
                 Id_to_ids[pid] = set(row["cit_papers_overall_ids"])
-    print(f"{'[Influential] ' if influential else ''}, Non-empty: {len(Id_to_ids)}")
     # turn to string list [1,2,3]->['1','2','3']
     Id_to_ids = {str(i):list(map(str, Id_to_ids[i])) for i in Id_to_ids}
     return Id_to_ids
@@ -82,66 +81,20 @@ def compute_overlap_matrices(Id_to_ref, paper_list):
         "dice": dice
     }
 
-"""def original_compute_overlap_matrices(df, influential):
-    Id_to_ref  = load_Id_lists(df, mode="reference", influential=influential)
-    paper_list = sorted(set(df['corpusid']))
-    for pid in paper_list:                                    
-        if pid not in Id_to_ref:                          
-            Id_to_ref[pid] = set()                      
-    paper_index = sorted(Id_to_ref.keys())
-
-    n = len(paper_index)
-    maxpr_matrix = np.zeros((n, n), dtype=np.float32)
-    jaccard_matrix = np.zeros((n, n), dtype=np.float32)
-    dice_matrix = np.zeros((n, n), dtype=np.float32)
-    for i in tqdm(range(n), desc="Computing overlap matrices"):
-        refs_i = set(Id_to_ref[paper_index[i]])
-        len_i = len(refs_i)
-        for j in range(i, n):
-            refs_j = set(Id_to_ref[paper_index[j]])
-            len_j = len(refs_j)
-            intersection = len(refs_i & refs_j)
-            # jaccard: intersection / (len_i + len_j - intersection)
-            union = len_i + len_j - intersection
-            score_jaccard = intersection / union if union else 0.0
-            # dice: 2 * intersection / (len_i + len_j)
-            total = len_i + len_j
-            score_dice = 2 * intersection / total if total else 0.0
-            # max_pr: max( intersection/len_i, intersection/len_j )
-            prec = intersection / len_i if len_i else 0.0
-            rec = intersection / len_j if len_j else 0.0
-            score_maxpr = prec if prec >= rec else rec
-            maxpr_matrix[i, j] = score_maxpr
-            maxpr_matrix[j, i] = score_maxpr
-            jaccard_matrix[i, j] = score_jaccard
-            jaccard_matrix[j, i] = score_jaccard
-            dice_matrix[i, j] = score_dice
-            dice_matrix[j, i] = score_dice
-    return {
-        "paper_index": paper_index,
-        "max_pr": csr_matrix(maxpr_matrix),
-        "jaccard": csr_matrix(jaccard_matrix),
-        "dice": csr_matrix(dice_matrix)
-    }"""
-
-"""def original_compute_direct_matrix(df, influential):  ######## added `influential` flag
+"""def original_compute_direct_matrix(Id_to_all, paper_list):
     # load references & citations with optional isInfluential filter
-    Id_to_ref  = load_Id_lists(df, mode="reference", influential=influential)
-    Id_to_cite = load_Id_lists(df, mode="citation",  influential=influential)
-    Id_to_all = {i:Id_to_ref[i] + Id_to_cite[i] for i in Id_to_ref}
-    all_pids = sorted(set(df["corpusid"]))
-    n = len(all_pids)
+    n = len(paper_list)
     mat = lil_matrix((n, n), dtype=np.bool_)
-    for i in tqdm(range(n), desc=f"{'[Influential] ' if influential else ''}Computing direct matrix"):
-        pid_i  = all_pids[i]
+    for i in tqdm(range(n), desc="Computing direct matrix"):
+        pid_i  = paper_list[i]
         refs_i = Id_to_all[pid_i]
         for j in range(i, n):
-            pid_j  = all_pids[j]
+            pid_j  = paper_list[j]
             refs_j = Id_to_all[pid_j]
             if pid_j in refs_i or pid_i in refs_j:
                 mat[i, j] = True
                 mat[j, i] = True
-    return {"paper_index": all_pids, "score_matrix": mat.tocsr()}"""
+    return mat.tocsr()"""
 
 def compute_direct_matrix(Id_to_all, paper_list):
     idx_map = {pid: i for i, pid in enumerate(paper_list)}
@@ -173,16 +126,12 @@ def main():
 
     time_start = time.time()
     overlap_all = compute_overlap_matrices(Id_to_ref, Id_list)
-    print(f"Time taken for normal: {time.time() - time_start} seconds")
-    time_start = time.time()
     direct_data  = compute_direct_matrix(Id_to_all, Id_list)
     print(f"Time taken for normal: {time.time() - time_start} seconds")
         
     # Compute influential
     time_start = time.time()
     inf_overlap_all = compute_overlap_matrices(Id_to_ref_inf, Id_list)
-    print(f"Time taken for normal: {time.time() - time_start} seconds")
-    time_start = time.time()
     inf_direct_data  = compute_direct_matrix(Id_to_all_inf, Id_list)
     print(f"Time taken for normal: {time.time() - time_start} seconds")
 

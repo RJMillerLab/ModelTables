@@ -65,8 +65,8 @@ def process_csv_file(csv_file):
             'status': 'valid'
         }, None
     except Exception as e:
+        print(f"Error processing {csv_file}: {e}")
         return None, str(e)
-
 
 def compute_resource_stats(df, resource):
     col = RESOURCES[resource][0]

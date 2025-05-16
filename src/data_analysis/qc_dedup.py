@@ -10,21 +10,20 @@ Description: Directly load CSV files from specified directories, deduplicate bas
 Tips: Better save a copy of the four folders, to avoid QC control will affect the original files.
 """
 
-import os, shutil, json
+import os, shutil, json, time
 import pandas as pd
 import numpy as np
 import hashlib
+import itertools
 from collections import defaultdict, Counter
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from tqdm_joblib import tqdm_joblib
 from datetime import datetime
-import itertools
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.colors import LogNorm, LinearSegmentedColormap
-import numpy as np
 
 # ---------------- QC CONFIG ----------------
 QC_BACKUP_ROOT = "data/qc_backup"
@@ -69,18 +68,17 @@ def is_placeholder(cell):
     return s == "" or s == "nan" or all(ch in " :-" for ch in s)
 
 def get_linked_set_from_parquet(df, cols):
-    linked_set = set()
+    linked_set = []
     for col in cols:
         if col in df.columns:
             for paths in df[col]:
                 if isinstance(paths, (list, tuple, np.ndarray)):
-                    linked_set.update([p for p in paths if isinstance(p, str) and os.path.exists(p)])
+                    linked_set.extend([p for p in paths if isinstance(p, str)])
                 elif isinstance(paths, str):
-                    if os.path.exists(paths):
-                        linked_set.add(paths)
+                    linked_set.append(paths)
     return linked_set
 
-def infer_resource_from_path(path: str) -> str:
+def infer_resource_from_path(path: str):
     """Infer the resource label from the canonical file path."""
     if "/deduped_hugging_csvs/" in path or "/hugging" in path:
         return "hugging"
@@ -184,9 +182,6 @@ def valid_filelist_with_qc_from_local(directories):
         resource = dir_info["resource"]
         ALLOW_ONE_ROW = resource != 'html'
         priority = dir_info["priority"]
-        if not os.path.exists(directory):
-            print(f"Warning: Directory {directory} does not exist. Skipping.")
-            continue
         # List CSV files and sort them to maintain sequence order
         file_names = sorted([f for f in os.listdir(directory) if f.lower().endswith('.csv')])
 
@@ -272,7 +267,7 @@ def update_row(row, duplicate_mapping, resource_priority):
 
 def compute_dup_matrix_from_sha(files_info):
     keys = ["hugging", "github", "html", "llm"]
-    resource_sha = {r: [fi.get("hash") for fi in files_info if fi.get("resource") == r] for r in keys}
+    resource_sha = {r: [fi["hash"] for fi in files_info if fi["resource"] == r] for r in keys}
     total_files = {r: len(resource_sha[r]) for r in keys}
     resource_sha_set = {r: set(sha_list) for r, sha_list in resource_sha.items()}
     unique_files = {r: len(resource_sha_set[r]) for r in keys}
@@ -292,7 +287,7 @@ def compute_dup_matrix_from_sha(files_info):
     # group by hash
     hash_groups = defaultdict(list)
     for fi in files_info:
-        h = fi.get("hash")
+        h = fi["hash"]
         if h is not None:
             hash_groups[h].append(fi)
     # sort hash group by priority
@@ -396,36 +391,48 @@ def save_heatmap(dup_matrix, unique_counts, output_dir):
 
 
 def main():
+    time_start = time.time()
     # --- Step 1: get the linked set (some files exist in local but not linked to model) ---
     df = pd.read_parquet(INPUT_PARQUET)
     cols = ["hugging_table_list", "github_table_list", "html_table_list_mapped", "llm_table_list_mapped"]
+    file_paths = [item['path'] for item in DIRS]
+
     linked_set = get_linked_set_from_parquet(df, cols)
+    linked_set = set(linked_set)
     print(f"Linked set size from parquet: {len(linked_set)}")
+    # intersection
+    """existing_set = []
+    for dir in file_paths:
+        # I want path starts with dir, directly modify based on above
+        existing_set.extend([os.path.join(dir, f) for f in os.listdir(dir)])
+    print('existing_set size:', len(existing_set))
+    linked_set = set(linked_set) & set(existing_set)
+    print(f"Linked set size from parquet: {len(linked_set)}")"""
+    print(f"time taken: {time.time() - time_start} seconds")
     
+    time_start = time.time()
     # --- Step 2: QC and sha256 hash ---
     # we don't care what's stats before qc. However, we retain all the csv in data/qc_backup for future reference.
     files_info = valid_filelist_with_qc_from_local(DIRS)
     # Filter local files that unlinked to modelcard
-    resource_totals = {}
-    for fi in files_info:
+    resource_totals = {res: 0 for res in RESOURCE_PRIORITY.keys()}
+    resource_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
+    filtered_files_info = []
+    for fi in tqdm(files_info, desc="Filtering files"):
         res = fi["resource"]
-        resource_totals[res] = resource_totals.get(res, 0) + 1
-    
-    filtered_files_info = [fi for fi in files_info if fi["file_path"] in linked_set]
-    resource_filtered = {}
-    for fi in filtered_files_info:
-        res = fi["resource"]
-        resource_filtered[res] = resource_filtered.get(res, 0) + 1
+        resource_totals[res] += 1
+        if fi["file_path"] in linked_set:
+            resource_filtered[res] += 1
+            filtered_files_info.append(fi)
     
     for res in RESOURCE_PRIORITY.keys():
-        total = resource_totals.get(res, 0)
-        kept = resource_filtered.get(res, 0)
+        total = resource_totals[res]
+        kept = resource_filtered[res]
         filtered_out = total - kept
-        print(f"Resource {res}: total {total}, kept {kept}, filtered out {filtered_out}")  ########
-    files_info = filtered_files_info
+        print(f"Resource {res}: total {total}, kept {kept}, filtered out {filtered_out}")
 
     # check duplicate stats
-    dup_matrix, stats, hash_groups = compute_dup_matrix_from_sha(files_info)
+    dup_matrix, stats, hash_groups = compute_dup_matrix_from_sha(filtered_files_info)
     overall_unique = stats["overall_unique"]
     # save overall_unique
     with open(os.path.join(OUTPUT_DIR, "overall_unique.txt"), "w") as f:
@@ -446,7 +453,9 @@ def main():
     print("Total files per resource:", stats["total_files"])
     print("Interal Unique files per resource:", stats["unique_files"])
     print("Cross-resource unique counts:", stats["cross_unique_counts"])
+    print(f"Time taken: {time.time() - time_start} seconds")
 
+    time_start = time.time()
     # --- Step 4: Determine the canonical file for each hash group and build duplicate_mapping ---
     duplicate_mapping = {}  # Key: duplicate file path, Value: canonical file path
     group_stats = []  # Store details for each hash group
@@ -464,9 +473,18 @@ def main():
             "duplicates": duplicates,
             "resources": [fi["resource"] for fi in group_sorted]
         })
+    print(f"Time taken: {time.time() - time_start} seconds")
     
+    time_start = time.time()
     # --- Step 6: Update the original parquet file with deduplicated file paths across resources ---
     print("Updating file paths in DataFrame using cross-resource duplicate mapping...")
+    # filter out invalid paths (qc remove)
+    VALID_PATHS = set(fi['file_path'] for fi in filtered_files_info)
+    for col in cols:
+        print(f"Filtering {col}... Before: {len(df[col])}")
+        df[col] = df[col].apply(lambda x: [p for p in x if p in VALID_PATHS])
+        print(f"After: {len(df[col])}")
+    # map the file path to the canonical file path
     new_cols = {col + "_dedup": [] for col in cols}
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing rows"):
         updated = update_row(row, duplicate_mapping, RESOURCE_PRIORITY)
@@ -474,10 +492,13 @@ def main():
             new_cols[col].append(updated[col])
     for col in new_cols:
         df[col] = new_cols[col]
+    print('add new cols:', new_cols.keys())
     
     df.to_parquet(OUTPUT_PARQUET, index=False)
     print(f"Updated parquet saved as {OUTPUT_PARQUET}")
+    print(f"Time taken: {time.time() - time_start} seconds")
 
+    time_start = time.time()
     # --- Step 7: Save duplicate mapping, unique file list, and duplicate group details ---
     with open(DUPLICATE_MAPPING_JSON, "w") as f:
         json.dump(duplicate_mapping, f, indent=2)
@@ -490,7 +511,6 @@ def main():
     unique_file_paths = list(unique_file_paths)
     assert len(unique_file_paths)==len(hash_groups)
     # please assert the len of unique_file_paths == the unique files above
-
     # save stats
     with open(STATS_PATH, "w") as f:
         json.dump(stats, f, indent=2)
@@ -504,13 +524,16 @@ def main():
     with open(DUPLICATE_GROUPS_JSON, "w") as f:
         json.dump(group_stats, f, indent=2)
     print(f"Duplicate group details saved to {DUPLICATE_GROUPS_JSON}")
+    print(f"Time taken: {time.time() - time_start} seconds")
 
+    time_start = time.time()
     # --- Step 4.5: Save dup_matrix and stats for later reuse
     dup_matrix_file = os.path.join(OUTPUT_DIR, "dup_matrix.pkl")
     dup_matrix.to_pickle(dup_matrix_file)
     print(f"Dup matrix saved to {dup_matrix_file}")
 
     save_heatmap(dup_matrix, stats["cross_unique_counts"], FIG_DIR)
+    print(f"Time taken: {time.time() - time_start} seconds")
 
 if __name__ == "__main__":
     main()

@@ -40,12 +40,14 @@ def create_symlinks_generic(df, processed_base_path, input_col, output_subfolder
     for i, row in tqdm(df.iterrows(), total=len(df), desc=f"Linking {link_tag} CSVs"):
         model_id = row['modelId']
         model_id_sanitized = model_id.replace('/', '_')
-        original_paths = row.get(input_col, [])
+        original_paths = row[input_col]
         symlink_list = []
         for idx, orig_path in enumerate(original_paths, start=1):
+            orig_path = os.path.normpath(orig_path)
+            if not os.path.isabs(orig_path):
+                orig_path = os.path.join(processed_base_path, orig_path)
             if not os.path.exists(orig_path):
-                print('Path does not exist:', orig_path)
-                print('Skipping non-existent CSV')
+                print('Skipping non-existent CSV:', orig_path)
                 continue
             link_filename = f"{model_id_sanitized}_{link_tag}{idx}.csv"
             link_path = os.path.join(output_folder, link_filename)
