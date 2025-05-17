@@ -481,9 +481,11 @@ def main():
     # filter out invalid paths (qc remove)
     VALID_PATHS = set(fi['file_path'] for fi in filtered_files_info)
     for col in cols:
-        print(f"Filtering {col}... Before: {len(df[col])}")
+        total_before = df[col].apply(lambda x: len(x) if isinstance(x, np.ndarray) else 0).sum()
+        print(f"Filtering {col}... Before: {total_before}")
         df[col] = df[col].apply(lambda x: [p for p in x if p in VALID_PATHS])
-        print(f"After: {len(df[col])}")
+        total_after = df[col].apply(lambda x: len(x) if isinstance(x, np.ndarray) else 0).sum()
+        print(f"After: {total_after}")
     # map the file path to the canonical file path
     new_cols = {col + "_dedup": [] for col in cols}
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing rows"):

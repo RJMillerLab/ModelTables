@@ -43,9 +43,9 @@ def create_symlinks_generic(df, processed_base_path, input_col, output_subfolder
         original_paths = row[input_col]
         symlink_list = []
         for idx, orig_path in enumerate(original_paths, start=1):
-            orig_path = os.path.normpath(orig_path)
-            if not os.path.isabs(orig_path):
-                orig_path = os.path.join(processed_base_path, orig_path)
+            #orig_path = os.path.normpath(orig_path)
+            #if not os.path.isabs(orig_path):
+            #    orig_path = os.path.join(processed_base_path, orig_path)
             if not os.path.exists(orig_path):
                 print('Skipping non-existent CSV:', orig_path)
                 continue
