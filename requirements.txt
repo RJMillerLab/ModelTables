@@ -13,3 +13,4 @@ feedparser
 pdfplumber
 html2text
 tiktoken
+suitesparse-graphblas

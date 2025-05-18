@@ -39,6 +39,8 @@ from typing import Dict, Iterable, Set
 from joblib import Parallel, delayed
 from itertools import combinations, product
 from scipy.sparse import csr_matrix, dok_matrix, save_npz, coo_matrix
+import suitesparse_graphblas as gb
+import scipy.sparse as sp
 
 # === Configuration ===
 DATA_DIR = "data/processed"
@@ -99,7 +101,7 @@ def load_relationships(mode: RelationshipMode):
     paper_index = data["paper_index"]
     # Select the proper score matrix from the new keys
     if mode == RelationshipMode.OVERLAP_RATE:
-        score_matrix = data["max_pr"]                              ########  (use max‑PR by default)
+        score_matrix = data["max_pr"]                             
     elif mode == RelationshipMode.DIRECTED_CITE:
         score_matrix = data["direct_label"]
     else:
@@ -233,55 +235,132 @@ def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: Re
     paper_adj.setdiag(True)
     return paper_adj.tocsr()
 
-def naive_model_adj(B: csr_matrix, A: csr_matrix):
+'''def naive_model_adj(B: csr_matrix, A: csr_matrix):
     C = (B.T @ A).astype(bool)
     adj = (C @ B).astype(bool).tocsr()
     adj.setdiag(True)
-    return adj, C
-
-def compute_subset_adj(B: csr_matrix, A: csr_matrix, block: int = 4):
-    used_models = np.unique(B.nonzero()[1])
+    return adj
+'''
+# corrected block partition over models axis
+'''def compute_subset_adj(B: csr_matrix, A: csr_matrix, mem_budget: int = 150 * 1024**2):
     used_papers = np.unique(B.nonzero()[0])
-    B_sub = B[used_papers, :][:, used_models].tocsr()
-    A_sub = A[used_papers, :][:, used_papers].tocsr()
-    k = len(used_models)
+    used_models = np.unique(B.nonzero()[1])
+    P_sub, M_sub = len(used_papers), len(used_models)
+
+    B_sub_csr = B[used_papers, :][:, used_models].tocsr()
+    B_sub_csc = B_sub_csr.tocsc()
+    A_sub      = A[used_papers, :][:, used_papers].tocsr()
+
+    # estimate scratch per model = P_sub * bool_size(1 byte)
+    scratch_per_model = P_sub
+    block = max(1, mem_budget // scratch_per_model)
+    block = min(block, M_sub)
+
     rows_acc, cols_acc = [], []
-    mem_max_blk = 0
-    for s in tqdm(range(0, k, block), desc="Computing subset adjacency"):
-        e = min(s + block, k)
-        C_blk = (B_sub[:, s:e].T @ A_sub).astype(bool)
-        mem_blk = C_blk.data.nbytes + C_blk.indices.nbytes + C_blk.indptr.nbytes
-        mem_max_blk = max(mem_max_blk, mem_blk)
-        part = (C_blk @ B_sub).astype(bool)
-        if part.nnz:
-            r, c = part.nonzero()
+    for s in tqdm(range(0, M_sub, block), desc="Computing subset adjacency"):
+        e = min(s + block, M_sub)
+        # slice models columns [s:e]
+        # B_sub_csc[:, s:e] is P_sub x block
+        # .T -> block x P_sub
+        Cblk = (B_sub_csr[:, s:e].T @ A_sub).astype(bool)   # (block x P_sub)
+        Pblk = (Cblk @ B_sub_csr).astype(bool)              # (block x M_sub)
+        if Pblk.nnz:
+            r, c = Pblk.nonzero()
             rows_acc.append(r + s)
             cols_acc.append(c)
-    if rows_acc:
-        rows = np.concatenate(rows_acc)
-        cols = np.concatenate(cols_acc)
-        data = np.ones(len(rows), dtype=bool)
-    else:
-        rows = cols = data = np.array([], dtype=int)
-    sub = coo_matrix((data, (rows, cols)), shape=(k, k)).tocsr()
-    sub.setdiag(True)
-    full_rows = used_models[rows]
-    full_cols = used_models[cols]
-    padded = coo_matrix((data, (full_rows, full_cols)), shape=(B.shape[1], B.shape[1])).tocsr()
-    padded.setdiag(True)
-    return padded
 
-def build_model_matrix(comb_mat, paper_adj):
+    if rows_acc:
+        all_rows = np.concatenate(rows_acc)
+        all_cols = np.concatenate(cols_acc)
+        data_sub = np.ones(len(all_rows), dtype=bool)
+        sub = coo_matrix((data_sub, (all_rows, all_cols)),
+                         shape=(M_sub, M_sub)).tocsr()
+    else:
+        sub = csr_matrix((M_sub, M_sub), dtype=bool)
+
+    sub.setdiag(True)
+    r2, c2 = sub.nonzero()
+    full_r = used_models[r2]
+    full_c = used_models[c2]
+    data_big = np.ones(len(full_r), dtype=bool)
+    big = coo_matrix((data_big, (full_r, full_c)),
+                     shape=(B.shape[1], B.shape[1])).tocsr()
+    big.setdiag(True)
+    big.eliminate_zeros()
+    return big'''
+'''def build_model_matrix(comb_mat, paper_adj):
     """
     comb_mat: csr_matrix of shape (num_papers, num_models), boolean
     paper_adj: csr_matrix of shape (num_papers, num_papers), boolean
     """
     # model-level adjacency: M x M
     #model_adj = ((comb_mat.T @ paper_paper_adj) @ comb_mat).astype(bool)
-    model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool), block=1000)
+    model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))
+    #import suitesparse_graphblas as gb
+    #B_gb = gb.io.from_scipy_sparse(comb_mat.astype(bool)) 
+    #A_gb = gb.io.from_scipy_sparse(paper_adj.astype(bool))
+    #M_gb = (B_gb.T @ A_gb) @ B_gb                          
+    #model_adj = gb.io.to_scipy_sparse(M_gb).astype(bool)   
     model_adj.setdiag(True)
     model_adj.eliminate_zeros()
-    return model_adj
+    return model_adj'''
+
+'''def build_model_matrix(comb_mat: csr_matrix, paper_adj: csr_matrix):   
+    """
+    Return a model-level Boolean adjacency (M × M) using either:
+      • GraphBLAS Boolean semiring  —— memory-safe & fast
+      • Fallback blocked SciPy path —— if GraphBLAS unavailable
+    """
+    print('shape of comb_mat: ', comb_mat.shape)
+    print('shape of paper_adj: ', paper_adj.shape)
+    B_gb = gb.Matrix.from_scipy_sparse(comb_mat)                  
+    A_gb = gb.Matrix.from_scipy_sparse(paper_adj)                 
+    # Boolean semiring: multiplication = logical AND, addition = logical OR
+    M_gb = (B_gb.T @ A_gb) @ B_gb                                  
+    model_adj = M_gb.to_scipy_sparse().astype(np.bool_)            
+    #else:                                                              
+    # Fallback to memory-aware blocked multiply (unchanged code)   
+    #model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))         
+    model_adj.setdiag(True)
+    model_adj.eliminate_zeros()
+    return model_adj'''
+
+def build_model_matrix(comb_mat, paper_adj):
+    """Edge‑scan implementation (memory‑light)."""
+    paper2models = [set(comb_mat.getrow(i).indices) for i in range(comb_mat.shape[0])]
+    links = defaultdict(set)
+    # 1. cross‑paper edges
+    rows, cols = paper_adj.nonzero()
+    for p1, p2 in tqdm(zip(rows, cols), desc="Building model adjacency between papers"):
+        if p1 > p2:   # include self later
+            for m1 in paper2models[p1]:
+                for m2 in paper2models[p2]:
+                    if m1 == m2:
+                        continue
+                    links[m1].add(m2)
+                    links[m2].add(m1)
+    # 2. within‑paper edges (diagonal of A)
+    for mods in tqdm(paper2models, desc="Building model adjacency within paper"):
+        if len(mods) > 1:
+            ms = list(mods)
+            for i in range(len(ms)):
+                for j in range(i+1, len(ms)):
+                    m1, m2 = ms[i], ms[j]
+                    links[m1].add(m2)
+                    links[m2].add(m1)
+    n_models = comb_mat.shape[1]
+    if not links:
+        adj = sp.identity(n_models, dtype=bool, format='csr')
+        return adj
+    r, c = [], []
+    for m1, nbrs in tqdm(links.items(), desc="Building model adjacency between models"):
+        for m2 in nbrs:
+            r.append(m1); c.append(m2)
+    data = np.ones(len(r), dtype=bool)
+    adj = sp.csr_matrix((data, (r, c)), shape=(n_models, n_models), dtype=bool)
+    adj.setdiag(True)
+    adj.eliminate_zeros()
+    return adj
 
 def adjacency_to_dict(adj: csr_matrix, index_list: list):
     print("Converting adjacency matrix to ground-truth dictionary ...")
