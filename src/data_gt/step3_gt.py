@@ -29,7 +29,7 @@ Usage:
     python -m src.data_gt.step3_gt --rel_mode overlap_rate --tbl_mode step4_symlink
 """
 
-import os, json, gzip, pickle
+import os, json, gzip, pickle, time
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -233,36 +233,55 @@ def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: Re
     paper_adj.setdiag(True)
     return paper_adj.tocsr()
 
-def build_B_sparse(paper_index, model_index, paperId_to_modelIds):  ########
-    """Build a CSR B (paper→model) with one pass COO construction."""
-    paper_pos = {pid: i for i, pid in enumerate(paper_index)}
-    model_pos = {mid: j for j, mid in enumerate(model_index)}
-    rows, cols = [], []
-    for pid, mids in paperId_to_modelIds.items():
-        i = paper_pos.get(pid)
-        if i is None:
-            continue
-        cols.extend(model_pos[m] for m in mids if m in model_pos)
-        rows.extend([i] * len(mids))
-    data = np.ones(len(rows), dtype=np.bool_)
-    return coo_matrix((data, (rows, cols)), shape=(len(paper_index), len(model_index))).tocsr() ########
+def naive_model_adj(B: csr_matrix, A: csr_matrix):
+    C = (B.T @ A).astype(bool)
+    adj = (C @ B).astype(bool).tocsr()
+    adj.setdiag(True)
+    return adj, C
 
-def build_model_matrix(paper_adj: csr_matrix, paper_index: list, paperId_to_modelIds: Dict[str, set], model_index: list):
-    """Fast model‑level adjacency via Bᵀ A B with all CSR operands."""
-    print("Building model-level adjacency matrix ...")
-    B = build_B_sparse(paper_index, model_index, paperId_to_modelIds) ########
-    B = B.astype(bool)
-    paper_adj = paper_adj.astype(bool)
-    print(f"B shape: {B.shape}")
-    print(f"paper_adj shape: {paper_adj.shape}")
-    print("Multiplying B^T @ A @ B ...")
-    #model_adj = (B.T @ paper_adj @ B).astype(bool)              ########
-    # split into twice multiplication
-    model_adj_1 = (B.T @ paper_adj).astype(bool)
-    model_adj = (model_adj_1 @ B).astype(bool)
+def compute_subset_adj(B: csr_matrix, A: csr_matrix, block: int = 4):
+    used_models = np.unique(B.nonzero()[1])
+    used_papers = np.unique(B.nonzero()[0])
+    B_sub = B[used_papers, :][:, used_models].tocsr()
+    A_sub = A[used_papers, :][:, used_papers].tocsr()
+    k = len(used_models)
+    rows_acc, cols_acc = [], []
+    mem_max_blk = 0
+    for s in tqdm(range(0, k, block), desc="Computing subset adjacency"):
+        e = min(s + block, k)
+        C_blk = (B_sub[:, s:e].T @ A_sub).astype(bool)
+        mem_blk = C_blk.data.nbytes + C_blk.indices.nbytes + C_blk.indptr.nbytes
+        mem_max_blk = max(mem_max_blk, mem_blk)
+        part = (C_blk @ B_sub).astype(bool)
+        if part.nnz:
+            r, c = part.nonzero()
+            rows_acc.append(r + s)
+            cols_acc.append(c)
+    if rows_acc:
+        rows = np.concatenate(rows_acc)
+        cols = np.concatenate(cols_acc)
+        data = np.ones(len(rows), dtype=bool)
+    else:
+        rows = cols = data = np.array([], dtype=int)
+    sub = coo_matrix((data, (rows, cols)), shape=(k, k)).tocsr()
+    sub.setdiag(True)
+    full_rows = used_models[rows]
+    full_cols = used_models[cols]
+    padded = coo_matrix((data, (full_rows, full_cols)), shape=(B.shape[1], B.shape[1])).tocsr()
+    padded.setdiag(True)
+    return padded
+
+def build_model_matrix(comb_mat, paper_adj):
+    """
+    comb_mat: csr_matrix of shape (num_papers, num_models), boolean
+    paper_adj: csr_matrix of shape (num_papers, num_papers), boolean
+    """
+    # model-level adjacency: M x M
+    #model_adj = ((comb_mat.T @ paper_paper_adj) @ comb_mat).astype(bool)
+    model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool), block=1000)
     model_adj.setdiag(True)
     model_adj.eliminate_zeros()
-    return model_adj, model_index
+    return model_adj
 
 def adjacency_to_dict(adj: csr_matrix, index_list: list):
     print("Converting adjacency matrix to ground-truth dictionary ...")
@@ -289,6 +308,7 @@ def build_title_model_matrix(df_titles_exploded):
             cols.append(model_pos[mid])
     data = np.ones(len(rows), dtype=bool)
     return csr_matrix((data, (rows, cols)), shape=(len(titles), len(modelIds))), titles.tolist(), modelIds.tolist()
+
 def build_paper_title_matrix(df_metadata, titles):
     paperIds = df_metadata['corpusid'].dropna().unique()
     title_pos = {title: i for i, title in enumerate(titles)}
@@ -301,6 +321,19 @@ def build_paper_title_matrix(df_metadata, titles):
             cols.append(title_pos[title])
     data = np.ones(len(rows), dtype=bool)
     return csr_matrix((data, (rows, cols)), shape=(len(paperIds), len(titles))), paperIds.tolist()
+
+def compute_subset_pt_tm(pt_mat, tm_mat):
+    """
+    Subset titles to only used ones, compute comb_sub full p x m.
+    """
+    used_pt = set(pt_mat.nonzero()[1])
+    used_tm = set(tm_mat.nonzero()[0])
+    used = sorted(used_pt.union(used_tm))
+    # Subset matrices
+    pt_sub = pt_mat[:, used]      # p x k
+    tm_sub = tm_mat[used, :]      # k x m
+    comb_sub = (pt_sub @ tm_sub).astype(bool).tocsr()  # p x m
+    return comb_sub
 
 def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RATE, tbl_mode: TableSourceMode = TableSourceMode.STEP4_SYMLINK, use_symlink = True):
     """High‑level orchestration for building GT tables."""
@@ -318,19 +351,24 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     df_titles = pd.read_parquet(FILES["title_list"], columns=["modelId", "all_title_list"])
     df_titles_exploded = df_titles.explode("all_title_list")
 
+    time_start = time.time()
     tm_mat, titles_list, model_list = build_title_model_matrix(df_titles_exploded)
     pt_mat, paper_list = build_paper_title_matrix(df_metadata, titles_list)
-    comb_mat = (pt_mat @ tm_mat).tocsr()
+    print(f"Time taken to build title-model and paper-title matrices: {time.time() - time_start:.2f} seconds")
 
-    # convert back to mapping  (paperId -> {modelIds})                                  ########
-    paperId_to_modelIds = defaultdict(set)                                              ########
-    rows, cols = comb_mat.nonzero()                                                     ########
-    for r, c in zip(rows, cols):                                                        ########
-        paperId_to_modelIds[str(paper_list[r])].add(model_list[c]) 
+    time_start = time.time()
+    #comb_mat = (pt_mat @ tm_mat).tocsr()
+    comb_mat = compute_subset_pt_tm(pt_mat, tm_mat)
+    print(f"Time taken to compute subset approach of pt_sub @ tm_sub: {time.time() - time_start:.2f} seconds")
 
     # ========== Step 4: Build model-level adjacency matrix from the paper-level adjacency ==========
-    model_index = sorted({mid for mids in paperId_to_modelIds.values() for mid in mids})
-    model_model_adj, model_index = build_model_matrix(paper_paper_adj, paper_index, paperId_to_modelIds, model_index)
+    time_start = time.time()
+    cols = comb_mat.nonzero()[1]
+    model_index = sorted({ model_list[j] for j in cols })
+    print(f"Time taken to build model index: {time.time() - time_start:.2f} seconds")
+    time_start = time.time()
+    model_model_adj = build_model_matrix(comb_mat, paper_paper_adj)
+    print(f"Time taken to build model-level adjacency matrix: {time.time() - time_start:.2f} seconds")
     print(f"[Model-level] Adjacency shape: {model_model_adj.shape}")
 
     # ---------- Step 4.5: modelId → csv mapping ----------
