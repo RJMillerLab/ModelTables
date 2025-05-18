@@ -45,17 +45,6 @@ import scipy.sparse as sp
 # === Configuration ===
 DATA_DIR = "data/processed"
 GT_DIR = "data/gt"
-CSV_LEVEL_ADJ_PATH  = f"{GT_DIR}/csv_level_adjacency.npz"
-CSV_INDEX_PATH      = f"{GT_DIR}/csv_index_list.pickle"
-
-PAPER_LEVEL_ADJ_PATH = f"{GT_DIR}/paper_level_adjacency.npz"
-MODEL_LEVEL_ADJ_PATH = f"{GT_DIR}/model_level_adjacency.npz"
-PAPER_INDEX_PATH      = f"{GT_DIR}/paper_index_list.pickle"
-MODEL_INDEX_PATH      = f"{GT_DIR}/model_index_list.pickle"
-CSV_SYMLINK_ADJ_PATH = f"{GT_DIR}/csv_symlink_adjacency.npz"
-CSV_SYMLINK_INDEX_PATH = f"{GT_DIR}/csv_symlink_index.pickle"
-CSV_REAL_ADJ_PATH   = f"{GT_DIR}/csv_real_adjacency.npz"
-CSV_REAL_INDEX_PATH = f"{GT_DIR}/csv_real_index.pickle"
 
 GT_COMBINED_PATH = f"{GT_DIR}/scilake_gt_all_matrices.pkl.gz"
 
@@ -79,17 +68,14 @@ DISCOUNT_RATE = 0.5
 IS_STRICT_MODE = True
 THRESHOLD = 0.1 # for overlap_rate only
 
-
 # ===== ENUMS =============================================================== #
 class RelationshipMode(str, Enum):
     OVERLAP_RATE = "overlap_rate"
     DIRECTED_CITE = "direct_label"
 
-
 class TableSourceMode(str, Enum):
     STEP4_SYMLINK = "step4_symlink"
     STEP3_MERGED = "step3_dedup"
-
 
 # ===== FACTORIES =========================================================== #
 def load_relationships(mode: RelationshipMode):
@@ -288,22 +274,6 @@ def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: Re
     big.setdiag(True)
     big.eliminate_zeros()
     return big'''
-'''def build_model_matrix(comb_mat, paper_adj):
-    """
-    comb_mat: csr_matrix of shape (num_papers, num_models), boolean
-    paper_adj: csr_matrix of shape (num_papers, num_papers), boolean
-    """
-    # model-level adjacency: M x M
-    #model_adj = ((comb_mat.T @ paper_paper_adj) @ comb_mat).astype(bool)
-    model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))
-    #import suitesparse_graphblas as gb
-    #B_gb = gb.io.from_scipy_sparse(comb_mat.astype(bool)) 
-    #A_gb = gb.io.from_scipy_sparse(paper_adj.astype(bool))
-    #M_gb = (B_gb.T @ A_gb) @ B_gb                          
-    #model_adj = gb.io.to_scipy_sparse(M_gb).astype(bool)   
-    model_adj.setdiag(True)
-    model_adj.eliminate_zeros()
-    return model_adj'''
 
 '''def build_model_matrix(comb_mat: csr_matrix, paper_adj: csr_matrix):   
     """
