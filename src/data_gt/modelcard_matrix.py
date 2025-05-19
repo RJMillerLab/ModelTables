@@ -68,8 +68,7 @@ def init_edge_db(db_path):
         CREATE TABLE IF NOT EXISTS edges (
             src TEXT NOT NULL,
             tgt TEXT NOT NULL,
-            rel TEXT NOT NULL,
-            UNIQUE(src, tgt, rel)
+            UNIQUE(src, tgt)
         );
         CREATE INDEX IF NOT EXISTS idx_src ON edges(src);
         CREATE INDEX IF NOT EXISTS idx_tgt ON edges(tgt);
@@ -77,72 +76,43 @@ def init_edge_db(db_path):
     conn.commit()
     return conn, cur
 
-def insert_edges(cur, edge_iter, rel_type, batch=5000):
+def insert_edges(cur, edge_iter, batch=5000):
     buf = []
     for s, t in edge_iter:
-        buf.append((s, t, rel_type))
+        buf.append((s, t))
         if len(buf) >= batch:
-            cur.executemany("INSERT INTO edges VALUES(?,?,?)", buf)
+            cur.executemany("INSERT OR IGNORE INTO edges VALUES(?,?)", buf)
             buf.clear()
     if buf:
-        cur.executemany("INSERT INTO edges VALUES(?,?,?)", buf)
+        cur.executemany("INSERT OR IGNORE INTO edges VALUES(?,?)", buf)
 
 def build_edges_sql(
     df_rel: pd.DataFrame,
     valid_model_ids: set,
-    rel_type: str,
     src_col="modelId",
     tgt_col="final_base_model",
     db_path=MODEL_REL_DB):
-    print(f"building {rel_type} edges to {db_path}")
+    print(f"building edges to {db_path}")
     conn, cur = init_edge_db(db_path)
-    """groups = df_rel.groupby(tgt_col)[src_col]
-    total = len(groups)  # number of cliques
-    for base, members in tqdm(groups,
-                              desc=f"[{rel_type}] clique", 
-                              total=total):
-        try:
-            members = [m for m in members if m in valid_model_ids]
-        except Exception as e:
-            print(f"ERROR filtering members for base={base}: {e}")
-            raise
-        for i, j in tqdm(combinations(members, 2),
-                          desc=f"[{rel_type}] edges in {base}", 
-                          leave=False):
-            try:
-                insert_edges(cur, ((i, j), (j, i)), rel_type)
-            except Exception as e:
-                print(f"ERROR inserting edge ({i},{j}) rel={rel_type}: {e}")
-                raise"""
-    """groups = df_rel.groupby(tgt_col)[src_col]                    ########
-    for base, members in tqdm(groups,                            ########
-                              desc=f"[{rel_type}] clique"):    ########
-        members = [m for m in members if m in valid_model_ids]    ########
-        if len(members) < 2:                                     ########
-            continue                                             ########
-        buf = []                                                 ########
-        for i, j in combinations(members, 2):                    ########
-            buf.append((i, j, rel_type))                        ########
-            buf.append((j, i, rel_type))                        ########
-        cur.executemany("INSERT OR IGNORE INTO edges VALUES(?,?,?)", buf) ########"""
-    groups = df_rel.groupby(tgt_col)[src_col]
-    commit_every = 500               ######## 每 500 个 clique 提交一次
-    for idx, (base, members) in enumerate(tqdm(groups, desc=f"[{rel_type}] clique")):
+    groups = df_rel.groupby(tgt_col)[src_col]         
+    commit_every = 500 
+    for idx, (base, members) in enumerate(tqdm(groups, desc=f"clique")):
+        # 只保留 valid 的 model
         members = [m for m in members if m in valid_model_ids]
         if len(members) < 2:
             continue
-        buf = []
-        for i, j in combinations(members, 2):
-            buf.append((i, j, rel_type))
-            buf.append((j, i, rel_type))
-        cur.executemany("INSERT OR IGNORE INTO edges VALUES(?,?,?)", buf)
-        del buf                        ######## 释放 Python list 内存
-        # 每 commit_every 个 clique，就提交一次
+        # 用 insert_edges 流式插入，一个 clique 也按 batch 分批
+        def edge_iter():
+            for i, j in combinations(members, 2):
+                yield (i, j)
+                yield (j, i)
+        insert_edges(cur, edge_iter())
+        # 每隔若干 clique 也可以分批 commit，释放 WAL 缓冲
         if idx % commit_every == 0:
-            conn.commit()             ######## 分批 commit，清空 WAL 缓冲
-    conn.commit()                     ######## 最后再确认一次
+            conn.commit()
+    conn.commit()
     conn.close()
-    print(f"✔️  {rel_type} edges stored → {db_path}")
+    print(f"✔️  edges stored → {db_path}")
 
 
 def build_model_relation_matrix(
@@ -190,11 +160,17 @@ def build_model_relation_matrix(
 
 def build_dataset_edges_sql(ds_groups, db_path=DATASET_REL_DB):
     conn, cur = init_edge_db(db_path)
-    for members in ds_groups:
+    commit_every = 500
+    for idx, members in enumerate(tqdm(ds_groups, desc="dataset clique")):
         if len(members) < 2:
             continue
-        for i, j in combinations(members, 2):
-            insert_edges(cur, ((i, j), (j, i)), rel_type='dataset')
+        def edge_iter():
+            for i, j in combinations(members, 2):
+                yield (i, j)
+                yield (j, i)
+        insert_edges(cur, edge_iter())
+        if idx % commit_every == 0:
+            conn.commit()
     conn.commit(); conn.close()
     print(f"✔️  dataset edges stored → {db_path}")
 
@@ -339,10 +315,8 @@ if __name__ == "__main__":
     # save HF model link lists
     all_model_links = df['hf_modelid'].dropna().unique()
     pd.Series(all_model_links).to_csv('data/tmp/all_hf_modelids.txt', index=False, header=False)
-    #pd.DataFrame({'hf_modelid': all_model_links}).to_parquet('data/tmp/all_hf_modelids.parquet')
     unmatched_model_links = [m for m in all_model_links if m not in valid_model_ids]
     pd.Series(unmatched_model_links).to_csv('data/tmp/unmatched_hf_modelids.txt', index=False, header=False)
-    #pd.DataFrame({'hf_modelid': unmatched_model_links}).to_parquet('data/tmp/unmatched_hf_modelids.parquet')
 
     # ---------- NEW: grab datasets+tags from YAML header ----------
     df[['datasets_tag_list','card_tag_list']] = (df[CARD_TAGS_KEY].apply(lambda txt: pd.Series(extract_datasets_tags(txt))) )
@@ -361,17 +335,16 @@ if __name__ == "__main__":
     print(f"Found HF dataset links total: {num_ds_links}, unique datasets: {len(all_dataset_links)}") 
     # save HF dataset link lists
     pd.Series(all_dataset_links).to_csv('data/tmp/all_hf_datasetids.txt', index=False, header=False) 
-    #pd.DataFrame({'hf_datasetid': all_dataset_links}).to_parquet('data/tmp/all_hf_datasetids.parquet') 
     print('finished!')
     
     # build edges
     model_index = sorted(valid_model_ids)
     df_tag_rel = df[df['final_base_model'].isin(valid_model_ids)].copy()
-    build_edges_sql(df_tag_rel, valid_model_ids, rel_type='base_model', db_path=MODEL_REL_DB)
+    build_edges_sql(df_tag_rel, valid_model_ids, db_path=MODEL_REL_DB)
 
     df_hf_rel = df[df['hf_modelid'].isin(valid_model_ids)].copy()
     df_hf_rel.rename(columns={'hf_modelid':'final_base_model'}, inplace=True)
-    build_edges_sql(df_hf_rel, valid_model_ids, rel_type='readme', db_path=MODEL_REL_DB)
+    build_edges_sql(df_hf_rel, valid_model_ids, db_path=MODEL_REL_DB)
 
     print('building dataset_adj')
     # 3) Dataset co-link matrix (models sharing datasets)

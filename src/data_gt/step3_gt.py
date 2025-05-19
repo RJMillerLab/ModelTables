@@ -40,12 +40,14 @@ from joblib import Parallel, delayed
 from itertools import combinations, product
 from scipy.sparse import csr_matrix, dok_matrix, save_npz, coo_matrix, vstack
 import scipy.sparse as sp
+from src.data_gt.modelcard_matrix import build_edges_sql, init_edge_db, insert_edges
 
 # === Configuration ===
 DATA_DIR = "data/processed"
 GT_DIR = "data/gt"
 GT_TMP_DIR = "data/gt_tmp"
 os.makedirs(GT_TMP_DIR, exist_ok=True)
+GT_MODEL_DB = "data/tmp/gt_mod_mod.db"
 
 GT_COMBINED_PATH = f"{GT_DIR}/scilake_gt_all_matrices.pkl.gz"
 
@@ -313,41 +315,13 @@ def bool_matmul_csr(X: csr_matrix,
     data = np.ones_like(rows, dtype=bool)                           ########
     return coo_matrix((data, (rows, cols)), shape=(m, p)).tocsr()   ########
 
-'''def bool_matmul_csr(X: csr_matrix, Y: csr_matrix) -> csr_matrix:
-    """
-    Boolean sparse matrix multiplication: C = X @ Y over Boolean semiring.
-    X: (m×n) csr, Y: (n×p) csr
-    For each row i in X, C[i, j] = OR_k (X[i,k] AND Y[k,j]).
-    """
-    print(f"[DEBUG] Boolean matmul called: X.shape={X.shape}, Y.shape={Y.shape}")
-    m, _ = X.shape
-    _, p = Y.shape
-    rows, cols = [], []
-    # Pre-fetch Y row indices
-    Y_indptr = Y.indptr
-    Y_indices = Y.indices
-    for i in tqdm(range(m), desc="Boolean matmul rows"):
-        row_start, row_end = X.indptr[i], X.indptr[i+1]
-        ks = X.indices[row_start:row_end]
-        if ks.size == 0:
-            continue
-        neigh = set()
-        for k in ks:
-            y_start, y_end = Y_indptr[k], Y_indptr[k+1]
-            neigh.update(Y_indices[y_start:y_end])
-        for j in neigh:
-            rows.append(i)
-            cols.append(j)
-    data = np.ones(len(rows), dtype=bool)
-    return csr_matrix((data, (rows, cols)), shape=(m, p), dtype=bool)'''
-
 """def naive_subset_adj(B: csr_matrix, A: csr_matrix):
     B_T = B.transpose().tocsr()
     C = (B_T @ A) @ B
     C.setdiag(True)
     return C"""
 
-def build_model_matrix(comb_mat: csr_matrix,
+'''def build_model_matrix(comb_mat: csr_matrix,
                        paper_adj: csr_matrix,
                        block_size: int = 1000,
                        tmp_dir: str = "tmp_blocks"):
@@ -418,7 +392,48 @@ def build_model_matrix(comb_mat: csr_matrix,
                            shape=(M_models, M_models)).tocsr()########
     model_adj.setdiag(True)                                     ########
     model_adj.eliminate_zeros()                                 ########
-    return model_adj
+    return model_adj'''
+
+def build_model_matrix(comb_mat: csr_matrix,
+                            paper_adj: csr_matrix,
+                            db_path: str = GT_MODEL_DB,
+                            block_size: int = 1000):
+    """
+    Write (model_i, model_j) edges directly into SQLite.
+    comb_mat: papers×models bool   (pt_sub @ tm_sub)
+    paper_adj: papers×papers bool  (paper-level adjacency)
+    """
+    paper_rows = np.array(comb_mat.sum(axis=1)).ravel() > 0
+    comb_sub   = comb_mat[paper_rows, :].astype(bool)
+    adj_sub    = paper_adj[paper_rows, :]
+    cols_sel   = np.array(adj_sub.sum(axis=0)).ravel() > 0
+    pa_sub     = adj_sub[:, cols_sel].astype(bool)
+    M_models   = comb_sub.shape[1]
+    orig_idx   = np.arange(M_models)
+    mask       = np.array(pa_sub.sum(axis=1)).ravel() > 0
+    counts     = comb_sub.T.dot(mask.astype(np.int8))
+    idx_C      = np.flatnonzero(counts)
+    conn, cur = init_edge_db(db_path)
+    print(f"→ Streaming model edges into {db_path}")
+    for start in tqdm(range(0, len(idx_C), block_size), desc="bool-matmul blocks"):
+        end       = min(start + block_size, len(idx_C))
+        idx_block = idx_C[start:end]
+        X_block   = comb_sub.transpose().tocsr()[idx_block, :]
+        C_block   = bool_matmul_csr(X_block, pa_sub)
+        sub_adj   = bool_matmul_csr(C_block, comb_sub)
+        r, c      = sub_adj.nonzero()
+        if r.size == 0:
+            continue
+        def edge_iter():
+            for i, j in zip(r, c):
+                yield (orig_idx[idx_block[i]], orig_idx[j])
+        insert_edges(cur, edge_iter())
+        if start // block_size % 20 == 0:
+            conn.commit()
+        del X_block, C_block, sub_adj
+    conn.commit()
+    conn.close()
+    print("✓ All model edges written to DB")
 
 def iter_block_files(block_files):                                ########
     """Yield (rows, cols) numpy arrays from each .npz block."""     ########
@@ -490,8 +505,6 @@ def compute_subset_pt_tm(FILES):
 def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RATE, tbl_mode: TableSourceMode = TableSourceMode.STEP4_SYMLINK, use_symlink = True):
     suffix = f"__{rel_mode.value}"
     """High‑level orchestration for building GT tables."""
-
-    
     # ========== Step 1: Load paper-level info ==========
     paper_index, score_matrix = load_relationships(rel_mode)
     print(f"Step1: [Paper-level] Index shape: {len(paper_index)}. Score matrix shape: {score_matrix.shape}")
@@ -515,13 +528,13 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     cols = comb_mat.nonzero()[1]
     model_index = sorted({model_list[j] for j in cols})
     print('len(model_index): ', len(model_index))
-    """model_model_adj = build_model_matrix(comb_mat, paper_paper_adj)
-    with open(f"{GT_TMP_DIR}/model_model_adj_{suffix}.pkl", "wb") as f:
-        pickle.dump(model_model_adj, f)
+    build_model_matrix(comb_mat, paper_paper_adj, db_path=GT_MODEL_DB)
+    #model_model_adj = build_model_matrix(comb_mat, paper_paper_adj, db_path=GT_MODEL_DB)
+    #with open(f"{GT_TMP_DIR}/model_model_adj_{suffix}.pkl", "wb") as f:
+    #    pickle.dump(model_model_adj, f)
     del paper_paper_adj
     print(f"Time taken to build model-level adjacency matrix: {time.time() - time_start:.2f} seconds")
-    print(f"[Model-level] Adjacency shape: {model_model_adj.shape}")"""
-
+    #print(f"[Model-level] Adjacency shape: {model_model_adj.shape}")
 
     tmp_dir = "tmp_blocks"
     block_files = [os.path.join(tmp_dir, f) for f in sorted(os.listdir(tmp_dir)) if f.startswith("block_") and f.endswith(".npz")]
