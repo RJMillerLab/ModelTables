@@ -9,14 +9,17 @@ def load_config(file_path):
     with open(file_path, 'r') as file:
         return yaml.safe_load(file)
 
-def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw"):
+def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", columns=[]):
     assert data_type in ["modelcard", "datasetcard"], "data_type must be 'modelcard' or 'datasetcard'"
     if data_type == "modelcard":
         file_names = [f"train-0000{i}-of-00004.parquet" for i in range(4)]
     elif data_type == "datasetcard":
         #file_names = [f"train-0000{i}-of-00003.parquet" for i in range(3)]
         file_names = [f"train-0000{i}-of-00002.parquet" for i in range(2)]
-    dfs = [pd.read_parquet(os.path.join(file_path, file)) for file in file_names]
+    if columns:
+        dfs = [pd.read_parquet(os.path.join(file_path, file), columns=columns) for file in file_names]
+    else:
+        dfs = [pd.read_parquet(os.path.join(file_path, file)) for file in file_names]
     combined_df = pd.concat(dfs, ignore_index=True)
     return combined_df
 

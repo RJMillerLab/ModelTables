@@ -35,10 +35,10 @@ import numpy as np
 from tqdm import tqdm
 from enum import Enum
 from collections import defaultdict, Counter
-from typing import Dict, Iterable, Set
+from typing import Dict, Iterable, Set, List, Tuple
 from joblib import Parallel, delayed
 from itertools import combinations, product
-from scipy.sparse import csr_matrix, dok_matrix, save_npz, coo_matrix
+from scipy.sparse import csr_matrix, dok_matrix, save_npz, coo_matrix, vstack
 import scipy.sparse as sp
 
 # === Configuration ===
@@ -175,6 +175,63 @@ def build_csv_matrix(model_adj: csr_matrix, model_index: list, modelId_to_csvs: 
     csv_adj.eliminate_zeros()
     return csv_adj
 
+
+def build_csv_matrix_from_blocks(
+    block_files: List[str],
+    model_index: List[str],
+    model_to_csvs: Dict[str, List[str]],
+) -> Tuple[csr_matrix, List[str]]:
+    """Convert streamed MODEL pairs into CSV adjacency."""
+    # 1) global CSV index
+    all_csv = {c for lst in model_to_csvs.values() for c in lst}
+    csv_index = sorted(all_csv)
+    pos_csv = {c: i for i, c in enumerate(csv_index)}
+
+    # 2) pre‑compute model → csv‑pos list
+    model_csv_pos = [
+        [pos_csv[c] for c in model_to_csvs.get(mid, []) if c in pos_csv]
+        for mid in model_index
+    ]
+
+    rows_c, cols_c = [], []
+
+    # 2a) inter‑model edges
+    for r_models, c_models in iter_block_files(block_files):
+        # guard against indices larger than model_csv_pos length
+        max_valid = len(model_csv_pos) - 1
+        mask = (r_models <= max_valid) & (c_models <= max_valid)
+        if not np.any(mask):
+            continue
+        r_models = r_models[mask]
+        c_models = c_models[mask]
+
+        for u, v in zip(r_models, c_models):
+            pos_u, pos_v = model_csv_pos[u], model_csv_pos[v]
+            if not pos_u or not pos_v:
+                continue
+            for i in pos_u:
+                for j in pos_v:
+                    if i != j:
+                        rows_c.append(i); cols_c.append(j)
+
+    # 2b) intra‑model fully connected (excl self)            
+    for pos_list in model_csv_pos:
+        if len(pos_list) > 1:
+            for i in pos_list:
+                for j in pos_list:
+                    if i != j:
+                        rows_c.append(i); cols_c.append(j)
+
+    if not rows_c:
+        return csr_matrix((len(csv_index), len(csv_index)), dtype=bool), csv_index
+
+    data = np.ones(len(rows_c), dtype=bool)
+    adj = coo_matrix((data, (rows_c, cols_c)), shape=(len(csv_index), len(csv_index))).tocsr()
+    adj.setdiag(False)
+    adj.eliminate_zeros()
+    return adj, csv_index
+
+
 def map_csv_adj_to_real(csv_adj: csr_matrix, csv_index: list, symlink_map: Dict[str, str]):
     """
     map 0/1 symlink‑adjacency back to real‑path adjacency
@@ -221,7 +278,42 @@ def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: Re
     paper_adj.setdiag(True)
     return paper_adj.tocsr()
 
-def bool_matmul_csr(X: csr_matrix, Y: csr_matrix) -> csr_matrix:
+def bool_matmul_csr(X: csr_matrix,
+                    Y: csr_matrix,
+                    block_rows: int = 2048) -> csr_matrix:
+    """
+    Memory-safe Boolean sparse matmul (C = X @ Y over OR/AND).
+    • Only keep the product result of the current row-block, and extract coordinates immediately.
+    • Build the sparse matrix with COO at the end to avoid high memory usage.
+    """
+    # --- empty quick-return --------------------------------------- ########
+    if X.nnz == 0 or Y.nnz == 0:
+        return csr_matrix((X.shape[0], Y.shape[1]), dtype=bool)
+
+    X_int = X.astype(np.int8, copy=False)                           ########
+    Y_int = Y.astype(np.int8, copy=False)                           ########
+
+    m, p = X.shape[0], Y.shape[1]                                   ########
+    row_acc, col_acc = [], []                                        ########
+
+    for i0 in range(0, m, block_rows):                         ########
+        i1 = min(i0 + block_rows, m)                                ########
+        blk = (X_int[i0:i1] @ Y_int)                                ########
+        r, c = blk.nonzero()                                        ########
+        if r.size:                                                  ########
+            row_acc.append(r + i0)                                  ########
+            col_acc.append(c)                                       ########
+        del blk                                                     ########
+
+    if not row_acc:                                                 ########
+        return csr_matrix((m, p), dtype=bool)                       ########
+
+    rows = np.concatenate(row_acc)                                  ########
+    cols = np.concatenate(col_acc)                                  ########
+    data = np.ones_like(rows, dtype=bool)                           ########
+    return coo_matrix((data, (rows, cols)), shape=(m, p)).tocsr()   ########
+
+'''def bool_matmul_csr(X: csr_matrix, Y: csr_matrix) -> csr_matrix:
     """
     Boolean sparse matrix multiplication: C = X @ Y over Boolean semiring.
     X: (m×n) csr, Y: (n×p) csr
@@ -247,7 +339,7 @@ def bool_matmul_csr(X: csr_matrix, Y: csr_matrix) -> csr_matrix:
             rows.append(i)
             cols.append(j)
     data = np.ones(len(rows), dtype=bool)
-    return csr_matrix((data, (rows, cols)), shape=(m, p), dtype=bool)
+    return csr_matrix((data, (rows, cols)), shape=(m, p), dtype=bool)'''
 
 """def naive_subset_adj(B: csr_matrix, A: csr_matrix):
     B_T = B.transpose().tocsr()
@@ -255,41 +347,84 @@ def bool_matmul_csr(X: csr_matrix, Y: csr_matrix) -> csr_matrix:
     C.setdiag(True)
     return C"""
 
-# corrected block partition over models axis
-def compute_subset_adj(B: csr_matrix, A: csr_matrix):
-    # 1) Compute C = B.T @ A
-    C = bool_matmul_csr(B.transpose().tocsr(), A)
-    del A
-    print('shape of C: ', C.shape)
-    # 2) Compute adj = C @ B
-    adj = bool_matmul_csr(C, B)
-    # 3) set diagonal True
-    adj.setdiag(True)
-    return adj
+def build_model_matrix(comb_mat: csr_matrix,
+                       paper_adj: csr_matrix,
+                       block_size: int = 1000,
+                       tmp_dir: str = "tmp_blocks"):
+    """
+    Build model-level adjacency via double-streaming blocks:
+      1) Filter comb_mat (papers×models) rows and align paper_adj.
+      2) Determine participating model indices (idx_C) using fast dot.
+      3) For each block of idx_C:
+         a) X_block = comb_sub.T[idx_block, :]
+         b) C_block = bool_matmul_csr(X_block, pa_sub)
+         c) sub_adj = bool_matmul_csr(C_block, comb_sub)
+         d) Extract (r,c) coords, map to global, save block .npz
+      4) Load all .npz, concatenate coords, assemble final adjacency matrix.
+    """
+    os.makedirs(tmp_dir, exist_ok=True)                         ########
 
-def build_model_matrix(comb_mat: csr_matrix, paper_adj: csr_matrix):   
-    """
-    Return a model-level Boolean adjacency (M × M) using either:
-      • GraphBLAS Boolean semiring  —— memory-safe & fast
-      • Fallback blocked SciPy path —— if GraphBLAS unavailable
-    """
-    print('shape of comb_mat: ', comb_mat.shape)
-    print('shape of paper_adj: ', paper_adj.shape)
-    # remove cols with all zeros
-    row_nz = np.array(comb_mat.sum(axis=1)).ravel() > 0
-    comb_mat = comb_mat[row_nz, :]
-    comb_mat = comb_mat.astype(np.bool_)
-    # remove rows with all zeros
-    col_nz = np.array(paper_adj.sum(axis=0)).ravel() > 0
-    paper_adj = paper_adj[:, col_nz]
-    paper_adj = paper_adj.astype(np.bool_)
-    print('after filtering, shape of comb_mat: ', comb_mat.shape)
-    print('after filtering, shape of paper_adj: ', paper_adj.shape)
-    model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))    
-    #model_adj = naive_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))
-    model_adj.setdiag(True)
-    model_adj.eliminate_zeros()
+    # 1) Filter comb_mat rows & align paper_adj                    ########
+    paper_rows = np.array(comb_mat.sum(axis=1)).ravel() > 0     ########
+    comb_sub = comb_mat[paper_rows, :].astype(bool)            ########
+    adj_sub = paper_adj[paper_rows, :]                         ########
+
+    # Filter adj_sub columns with any citation                     ########
+    cols_sel = np.array(adj_sub.sum(axis=0)).ravel() > 0       ########
+    pa_sub = adj_sub[:, cols_sel].astype(bool)                 ########
+
+    M_models = comb_sub.shape[1]                               ########
+    orig_model_idx = np.arange(M_models)                       ########
+
+    # 2) Determine participating models                           ########
+    mask = np.array(pa_sub.sum(axis=1)).ravel() > 0            ########
+    counts = comb_sub.T.dot(mask.astype(np.int8))             ########
+    idx_C = np.flatnonzero(counts)                             ########
+
+    # 3) Block-wise compute adjacency                              ########
+    for start in tqdm(range(0, len(idx_C), block_size), desc="streaming bool matmul"):             ########
+        end = min(start + block_size, len(idx_C))              ########
+        idx_block = idx_C[start:end]                           ########
+        # a) extract block of models→papers                        ########
+        X_block = comb_sub.transpose().tocsr()[idx_block, :]   ########
+        # b) compute model_block→paper_block                       ########
+        C_block = bool_matmul_csr(X_block, pa_sub)             ########
+        # c) compute model_block→model_all                         ########
+        sub_adj = bool_matmul_csr(C_block, comb_sub)           ########
+        # d) extract non-zero coords and map to global indices     ########
+        r, c = sub_adj.nonzero()                              ########
+        rows_glob = orig_model_idx[idx_block[r]]              ########
+        cols_glob = orig_model_idx[c]                         ########
+        # save coords per block                                   ########
+        np.savez(os.path.join(tmp_dir, f"block_{start}.npz"), rows=rows_glob, cols=cols_glob)########
+        # free block memory                                       ########
+        del X_block, C_block, sub_adj
+
+    # 4) Load all blocks, concatenate coords                      ########
+    row_list, col_list = [], []                                ########
+    for fname in sorted(os.listdir(tmp_dir)):                  ########
+        if fname.startswith("block_") and fname.endswith(".npz"):########
+            data = np.load(os.path.join(tmp_dir, fname))      ########
+            row_list.append(data['rows'])                     ########
+            col_list.append(data['cols'])                     ########
+    if not row_list:                                           ########
+        return csr_matrix((M_models, M_models), dtype=bool)   ########
+    rows = np.concatenate(row_list)                            ########
+    cols = np.concatenate(col_list)                            ########
+
+    # assemble final adjacency                                   ########
+    model_adj = coo_matrix((np.ones_like(rows, dtype=bool),   ########
+                            (rows, cols)),                    ########
+                           shape=(M_models, M_models)).tocsr()########
+    model_adj.setdiag(True)                                     ########
+    model_adj.eliminate_zeros()                                 ########
     return model_adj
+
+def iter_block_files(block_files):                                ########
+    """Yield (rows, cols) numpy arrays from each .npz block."""     ########
+    for path in block_files:                                       ########
+        data = np.load(path)                                       ########
+        yield data['rows'], data['cols']                           ########
 
 def adjacency_to_dict(adj: csr_matrix, index_list: list):
     print("Converting adjacency matrix to ground-truth dictionary ...")
@@ -355,12 +490,15 @@ def compute_subset_pt_tm(FILES):
 def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RATE, tbl_mode: TableSourceMode = TableSourceMode.STEP4_SYMLINK, use_symlink = True):
     suffix = f"__{rel_mode.value}"
     """High‑level orchestration for building GT tables."""
+
+    
     # ========== Step 1: Load paper-level info ==========
     paper_index, score_matrix = load_relationships(rel_mode)
     print(f"Step1: [Paper-level] Index shape: {len(paper_index)}. Score matrix shape: {score_matrix.shape}")
     # ========== Step 2: Build paper-level adjacency matrix ==========
     paper_paper_adj = build_paper_matrix(score_matrix, paper_index, rel_mode)
-    # save paper_index
+    with open(f"{GT_TMP_DIR}/paper_paper_adj_{suffix}.pkl", "wb") as f:
+        pickle.dump(paper_paper_adj, f)
     with open(f"{GT_TMP_DIR}/paper_index_{suffix}.pkl", "wb") as f:
         pickle.dump(paper_index, f)
     del score_matrix, paper_index
@@ -377,14 +515,16 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     cols = comb_mat.nonzero()[1]
     model_index = sorted({model_list[j] for j in cols})
     print('len(model_index): ', len(model_index))
-    model_model_adj = build_model_matrix(comb_mat, paper_paper_adj)
-    # save paper_paper_adj to data/gt_pkl/paper_paper_adj.pkl
-    with open(f"{GT_TMP_DIR}/paper_paper_adj_{suffix}.pkl", "wb") as f:
-        pickle.dump(paper_paper_adj, f)
+    """model_model_adj = build_model_matrix(comb_mat, paper_paper_adj)
+    with open(f"{GT_TMP_DIR}/model_model_adj_{suffix}.pkl", "wb") as f:
+        pickle.dump(model_model_adj, f)
     del paper_paper_adj
     print(f"Time taken to build model-level adjacency matrix: {time.time() - time_start:.2f} seconds")
-    print(f"[Model-level] Adjacency shape: {model_model_adj.shape}")
+    print(f"[Model-level] Adjacency shape: {model_model_adj.shape}")"""
 
+
+    tmp_dir = "tmp_blocks"
+    block_files = [os.path.join(tmp_dir, f) for f in sorted(os.listdir(tmp_dir)) if f.startswith("block_") and f.endswith(".npz")]
     # ---------- Step 4.5: modelId → csv mapping ----------
     df_tables = load_table_source(TableSourceMode.STEP4_SYMLINK) # fixed here! tbl_mode
     modelId_to_csvs_sym = {mid: extract_csv_list(row, use_symlink=True) for mid, row in df_tables.iterrows()}
@@ -394,7 +534,8 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     del df_tables
     # ---------- Step 5: Build CSV‑level adjacency ----------
     csv_index = sorted({c for mid in model_index for c in modelId_to_csvs_real.get(mid, [])})
-    csv_csv_adj = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs_real, csv_index)
+    #csv_csv_adj = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs_real, csv_index)
+    csv_csv_adj = build_csv_matrix_from_blocks(block_files, model_index, modelId_to_csvs_real)
     # save csv_index
     with open(f"{GT_TMP_DIR}/csv_index_{suffix}.pkl", "wb") as f:
         pickle.dump(csv_index, f)
@@ -406,10 +547,10 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     print(f"[CSV‑level] Adjacency shape: {csv_csv_adj.shape}")
      # ---------- Step 5a: symlink‑level (0/1, no self-loop) ----------
     csv_symlink_index = sorted({c for mid in model_index for c in modelId_to_csvs_sym.get(mid, [])})
-    csv_symlink_adj = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs_sym, csv_symlink_index)
+    #csv_symlink_adj = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs_sym, csv_symlink_index)
+    csv_symlink_adj = build_csv_matrix_from_blocks(block_files, model_index, modelId_to_csvs_sym)
     # save model_model_adj, model_index
-    with open(f"{GT_TMP_DIR}/model_model_adj_{suffix}.pkl", "wb") as f:
-        pickle.dump(model_model_adj, f)
+    
     with open(f"{GT_TMP_DIR}/model_index_{suffix}.pkl", "wb") as f:
         pickle.dump(model_index, f)
     del model_model_adj, model_index
