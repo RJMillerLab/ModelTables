@@ -227,55 +227,90 @@ def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: Re
     adj.setdiag(True)
     return adj
 '''
+
+def compute_subset_adj_bit(B: csr_matrix, A: csr_matrix):
+    """
+    Boolean semiring multiplication via bit-packing:
+      C = B.T @ A
+      adj = C @ B
+    but implemented with packbits + bitwise_and + any over bits,
+    two for-loops (with tqdm) over models.
+    """
+    import numpy as np
+    from scipy.sparse import csr_matrix
+    from tqdm import tqdm
+
+    P, M = B.shape  # B: P papers × M models
+
+    # 1) Pack B columns (each model → P-bit vector)
+    B_arr = B.toarray().astype(np.bool_)         # P × M
+    B_packed = np.packbits(B_arr, axis=0)        # (P/8) × M
+
+    # 2) Pack A columns (each target paper column → P-bit vector)
+    A_arr = A.toarray().astype(np.bool_)         # P × P
+    A_packed = np.packbits(A_arr, axis=0)        # (P/8) × P
+
+    # 3) Compute C = B.T @ A via bitwise
+    C_arr = np.zeros((M, P), dtype=bool)         # to fill with boolean results
+    nbytes = B_packed.shape[0]
+    for i in tqdm(range(M), desc="Compute C = B.T @ A"):
+        col_bits = B_packed[:, i:i+1]            # (nbytes × 1)
+        common = np.bitwise_and(col_bits, A_packed)  # (nbytes × P)
+        bits = np.unpackbits(common, axis=0, count=P)  # (P × P) in bits
+        C_arr[i, :] = bits.any(axis=0)           # OR over papers
+
+    # 4) Pack C rows for next multiply
+    C_packed = np.packbits(C_arr.astype(np.uint8), axis=1)  # M × (P/8)
+
+    # 5) Compute adj = C @ B via bitwise
+    adj = np.zeros((M, M), dtype=bool)
+    for i in tqdm(range(M), desc="Compute adj = C @ B"):
+        row_bits = C_packed[i:i+1, :].T           # (nbytes × 1)
+        common = np.bitwise_and(row_bits, B_packed)  # (nbytes × M)
+        bits = np.unpackbits(common, axis=0, count=P) # (P × M)
+        adj[i, :] = bits.any(axis=0)
+
+    # 6) to sparse CSR
+    return csr_matrix(adj)
+
+def bool_matmul_csr(X: csr_matrix, Y: csr_matrix) -> csr_matrix:
+    """
+    Boolean sparse matrix multiplication: C = X @ Y over Boolean semiring.
+    X: (m×n) csr, Y: (n×p) csr
+    For each row i in X, C[i, j] = OR_k (X[i,k] AND Y[k,j]).
+    """
+    m, _ = X.shape
+    _, p = Y.shape
+    rows, cols = [], []
+    # Pre-fetch Y row indices
+    Y_indptr = Y.indptr
+    Y_indices = Y.indices
+    for i in tqdm(range(m), desc="Boolean matmul rows"):
+        row_start, row_end = X.indptr[i], X.indptr[i+1]
+        ks = X.indices[row_start:row_end]
+        if ks.size == 0:
+            continue
+        neigh = set()
+        for k in ks:
+            y_start, y_end = Y_indptr[k], Y_indptr[k+1]
+            neigh.update(Y_indices[y_start:y_end])
+        for j in neigh:
+            rows.append(i)
+            cols.append(j)
+    data = np.ones(len(rows), dtype=bool)
+    return csr_matrix((data, (rows, cols)), shape=(m, p), dtype=bool)
 # corrected block partition over models axis
-'''def compute_subset_adj(B: csr_matrix, A: csr_matrix, mem_budget: int = 150 * 1024**2):
-    used_papers = np.unique(B.nonzero()[0])
-    used_models = np.unique(B.nonzero()[1])
-    P_sub, M_sub = len(used_papers), len(used_models)
+def compute_subset_adj(B: csr_matrix, A: csr_matrix):
+    # 1) Compute C = B.T @ A
+    C = bool_matmul_csr(B.transpose().tocsr(), A)
+    print('shape of C: ', C.shape)
+    # 2) Compute adj = C @ B
+    adj = bool_matmul_csr(C, B)
+    # 3) set diagonal True
+    adj.setdiag(True)
+    return adj
 
-    B_sub_csr = B[used_papers, :][:, used_models].tocsr()
-    B_sub_csc = B_sub_csr.tocsc()
-    A_sub      = A[used_papers, :][:, used_papers].tocsr()
-
-    # estimate scratch per model = P_sub * bool_size(1 byte)
-    scratch_per_model = P_sub
-    block = max(1, mem_budget // scratch_per_model)
-    block = min(block, M_sub)
-
-    rows_acc, cols_acc = [], []
-    for s in tqdm(range(0, M_sub, block), desc="Computing subset adjacency"):
-        e = min(s + block, M_sub)
-        # slice models columns [s:e]
-        # B_sub_csc[:, s:e] is P_sub x block
-        # .T -> block x P_sub
-        Cblk = (B_sub_csr[:, s:e].T @ A_sub).astype(bool)   # (block x P_sub)
-        Pblk = (Cblk @ B_sub_csr).astype(bool)              # (block x M_sub)
-        if Pblk.nnz:
-            r, c = Pblk.nonzero()
-            rows_acc.append(r + s)
-            cols_acc.append(c)
-
-    if rows_acc:
-        all_rows = np.concatenate(rows_acc)
-        all_cols = np.concatenate(cols_acc)
-        data_sub = np.ones(len(all_rows), dtype=bool)
-        sub = coo_matrix((data_sub, (all_rows, all_cols)),
-                         shape=(M_sub, M_sub)).tocsr()
-    else:
-        sub = csr_matrix((M_sub, M_sub), dtype=bool)
-
-    sub.setdiag(True)
-    r2, c2 = sub.nonzero()
-    full_r = used_models[r2]
-    full_c = used_models[c2]
-    data_big = np.ones(len(full_r), dtype=bool)
-    big = coo_matrix((data_big, (full_r, full_c)),
-                     shape=(B.shape[1], B.shape[1])).tocsr()
-    big.setdiag(True)
-    big.eliminate_zeros()
-    return big'''
-
-'''def build_model_matrix(comb_mat: csr_matrix, paper_adj: csr_matrix):   
+def build_model_matrix(comb_mat: csr_matrix, paper_adj: csr_matrix):   
     """
     Return a model-level Boolean adjacency (M × M) using either:
       • GraphBLAS Boolean semiring  —— memory-safe & fast
@@ -283,19 +318,27 @@ def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: Re
     """
     print('shape of comb_mat: ', comb_mat.shape)
     print('shape of paper_adj: ', paper_adj.shape)
-    B_gb = gb.Matrix.from_scipy_sparse(comb_mat)                  
+    # remove cols with all zeros
+    row_nz = np.array(comb_mat.sum(axis=1)).ravel() > 0
+    comb_mat = comb_mat[row_nz, :]
+    comb_mat = comb_mat.astype(np.bool_)
+    # remove rows with all zeros
+    col_nz = np.array(paper_adj.sum(axis=0)).ravel() > 0
+    paper_adj = paper_adj[:, col_nz]
+    paper_adj = paper_adj.astype(np.bool_)
+    print('after filtering, shape of comb_mat: ', comb_mat.shape)
+    print('after filtering, shape of paper_adj: ', paper_adj.shape)
+    """B_gb = gb.Matrix.from_scipy_sparse(comb_mat)
     A_gb = gb.Matrix.from_scipy_sparse(paper_adj)                 
-    # Boolean semiring: multiplication = logical AND, addition = logical OR
     M_gb = (B_gb.T @ A_gb) @ B_gb                                  
-    model_adj = M_gb.to_scipy_sparse().astype(np.bool_)            
-    #else:                                                              
-    # Fallback to memory-aware blocked multiply (unchanged code)   
-    #model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))         
+    model_adj = M_gb.to_scipy_sparse().astype(np.bool_)            """
+    model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))    
+    #model_adj = compute_subset_adj_bit(comb_mat.astype(bool), paper_adj.astype(bool))
     model_adj.setdiag(True)
     model_adj.eliminate_zeros()
-    return model_adj'''
+    return model_adj
 
-def build_model_matrix(comb_mat, paper_adj):
+'''def build_model_matrix(comb_mat, paper_adj):
     """Edge‑scan implementation (memory‑light)."""
     paper2models = [set(comb_mat.getrow(i).indices) for i in range(comb_mat.shape[0])]
     links = defaultdict(set)
@@ -330,7 +373,7 @@ def build_model_matrix(comb_mat, paper_adj):
     adj = sp.csr_matrix((data, (r, c)), shape=(n_models, n_models), dtype=bool)
     adj.setdiag(True)
     adj.eliminate_zeros()
-    return adj
+    return adj'''
 
 def adjacency_to_dict(adj: csr_matrix, index_list: list):
     print("Converting adjacency matrix to ground-truth dictionary ...")
@@ -388,11 +431,13 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     """High‑level orchestration for building GT tables."""
     # ========== Step 1: Load paper-level info ==========
     paper_index, score_matrix = load_relationships(rel_mode)
+    print(f"Step1: [Paper-level] Index shape: {len(paper_index)}. Score matrix shape: {score_matrix.shape}")
     n = len(paper_index)
 
     # ========== Step 2: Build paper-level adjacency matrix ==========
     paper_paper_adj = build_paper_matrix(score_matrix, paper_index, rel_mode)
-    print(f"[Paper-level] Adjacency shape: {paper_paper_adj.shape}")
+    print(f"Step2: [Paper-level] Adjacency shape: {paper_paper_adj.shape}")
+    print(paper_paper_adj[0])
 
     # ========== Step 3: Build paperId -> modelIds mapping ==========
     # Load metadata
@@ -403,19 +448,18 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     time_start = time.time()
     tm_mat, titles_list, model_list = build_title_model_matrix(df_titles_exploded)
     pt_mat, paper_list = build_paper_title_matrix(df_metadata, titles_list)
-    print(f"Time taken to build title-model and paper-title matrices: {time.time() - time_start:.2f} seconds")
-
-    time_start = time.time()
+    print(f"pt_mat: {pt_mat.shape}")
+    print(f"tm_mat: {tm_mat.shape}")
     #comb_mat = (pt_mat @ tm_mat).tocsr()
     comb_mat = compute_subset_pt_tm(pt_mat, tm_mat)
     print(f"Time taken to compute subset approach of pt_sub @ tm_sub: {time.time() - time_start:.2f} seconds")
-
+    print(f"comb_mat: {comb_mat.shape}")
+    
     # ========== Step 4: Build model-level adjacency matrix from the paper-level adjacency ==========
     time_start = time.time()
     cols = comb_mat.nonzero()[1]
     model_index = sorted({ model_list[j] for j in cols })
-    print(f"Time taken to build model index: {time.time() - time_start:.2f} seconds")
-    time_start = time.time()
+    print('len(model_index): ', len(model_index))
     model_model_adj = build_model_matrix(comb_mat, paper_paper_adj)
     print(f"Time taken to build model-level adjacency matrix: {time.time() - time_start:.2f} seconds")
     print(f"[Model-level] Adjacency shape: {model_model_adj.shape}")
