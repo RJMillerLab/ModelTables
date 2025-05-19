@@ -39,12 +39,13 @@ from typing import Dict, Iterable, Set
 from joblib import Parallel, delayed
 from itertools import combinations, product
 from scipy.sparse import csr_matrix, dok_matrix, save_npz, coo_matrix
-import suitesparse_graphblas as gb
 import scipy.sparse as sp
 
 # === Configuration ===
 DATA_DIR = "data/processed"
 GT_DIR = "data/gt"
+GT_TMP_DIR = "data/gt_tmp"
+os.makedirs(GT_TMP_DIR, exist_ok=True)
 
 GT_COMBINED_PATH = f"{GT_DIR}/scilake_gt_all_matrices.pkl.gz"
 
@@ -96,11 +97,10 @@ def load_relationships(mode: RelationshipMode):
 
 def load_table_source(mode: TableSourceMode):
     """Factory loader for table‑list metadata."""
-    path = FILES[mode.value]
-    print(f"Loading table source ({mode.value}) from: {path}")
+    print(f"Loading table source ({mode.value}) from: {FILES[mode.value]}")
     # load valid_title, and merge by modelId
     df_valid_title = pd.read_parquet(FILES["valid_title"], columns=["modelId", "all_title_list_valid", "has_title", "has_valid_title"])
-    df = pd.read_parquet(path)
+    df = pd.read_parquet(FILES[mode.value], columns=["modelId", "hugging_table_list_sym", "github_table_list_sym", "html_table_list_sym", "llm_table_list_sym", "hugging_table_list_dedup", "github_table_list_dedup", "html_table_list_mapped_dedup", "llm_table_list_mapped_dedup"])
     df_tables = pd.merge(df, df_valid_title, how="left", on="modelId")
     return df_tables.set_index("modelId", drop=False)
 
@@ -173,7 +173,7 @@ def build_csv_matrix(model_adj: csr_matrix, model_index: list, modelId_to_csvs: 
     csv_adj = (M2C.astype(bool).T @ (model_adj.astype(bool) @ M2C.astype(bool))).astype(bool)
     csv_adj.setdiag(False)
     csv_adj.eliminate_zeros()
-    return csv_adj, csv_index
+    return csv_adj
 
 def map_csv_adj_to_real(csv_adj: csr_matrix, csv_index: list, symlink_map: Dict[str, str]):
     """
@@ -221,64 +221,13 @@ def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: Re
     paper_adj.setdiag(True)
     return paper_adj.tocsr()
 
-'''def naive_model_adj(B: csr_matrix, A: csr_matrix):
-    C = (B.T @ A).astype(bool)
-    adj = (C @ B).astype(bool).tocsr()
-    adj.setdiag(True)
-    return adj
-'''
-
-def compute_subset_adj_bit(B: csr_matrix, A: csr_matrix):
-    """
-    Boolean semiring multiplication via bit-packing:
-      C = B.T @ A
-      adj = C @ B
-    but implemented with packbits + bitwise_and + any over bits,
-    two for-loops (with tqdm) over models.
-    """
-    import numpy as np
-    from scipy.sparse import csr_matrix
-    from tqdm import tqdm
-
-    P, M = B.shape  # B: P papers × M models
-
-    # 1) Pack B columns (each model → P-bit vector)
-    B_arr = B.toarray().astype(np.bool_)         # P × M
-    B_packed = np.packbits(B_arr, axis=0)        # (P/8) × M
-
-    # 2) Pack A columns (each target paper column → P-bit vector)
-    A_arr = A.toarray().astype(np.bool_)         # P × P
-    A_packed = np.packbits(A_arr, axis=0)        # (P/8) × P
-
-    # 3) Compute C = B.T @ A via bitwise
-    C_arr = np.zeros((M, P), dtype=bool)         # to fill with boolean results
-    nbytes = B_packed.shape[0]
-    for i in tqdm(range(M), desc="Compute C = B.T @ A"):
-        col_bits = B_packed[:, i:i+1]            # (nbytes × 1)
-        common = np.bitwise_and(col_bits, A_packed)  # (nbytes × P)
-        bits = np.unpackbits(common, axis=0, count=P)  # (P × P) in bits
-        C_arr[i, :] = bits.any(axis=0)           # OR over papers
-
-    # 4) Pack C rows for next multiply
-    C_packed = np.packbits(C_arr.astype(np.uint8), axis=1)  # M × (P/8)
-
-    # 5) Compute adj = C @ B via bitwise
-    adj = np.zeros((M, M), dtype=bool)
-    for i in tqdm(range(M), desc="Compute adj = C @ B"):
-        row_bits = C_packed[i:i+1, :].T           # (nbytes × 1)
-        common = np.bitwise_and(row_bits, B_packed)  # (nbytes × M)
-        bits = np.unpackbits(common, axis=0, count=P) # (P × M)
-        adj[i, :] = bits.any(axis=0)
-
-    # 6) to sparse CSR
-    return csr_matrix(adj)
-
 def bool_matmul_csr(X: csr_matrix, Y: csr_matrix) -> csr_matrix:
     """
     Boolean sparse matrix multiplication: C = X @ Y over Boolean semiring.
     X: (m×n) csr, Y: (n×p) csr
     For each row i in X, C[i, j] = OR_k (X[i,k] AND Y[k,j]).
     """
+    print(f"[DEBUG] Boolean matmul called: X.shape={X.shape}, Y.shape={Y.shape}")
     m, _ = X.shape
     _, p = Y.shape
     rows, cols = [], []
@@ -299,10 +248,18 @@ def bool_matmul_csr(X: csr_matrix, Y: csr_matrix) -> csr_matrix:
             cols.append(j)
     data = np.ones(len(rows), dtype=bool)
     return csr_matrix((data, (rows, cols)), shape=(m, p), dtype=bool)
+
+"""def naive_subset_adj(B: csr_matrix, A: csr_matrix):
+    B_T = B.transpose().tocsr()
+    C = (B_T @ A) @ B
+    C.setdiag(True)
+    return C"""
+
 # corrected block partition over models axis
 def compute_subset_adj(B: csr_matrix, A: csr_matrix):
     # 1) Compute C = B.T @ A
     C = bool_matmul_csr(B.transpose().tocsr(), A)
+    del A
     print('shape of C: ', C.shape)
     # 2) Compute adj = C @ B
     adj = bool_matmul_csr(C, B)
@@ -328,52 +285,11 @@ def build_model_matrix(comb_mat: csr_matrix, paper_adj: csr_matrix):
     paper_adj = paper_adj.astype(np.bool_)
     print('after filtering, shape of comb_mat: ', comb_mat.shape)
     print('after filtering, shape of paper_adj: ', paper_adj.shape)
-    """B_gb = gb.Matrix.from_scipy_sparse(comb_mat)
-    A_gb = gb.Matrix.from_scipy_sparse(paper_adj)                 
-    M_gb = (B_gb.T @ A_gb) @ B_gb                                  
-    model_adj = M_gb.to_scipy_sparse().astype(np.bool_)            """
     model_adj = compute_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))    
-    #model_adj = compute_subset_adj_bit(comb_mat.astype(bool), paper_adj.astype(bool))
+    #model_adj = naive_subset_adj(comb_mat.astype(bool), paper_adj.astype(bool))
     model_adj.setdiag(True)
     model_adj.eliminate_zeros()
     return model_adj
-
-'''def build_model_matrix(comb_mat, paper_adj):
-    """Edge‑scan implementation (memory‑light)."""
-    paper2models = [set(comb_mat.getrow(i).indices) for i in range(comb_mat.shape[0])]
-    links = defaultdict(set)
-    # 1. cross‑paper edges
-    rows, cols = paper_adj.nonzero()
-    for p1, p2 in tqdm(zip(rows, cols), desc="Building model adjacency between papers"):
-        if p1 > p2:   # include self later
-            for m1 in paper2models[p1]:
-                for m2 in paper2models[p2]:
-                    if m1 == m2:
-                        continue
-                    links[m1].add(m2)
-                    links[m2].add(m1)
-    # 2. within‑paper edges (diagonal of A)
-    for mods in tqdm(paper2models, desc="Building model adjacency within paper"):
-        if len(mods) > 1:
-            ms = list(mods)
-            for i in range(len(ms)):
-                for j in range(i+1, len(ms)):
-                    m1, m2 = ms[i], ms[j]
-                    links[m1].add(m2)
-                    links[m2].add(m1)
-    n_models = comb_mat.shape[1]
-    if not links:
-        adj = sp.identity(n_models, dtype=bool, format='csr')
-        return adj
-    r, c = [], []
-    for m1, nbrs in tqdm(links.items(), desc="Building model adjacency between models"):
-        for m2 in nbrs:
-            r.append(m1); c.append(m2)
-    data = np.ones(len(r), dtype=bool)
-    adj = sp.csr_matrix((data, (r, c)), shape=(n_models, n_models), dtype=bool)
-    adj.setdiag(True)
-    adj.eliminate_zeros()
-    return adj'''
 
 def adjacency_to_dict(adj: csr_matrix, index_list: list):
     print("Converting adjacency matrix to ground-truth dictionary ...")
@@ -414,10 +330,19 @@ def build_paper_title_matrix(df_metadata, titles):
     data = np.ones(len(rows), dtype=bool)
     return csr_matrix((data, (rows, cols)), shape=(len(paperIds), len(titles))), paperIds.tolist()
 
-def compute_subset_pt_tm(pt_mat, tm_mat):
+def compute_subset_pt_tm(FILES):
     """
     Subset titles to only used ones, compute comb_sub full p x m.
     """
+    df_metadata = pd.read_parquet(FILES["integration"], columns=["corpusid", "query"])
+    df_titles = pd.read_parquet(FILES["title_list"], columns=["modelId", "all_title_list"])
+    df_titles_exploded = df_titles.explode("all_title_list")
+    tm_mat, titles_list, model_list = build_title_model_matrix(df_titles_exploded)
+    pt_mat, paper_list = build_paper_title_matrix(df_metadata, titles_list)
+    print(f"pt_mat: {pt_mat.shape}")
+    print(f"tm_mat: {tm_mat.shape}")
+
+    #comb_mat = (pt_mat @ tm_mat).tocsr()
     used_pt = set(pt_mat.nonzero()[1])
     used_tm = set(tm_mat.nonzero()[0])
     used = sorted(used_pt.union(used_tm))
@@ -425,42 +350,38 @@ def compute_subset_pt_tm(pt_mat, tm_mat):
     pt_sub = pt_mat[:, used]      # p x k
     tm_sub = tm_mat[used, :]      # k x m
     comb_sub = (pt_sub @ tm_sub).astype(bool).tocsr()  # p x m
-    return comb_sub
+    return comb_sub, titles_list, model_list, paper_list
 
 def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RATE, tbl_mode: TableSourceMode = TableSourceMode.STEP4_SYMLINK, use_symlink = True):
+    suffix = f"__{rel_mode.value}"
     """High‑level orchestration for building GT tables."""
     # ========== Step 1: Load paper-level info ==========
     paper_index, score_matrix = load_relationships(rel_mode)
     print(f"Step1: [Paper-level] Index shape: {len(paper_index)}. Score matrix shape: {score_matrix.shape}")
-    n = len(paper_index)
-
     # ========== Step 2: Build paper-level adjacency matrix ==========
     paper_paper_adj = build_paper_matrix(score_matrix, paper_index, rel_mode)
+    # save paper_index
+    with open(f"{GT_TMP_DIR}/paper_index_{suffix}.pkl", "wb") as f:
+        pickle.dump(paper_index, f)
+    del score_matrix, paper_index
+
     print(f"Step2: [Paper-level] Adjacency shape: {paper_paper_adj.shape}")
     print(paper_paper_adj[0])
-
     # ========== Step 3: Build paperId -> modelIds mapping ==========
     # Load metadata
-    df_metadata = pd.read_parquet(FILES["integration"], columns=["corpusid", "query"])
-    df_titles = pd.read_parquet(FILES["title_list"], columns=["modelId", "all_title_list"])
-    df_titles_exploded = df_titles.explode("all_title_list")
+    comb_mat, titles_list, model_list, paper_list = compute_subset_pt_tm(FILES)
+    print(f"comb_mat: {comb_mat.shape}")
+    # ========== Step 4: Build model-level adjacency matrix from the paper-level adjacency ==========
 
     time_start = time.time()
-    tm_mat, titles_list, model_list = build_title_model_matrix(df_titles_exploded)
-    pt_mat, paper_list = build_paper_title_matrix(df_metadata, titles_list)
-    print(f"pt_mat: {pt_mat.shape}")
-    print(f"tm_mat: {tm_mat.shape}")
-    #comb_mat = (pt_mat @ tm_mat).tocsr()
-    comb_mat = compute_subset_pt_tm(pt_mat, tm_mat)
-    print(f"Time taken to compute subset approach of pt_sub @ tm_sub: {time.time() - time_start:.2f} seconds")
-    print(f"comb_mat: {comb_mat.shape}")
-    
-    # ========== Step 4: Build model-level adjacency matrix from the paper-level adjacency ==========
-    time_start = time.time()
     cols = comb_mat.nonzero()[1]
-    model_index = sorted({ model_list[j] for j in cols })
+    model_index = sorted({model_list[j] for j in cols})
     print('len(model_index): ', len(model_index))
     model_model_adj = build_model_matrix(comb_mat, paper_paper_adj)
+    # save paper_paper_adj to data/gt_pkl/paper_paper_adj.pkl
+    with open(f"{GT_TMP_DIR}/paper_paper_adj_{suffix}.pkl", "wb") as f:
+        pickle.dump(paper_paper_adj, f)
+    del paper_paper_adj
     print(f"Time taken to build model-level adjacency matrix: {time.time() - time_start:.2f} seconds")
     print(f"[Model-level] Adjacency shape: {model_model_adj.shape}")
 
@@ -468,32 +389,49 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
     df_tables = load_table_source(TableSourceMode.STEP4_SYMLINK) # fixed here! tbl_mode
     modelId_to_csvs_sym = {mid: extract_csv_list(row, use_symlink=True) for mid, row in df_tables.iterrows()}
     modelId_to_csvs_real = {mid: extract_csv_list(row, use_symlink=False) for mid, row in df_tables.iterrows()}
+    print('shape of modelId_to_csvs_sym: ', len(modelId_to_csvs_sym))
+    print('shape of modelId_to_csvs_real: ', len(modelId_to_csvs_real))
+    del df_tables
     # ---------- Step 5: Build CSV‑level adjacency ----------
-    all_csvs_real = {c for mid in model_index for c in modelId_to_csvs_real.get(mid, [])}
-    csv_index = sorted(all_csvs_real)
-    csv_csv_adj, csv_index = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs_real, csv_index)
+    csv_index = sorted({c for mid in model_index for c in modelId_to_csvs_real.get(mid, [])})
+    csv_csv_adj = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs_real, csv_index)
+    # save csv_index
+    with open(f"{GT_TMP_DIR}/csv_index_{suffix}.pkl", "wb") as f:
+        pickle.dump(csv_index, f)
+    del csv_index
+    # save csv_csv_adj
+    with open(f"{GT_TMP_DIR}/csv_csv_adj_{suffix}.pkl", "wb") as f:
+        pickle.dump(csv_csv_adj, f)
+    del csv_csv_adj
     print(f"[CSV‑level] Adjacency shape: {csv_csv_adj.shape}")
      # ---------- Step 5a: symlink‑level (0/1, no self-loop) ----------
-    all_csvs_sym = {c for mid in model_index for c in modelId_to_csvs_sym.get(mid, [])}
-    csv_symlink_index = sorted(all_csvs_sym)
-    csv_symlink_adj, csv_symlink_index = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs_sym, csv_symlink_index)
+    csv_symlink_index = sorted({c for mid in model_index for c in modelId_to_csvs_sym.get(mid, [])})
+    csv_symlink_adj = build_csv_matrix(model_model_adj, model_index, modelId_to_csvs_sym, csv_symlink_index)
+    # save model_model_adj, model_index
+    with open(f"{GT_TMP_DIR}/model_model_adj_{suffix}.pkl", "wb") as f:
+        pickle.dump(model_model_adj, f)
+    with open(f"{GT_TMP_DIR}/model_index_{suffix}.pkl", "wb") as f:
+        pickle.dump(model_index, f)
+    del model_model_adj, model_index
     print(f"[CSV‑symlink] shape: {csv_symlink_adj.shape}")
-
     # ---------- Step 5b: real‑path level (count, no self-loop) ----------
     symlink_map = load_symlink_mapping()
     csv_real_adj, csv_real_index = map_csv_adj_to_real(csv_symlink_adj, csv_symlink_index, symlink_map)
+    # save csv_symlink_adj, csv_symlink_index
+    with open(f"{GT_TMP_DIR}/csv_symlink_adj_{suffix}.pkl", "wb") as f:
+        pickle.dump(csv_symlink_adj, f)
+    with open(f"{GT_TMP_DIR}/csv_symlink_index_{suffix}.pkl", "wb") as f:
+        pickle.dump(csv_symlink_index, f)
+    del csv_symlink_adj, csv_symlink_index
     print(f"[CSV‑real]    shape: {csv_real_adj.shape}")
-
     csv_real_gt = adjacency_to_dict(csv_real_adj, csv_real_index)
     # only record basename path
-    csv_real_gt = {
-        os.path.basename(k): [os.path.basename(vv) for vv in v]
-        for k, v in csv_real_gt.items()
-    }
-
+    csv_real_gt = {os.path.basename(k): [os.path.basename(vv) for vv in v] for k, v in csv_real_gt.items()}
+    # save csv_real_gt
+    with open(f"{GT_TMP_DIR}/csv_real_gt_{suffix}.pkl", "wb") as f:
+        pickle.dump(csv_real_gt, f)
+    del csv_real_gt
     # ========== Step 5: Save everything to disk ==========
-    suffix = f"__{rel_mode.value}"
-    
     # ---- extra: save real‑path count adjacency (as dict) ----
     count_dict = defaultdict(dict)
     rows, cols = csv_real_adj.nonzero()
@@ -503,7 +441,19 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
         src = os.path.basename(csv_real_index[i])
         tgt = os.path.basename(csv_real_index[j])
         count_dict[src][tgt] = int(csv_real_adj[i, j])
-    combined = {
+    # save csv_real_count
+    with open(f"{GT_TMP_DIR}/csv_real_count_{suffix}.pkl", "wb") as f:
+        pickle.dump(dict(count_dict), f)
+    del count_dict
+    # save csv_real_adj
+    with open(f"{GT_TMP_DIR}/csv_real_adj_{suffix}.pkl", "wb") as f:
+        pickle.dump(csv_real_adj, f)
+    del csv_real_adj
+    # save csv_real_index
+    with open(f"{GT_TMP_DIR}/csv_real_index_{suffix}.pkl", "wb") as f:
+        pickle.dump(csv_real_index, f)
+    del csv_real_index
+    """combined = {
         "paper_adj":       paper_paper_adj,                        
         "paper_index":     paper_index,                            
         "model_adj":       model_model_adj,                        
@@ -518,8 +468,8 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
         "csv_real_count":  dict(count_dict),                       
     }
     with gzip.open(GT_COMBINED_PATH.replace(".pkl.gz", f"{suffix}.pkl.gz"), "wb") as f:
-        pickle.dump(combined, f)                                   
-    print(f"✔️  All matrices & indices saved to {GT_COMBINED_PATH}{suffix}")
+        pickle.dump(combined, f)
+    print(f"✔️  All matrices & indices saved to {GT_COMBINED_PATH}{suffix}")"""                                   
 
     print("✅ Done building matrix-based groundtruth!")
 
