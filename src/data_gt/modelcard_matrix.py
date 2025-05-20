@@ -32,10 +32,10 @@ CARD_TAGS_KEY       = "card_tags"
 CARD_README_KEY     = 'card_readme'
 
 os.makedirs('data/tmp', exist_ok=True)
-
 # ---------- fast regex helpers (no PyYAML) ---------- 
 _DS_INLINE_RE = re.compile(r'^datasets?\s*:\s*\[?([^\[\]\n]+)', re.I)
 _TAG_INLINE_RE = re.compile(r'^tags?\s*:\s*\[?([^\[\]\n]+)', re.I)
+
 
 def _split_csv(txt: str):                                       
     return [t.strip().lower() for t in re.split(r'[,\s]+', txt) if t]
@@ -95,7 +95,7 @@ def build_edges_sql(
     print(f"building edges to {db_path}")
     conn, cur = init_edge_db(db_path)
     groups = df_rel.groupby(tgt_col)[src_col]         
-    commit_every = 500 
+    commit_every = 100 
     for idx, (base, members) in enumerate(tqdm(groups, desc=f"clique")):
         # 只保留 valid 的 model
         members = [m for m in members if m in valid_model_ids]
@@ -198,10 +198,11 @@ def normalize_extracted(link: str):
 
 if __name__ == "__main__":
     # get all valid dataset IDs
-    valid_ds_df       = load_combined_data(data_type="datasetcard", file_path=os.path.expanduser("~/Repo/CitationLake/data/raw/"), columns=["datasetId"])
+    valid_ds_df = load_combined_data(data_type="datasetcard", file_path=os.path.expanduser("~/Repo/CitationLake/data/raw/"), columns=["datasetId"])
     valid_dataset_ids = set(valid_ds_df["datasetId"].str.lower())
     del valid_ds_df
     print(f"Loaded {len(valid_dataset_ids)} valid dataset IDs")
+
     # get df which contains modelId, card_tags, downloads and all_table_list_dedup
     df_full = pd.read_parquet(DATA_PATH, columns=['modelId', CARD_TAGS_KEY, CARD_README_KEY, 'downloads'])
     df_full_2 = pd.read_parquet(DATA_2_PATH, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup', 'all_title_list'])
@@ -210,11 +211,15 @@ if __name__ == "__main__":
     del df_full, df_full_2
     # get all valid model IDs
     valid_model_ids= set(df['modelId'])
+
     # get extracted_base_model from card_tags
-    df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(r'base_model:\s*([^\s]+)', flags=re.IGNORECASE).replace({np.nan: None})
-    df['extracted_base_model'] = df['extracted_base_model'].str.replace(r"[\"'`]", "", regex=True)
-    df['extracted_base_model'] = df['extracted_base_model'].str.replace(r"[\[\]\(\)\{\}]", "", regex=True)
-    df['extracted_base_model'] = df['extracted_base_model'].str.replace('https://huggingface.co/', '')
+    df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(
+        r'base_model:\s*([^\s]+)',
+        flags=re.IGNORECASE,
+        expand=False
+    )
+    cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\(\)\{\}]'
+    df['extracted_base_model'] = (df['extracted_base_model'].str.replace(cleanup_pattern, '', regex=True))
     print(f"Unique extracted_base_model before filtering: {df['extracted_base_model'].nunique()}")
     # build mapping counts and identify invalid
     mapping_counts = df.groupby(['modelId','extracted_base_model']).size().reset_index(name='count')
@@ -271,56 +276,26 @@ if __name__ == "__main__":
     print('-'*100)
     # the model which points to same base_model should link to each other
     df['final_base_model'] = df['extracted_base_model'].map(correction_map).fillna(df['extracted_base_model'])
-    # extract HF links if README exists and print stats
+    # extract HF links from README
     assert CARD_README_KEY in df.columns
-    """df.loc[mask_only, 'hf_modelid'] = df.loc[mask_only, 'hf_repo'].map(
-        lambda repo: models_df[models_df['repo']==repo]
-                        .sort_values('downloads', ascending=False)
-                        ['modelId'].iloc[0]
-    )"""
-    hf_match = df[CARD_README_KEY].str.extract(r'https?://huggingface\.co/([^/\s]+)/([^/\s]+)')
-    df[['hf_user','hf_repo']] = hf_match
+    df[['hf_user','hf_repo']] = df[CARD_README_KEY].str.extract(r'https?://huggingface\.co/([^/\s]+)/([^/\s]+)')
     df['hf_modelid'] = (df['hf_user'].str.lower() + '/' + df['hf_repo'].str.lower())
     df['hf_modelid'] = df['hf_modelid'].map(valid_map).fillna(df['hf_modelid'])
     # because some base_model is only partial, we need to makeup the full modelId
-
-    """
-    hf_match = df[CARD_README_KEY].str.extract(
-        r'https?://huggingface\.co/(?:datasets/)?' +
-        r'(?:(?P<hf_user>[^/\s]+)/(?P<hf_repo>[^/\s]+)' +
-        r'|(?P<hf_repo_only>[^/\s]+))'
-    )
-    print('extracted!')
-    df['hf_user'] = hf_match['hf_user']
-    df['hf_repo'] = hf_match['hf_repo'].fillna(hf_match['hf_repo_only'])
-    mask_only = hf_match['hf_repo_only'].notna()
-    def resolve_repo_only(repo):
-        subset = models_df[models_df['repo'] == repo]
-        if not subset.empty:
-            return subset.sort_values('downloads', ascending=False)['modelId'].iloc[0]  
-        else:
-            return None
-
-    df.loc[mask_only, 'hf_modelid'] = df.loc[mask_only, 'hf_repo'].map(resolve_repo_only)
-
-    mask_full = ~mask_only
-    df.loc[mask_full, 'hf_modelid'] = df.loc[mask_full].apply(
-        lambda r: f"{r['hf_user'].lower()}/{r['hf_repo'].lower()}", axis=1
-    )
-    df['hf_modelid'] = df['hf_modelid'].map(valid_map).fillna(df['hf_modelid'])"""
     num_hf_links = df['hf_modelid'].notna().sum()
     matched_hf = df['hf_modelid'].isin(valid_model_ids).sum()
-    unmatched_hf = num_hf_links - matched_hf
-    print(f"Found HF model links: {num_hf_links}, matched: {matched_hf}, unmatched: {unmatched_hf}")
-    # save HF model link lists
+    print(f"Found HF model links: {num_hf_links}, matched: {matched_hf}, unmatched: {num_hf_links - matched_hf}")
+    # save HF model link lists to check
     all_model_links = df['hf_modelid'].dropna().unique()
     pd.Series(all_model_links).to_csv('data/tmp/all_hf_modelids.txt', index=False, header=False)
-    unmatched_model_links = [m for m in all_model_links if m not in valid_model_ids]
-    pd.Series(unmatched_model_links).to_csv('data/tmp/unmatched_hf_modelids.txt', index=False, header=False)
+    pd.Series([m for m in all_model_links if m not in valid_model_ids]).to_csv('data/tmp/unmatched_hf_modelids.txt', index=False, header=False)
 
-    # ---------- NEW: grab datasets+tags from YAML header ----------
+    ###################
+    # dataset
+    ###################
+    # grab datasets from tags
     df[['datasets_tag_list','card_tag_list']] = (df[CARD_TAGS_KEY].apply(lambda txt: pd.Series(extract_datasets_tags(txt))) )
-    # README hyperlinks → list
+    # grab datasets from README
     df['hf_datasetid_list'] = df[CARD_README_KEY].str.findall(r'https?://huggingface\.co/datasets/([^/\s]+)/([^/\s]+)',  flags=re.I).apply(lambda lst: [f"{org.lower()}/{name.lower()}" for org, name in lst])
     # merge YAML + README
     df['all_dataset_list'] = df.apply(lambda r: list(set( (r['datasets_tag_list'] or []) + (r['hf_datasetid_list'] or []) )), axis=1)
