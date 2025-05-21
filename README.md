@@ -155,7 +155,7 @@ python -m src.data_gt.modelcard_matrix # (add modelcard level citation graph)
 # process
 python -m src.data_gt.gt_keep_basename # keep basename
 python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t
-python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
+# (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 
 python -m src.data_analysis.gt_fig # plot stats
 ```
@@ -186,16 +186,15 @@ python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_fileli
 # (deprecate) (already processed in QC step) bash check_empty.sh # filter out empty files (or low quality files later)
 bash scripts/step1_pretrain.sh # finetune contrastive learning
 bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake items
-bash scripts/step3_search_hnsw.sh # data lake search (retrieve)! notice we move the gt compare to step3_processmetrics, because we need to compare multiple groundtruth
-bash scripts/step3_processmetrics.sh # extract metrics based on searched results
-bash scripts/step4_discovery.sh
+bash scripts/step3_search_hnsw.sh # data lake search (retrieve)
+bash scripts/step3_processmetrics.sh # extract metrics based on gt & result diff | plot fig
+# bash scripts/step4_discovery.sh
 ```
 
 Analysis on results
 ```bash  
 # get top-10 results from step3_search_hnsw
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
-python -m src.data_analysis.starmie_metrics_topk --input ~/Repo/starmie_internal/tmp/metrics_scilake_large_hnsw.json --output data/analysis/metrics_plot.pdf
 # get distribution of groundtruth
 python -m src.data_analysis.gt_distri # get csv with gt list > 1000 # Input: /Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__direct_label.pickle # Output: figures
 python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log # check the related model of csv
