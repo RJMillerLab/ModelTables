@@ -19,12 +19,20 @@ SUFFIXES = {
 }
 
 def add_suffix_to_adj(adj_dict, suf):
+    """
+    Append suffix *before* the file extension, e.g.
+    'table1.csv' + '_s' -> 'table1_s.csv'
+    """
     out = {}
     for k, neigh in adj_dict.items():
-        k2   = f"{k}{suf}"
-        neigh2 = [f"{n}{suf}" for n in neigh]
+        root, ext = os.path.splitext(k)                                ########
+        k2 = f"{root}{suf}{ext}"                                       ########
+        neigh2 = []
+        for n in neigh:
+            r, e = os.path.splitext(n)                                 ########
+            neigh2.append(f"{r}{suf}{e}")                             ########
         out[k2] = neigh2
-    return out
+    return out  
 
 def main():
     ap = argparse.ArgumentParser()
