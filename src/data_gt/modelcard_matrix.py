@@ -112,21 +112,25 @@ def extract_modelids_from_readme(text: str, valid_models: set, repo_map: dict) -
     #for m in HF_Q_MODEL.findall(text):                                    
     #    if "/" in m: ids.add(_clean_token(m.lower())) 
     for m in HF_Q_MODEL.findall(text):                                    
-        tok = _clean_token(m.lower())                                     
+        #tok = _clean_token(m.lower())       
+        tok = _clean_token(m)                              
         if "/" in tok:                                                   
             ids.add(tok)                                                  
-        else:                                                             
+        else:
+            ids.add(tok)
             # bare repo: resolve to highest-download modelId             
             if tok in repo_map:                                          
                 ids.add(repo_map[tok][0])                               
     #for s in HF_Q_SEARCH.findall(text):                                   
     #    ids.add(_clean_token(s.lower()))   
     for s in HF_Q_SEARCH.findall(text):                                   
-        tok = _clean_token(s.lower())                                     
-        if "/" in tok:                                                   
-            ids.add(tok)                                                  
-        else:                                                             
-            if tok in repo_map:                                          
+        #tok = _clean_token(s.lower())
+        tok = _clean_token(s)
+        if "/" in tok:
+            ids.add(tok)
+        else:
+            ids.add(tok)
+            if tok in repo_map:
                 ids.add(repo_map[tok][0])
     # 3) bare org/repo tokens -------------------------------------------
     for org, repo in HF_ID_RE.findall(text):                              
@@ -158,11 +162,16 @@ def extract_datasets_from_tags(tags_text: str, valid_datasets: set) -> list:
     return [d for d in ds if d in valid_datasets]
 
 def extract_basemodels_from_tags(df: pd.DataFrame) -> list:
-    df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(r'base_model:\s*([^\s]+)', flags=re.IGNORECASE, expand=False)
+    #df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(r'base_model:\s*([^\s]+)', flags=re.IGNORECASE, expand=False)
+    df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(r'base_model:\s*([^\s,>\]]+)', flags=re.IGNORECASE, expand=False)
     #cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\(\)\{\}]'
-    cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\{\}]'
-    df['extracted_base_model'] = (df['extracted_base_model'].str.replace(cleanup_pattern, '', regex=True))
+    #cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\{\}]'
+    cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\{\}\)\>]+'
+    #df['extracted_base_model'] = (df['extracted_base_model'].str.replace(cleanup_pattern, '', regex=True))
+    df['extracted_base_model'] = df['extracted_base_model'].str.replace(cleanup_pattern, '', regex=True)
+    #df['extracted_base_model'] = df['extracted_base_model'].apply(lambda x: _clean_token(x) if isinstance(x, str) else x)
     df['extracted_base_model'] = df['extracted_base_model'].apply(lambda x: _clean_token(x) if isinstance(x, str) else x)
+
     print(f"Unique extracted_base_model before filtering: {df['extracted_base_model'].nunique()}")
     # build mapping counts and identify invalid
     mapping_counts = df.groupby(['modelId','extracted_base_model']).size().reset_index(name='count')
@@ -361,57 +370,57 @@ if __name__ == "__main__":
     csv_counts_model = defaultdict(int)                                                         
     for m, neighs in related_model.items():                                                 
         cs_m = model_to_csvs.get(m, [])                                                     
-        for n in neighs:                                                                    ########
-            if m >= n: continue  # 只计一次                                          ########
-            cs_n = model_to_csvs.get(n, [])                                                 ########
-            for a, b in product(cs_m, cs_n):                                                ########
-                if a == b: continue                                                          ########
-                key = tuple(sorted((a, b)))                                                 ########
-                csv_counts_model[key] += 1                                                  ########
+        for n in neighs:
+            if m >= n: continue  # 只计一次                                          
+            cs_n = model_to_csvs.get(n, [])                                                 
+            for a, b in product(cs_m, cs_n):                                                
+                if a == b: continue                                                         
+                key = tuple(sorted((a, b)))                                                
+                csv_counts_model[key] += 1                                                 
     # 保存原始 tuple→count
-    with open('data/gt/scilake_gt_modellink_model_counts.pkl', 'wb') as f:                   ########
-        pickle.dump(dict(csv_counts_model), f)                                              ########
+    with open('data/gt/scilake_gt_modellink_model_counts.pkl', 'wb') as f:                  
+        pickle.dump(dict(csv_counts_model), f)                                             
     # 转成邻接表并存 JSON
-    adj_model = defaultdict(set)                                                             ########
-    for (a, b), cnt in csv_counts_model.items():                                            ########
-        if cnt > 0:                                                                         ########
-            adj_model[a].add(b); adj_model[b].add(a)                                        ########
-    adj_model = {k: sorted(v) for k, v in adj_model.items()}                                ########
+    adj_model = defaultdict(set)                                                            
+    for (a, b), cnt in csv_counts_model.items():                                           
+        if cnt > 0:                                                                        
+            adj_model[a].add(b); adj_model[b].add(a)                                       
+    adj_model = {k: sorted(v) for k, v in adj_model.items()}                               
     import json
-    with open('data/gt/scilake_gt_modellink_model_adj.json', 'w') as f:                      ########
-        json.dump(adj_model, f, indent=2)                                                   ########
-    print(f"✔️  Saved MODEL-BASED CSV adjacency ({len(adj_model):,} keys)")                   ########
+    with open('data/gt/scilake_gt_modellink_model_adj.json', 'w') as f:                      
+        json.dump(adj_model, f, indent=2)                                                  
+    print(f"✔️  Saved MODEL-BASED CSV adjacency ({len(adj_model):,} keys)")                  
 
     ########################################################################
     # 5b ) BUILD CSV-LEVEL GT FROM related_dataset_list (Dataset-based)     ########
     ########################################################################
     # 先构造 dataset 关联 map
-    df_ds = df[df.apply(lambda r: bool(r['tag_dataset_list'] or r['readme_datasetid_list']), axis=1)] ########
-    related_ds = defaultdict(set)                                                            ########
-    for col in ["tag_dataset_list", "readme_datasetid_list"]:                                 ########
-        expl = df_ds[["modelId", col]].explode(col).dropna()                                 ########
-        for _, grp in expl.groupby(col)["modelId"]:                                          ########
-            mem = grp.tolist()                                                               ########
-            for a, b in combinations(mem, 2):                                                ########
-                related_ds[a].add(b); related_ds[b].add(a)                                   ########
+    df_ds = df[df.apply(lambda r: bool(r['tag_dataset_list'] or r['readme_datasetid_list']), axis=1)]
+    related_ds = defaultdict(set)                                                           
+    for col in ["tag_dataset_list", "readme_datasetid_list"]:                                
+        expl = df_ds[["modelId", col]].explode(col).dropna()                                
+        for _, grp in expl.groupby(col)["modelId"]:                                         
+            mem = grp.tolist()                                                              
+            for a, b in combinations(mem, 2):                                               
+                related_ds[a].add(b); related_ds[b].add(a)                                  
     # 交叉 model→csv to dataset-GT
-    csv_counts_ds = defaultdict(int)                                                        ########
-    for m, neighs in related_ds.items():                                                   ########
-        cs_m = model_to_csvs.get(m, [])                                                     ########
-        for n in neighs:                                                                   ########
-            if m >= n: continue                                                             ########
-            cs_n = model_to_csvs.get(n, [])                                                 ########
-            for a, b in product(cs_m, cs_n):                                                ########
-                if a == b: continue                                                          ########
-                key = tuple(sorted((a, b)))                                                 ########
-                csv_counts_ds[key] += 1                                                     ########
-    with open('data/gt/scilake_gt_modellink_dataset_counts.pkl', 'wb') as f:                 ########
-        pickle.dump(dict(csv_counts_ds), f)                                                 ########
-    adj_ds = defaultdict(set)                                                               ########
-    for (a, b), cnt in csv_counts_ds.items():                                              ########
-        if cnt > 0:                                                                        ########
-            adj_ds[a].add(b); adj_ds[b].add(a)                                             ########
-    adj_ds = {k: sorted(v) for k, v in adj_ds.items()}                                     ########
-    with open('data/gt/scilake_gt_modellink_dataset_adj.json', 'w') as f:                   ########
-        json.dump(adj_ds, f, indent=2)                                                     ########
-    print(f"✔️  Saved DATASET-BASED CSV adjacency ({len(adj_ds):,} keys)")                  ########
+    csv_counts_ds = defaultdict(int)                                                       
+    for m, neighs in related_ds.items():                                                  
+        cs_m = model_to_csvs.get(m, [])                                                    
+        for n in neighs:                                                                  
+            if m >= n: continue                                                            
+            cs_n = model_to_csvs.get(n, [])                                                
+            for a, b in product(cs_m, cs_n):                                               
+                if a == b: continue                                                         
+                key = tuple(sorted((a, b)))                                                
+                csv_counts_ds[key] += 1                                                    
+    with open('data/gt/scilake_gt_modellink_dataset_counts.pkl', 'wb') as f:                
+        pickle.dump(dict(csv_counts_ds), f)                                                
+    adj_ds = defaultdict(set)                                                              
+    for (a, b), cnt in csv_counts_ds.items():                                             
+        if cnt > 0:                                                                       
+            adj_ds[a].add(b); adj_ds[b].add(a)                                            
+    adj_ds = {k: sorted(v) for k, v in adj_ds.items()}                                    
+    with open('data/gt/scilake_gt_modellink_dataset_adj.json', 'w') as f:                  
+        json.dump(adj_ds, f, indent=2)                                                    
+    print(f"✔️  Saved DATASET-BASED CSV adjacency ({len(adj_ds):,} keys)")
