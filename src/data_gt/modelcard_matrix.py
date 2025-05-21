@@ -17,12 +17,11 @@ import requests
 import pandas as pd
 import numpy as np                                              
 import pickle
-from scipy.sparse import dok_matrix, csr_matrix, save_npz
-import sqlite3
 from tqdm import tqdm                            
 from src.utils import load_combined_data    
 from itertools import combinations
-from scipy.sparse import coo_matrix
+from collections import defaultdict
+from itertools import product
 
 MODEL_REL_DB   = "data/tmp/model_rel.db"
 DATASET_REL_DB = "data/tmp/dataset_rel.db"
@@ -58,121 +57,6 @@ def extract_datasets_tags(card_text: str) -> (list, list):
     # prune special keys you already handle elsewhere
     tg = [t for t in tg if not t.startswith(('arxiv:', 'base_model'))]
     return ds, tg
-# ----------------------------------------------------
-def init_edge_db(db_path):
-    conn = sqlite3.connect(db_path)
-    cur  = conn.cursor()
-    cur.executescript("""
-        PRAGMA journal_mode=WAL;
-        PRAGMA synchronous  = OFF;
-        CREATE TABLE IF NOT EXISTS edges (
-            src TEXT NOT NULL,
-            tgt TEXT NOT NULL,
-            UNIQUE(src, tgt)
-        );
-        CREATE INDEX IF NOT EXISTS idx_src ON edges(src);
-        CREATE INDEX IF NOT EXISTS idx_tgt ON edges(tgt);
-    """)
-    conn.commit()
-    return conn, cur
-
-def insert_edges(cur, edge_iter, batch=5000):
-    buf = []
-    for s, t in edge_iter:
-        buf.append((s, t))
-        if len(buf) >= batch:
-            cur.executemany("INSERT OR IGNORE INTO edges VALUES(?,?)", buf)
-            buf.clear()
-    if buf:
-        cur.executemany("INSERT OR IGNORE INTO edges VALUES(?,?)", buf)
-
-def build_edges_sql(
-    df_rel: pd.DataFrame,
-    valid_model_ids: set,
-    src_col="modelId",
-    tgt_col="final_base_model",
-    db_path=MODEL_REL_DB):
-    print(f"building edges to {db_path}")
-    conn, cur = init_edge_db(db_path)
-    groups = df_rel.groupby(tgt_col)[src_col]         
-    commit_every = 100 
-    for idx, (base, members) in enumerate(tqdm(groups, desc=f"clique")):
-        # 只保留 valid 的 model
-        members = [m for m in members if m in valid_model_ids]
-        if len(members) < 2:
-            continue
-        # 用 insert_edges 流式插入，一个 clique 也按 batch 分批
-        def edge_iter():
-            for i, j in combinations(members, 2):
-                yield (i, j)
-                yield (j, i)
-        insert_edges(cur, edge_iter())
-        # 每隔若干 clique 也可以分批 commit，释放 WAL 缓冲
-        if idx % commit_every == 0:
-            conn.commit()
-    conn.commit()
-    conn.close()
-    print(f"✔️  edges stored → {db_path}")
-
-
-def build_model_relation_matrix(
-    df_rel: pd.DataFrame,
-    all_models: set,
-    src_col: str = "modelId",
-    tgt_col: str = "final_base_model",
-    mode: str = "undirected"
-) -> (csr_matrix, list):
-    """
-    Vectorised + COO
-    ------------------------------------------------
-    directed : single-directional src→tgt
-    related  : fully connected within the same base_model (undirected, symmetric)
-    """
-    print('shape', df_rel.shape)
-    print()
-    pos = {m: i for i, m in enumerate(model_index)}
-    M = len(model_index)
-    rows, cols = [], []
-
-    if mode == "directed":
-        src_idx = df_rel[src_col].map(pos).to_numpy()
-        tgt_idx = df_rel[tgt_col].map(pos).to_numpy()
-        mask    = (src_idx >= 0) & (tgt_idx >= 0)
-        rows.extend(src_idx[mask])
-        cols.extend(tgt_idx[mask])
-    else:  # 'related' → clique
-        for _, members in df_rel.groupby(tgt_col)[src_col]:
-            members = [pos[m] for m in members if m in pos]
-            if len(members) < 2:
-                continue
-            # generate (i,j) & (j,i) to maintain undirected
-            for i, j in combinations(members, 2):
-                rows.append(i); cols.append(j)
-                rows.append(j); cols.append(i)
-    # add self-loops
-    rows.extend(range(M)); cols.extend(range(M))
-    data = np.ones(len(rows), dtype=bool)
-    csr_mat = coo_matrix((data, (rows, cols)), shape=(M, M)).tocsr()
-
-    print(f"Adjacency shape: {csr_mat.shape}  |  "
-          f"edges excl.self-loop: {csr_mat.nnz - M:,}")
-    return csr_mat, model_index
-
-def build_dataset_edges_sql(ds_groups, db_path=DATASET_REL_DB):
-    conn, cur = init_edge_db(db_path)
-    commit_every = 500
-    for idx, members in enumerate(tqdm(ds_groups, desc="dataset clique")):
-        if len(members) < 2:
-            continue
-        def edge_iter():
-            for i, j in combinations(members, 2):
-                yield (i, j)
-                yield (j, i)
-        insert_edges(cur, edge_iter())
-        if idx % commit_every == 0:
-            conn.commit()
-    conn.commit(); conn.close()
-    print(f"✔️  dataset edges stored → {db_path}")
 
 # ---------- re-direct the link  ----------
 def normalize_extracted(link: str):                       
@@ -196,46 +80,83 @@ def normalize_extracted(link: str):
         pass                                                           
     return link.lower()
 
-if __name__ == "__main__":
-    # get all valid dataset IDs
-    valid_ds_df = load_combined_data(data_type="datasetcard", file_path=os.path.expanduser("~/Repo/CitationLake/data/raw/"), columns=["datasetId"])
-    valid_dataset_ids = set(valid_ds_df["datasetId"].str.lower())
-    del valid_ds_df
-    print(f"Loaded {len(valid_dataset_ids)} valid dataset IDs")
-
-    # get df which contains modelId, card_tags, downloads and all_table_list_dedup
+def load_model_with_valid_table():
     df_full = pd.read_parquet(DATA_PATH, columns=['modelId', CARD_TAGS_KEY, CARD_README_KEY, 'downloads'])
     df_full_2 = pd.read_parquet(DATA_2_PATH, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup', 'all_title_list'])
     df_full_2['all_table_list_dedup'] = df_full_2['hugging_table_list_dedup'].apply(list) + df_full_2['github_table_list_dedup'].apply(list) + df_full_2['html_table_list_mapped_dedup'].apply(list) + df_full_2['llm_table_list_mapped_dedup'].apply(list)
     df = pd.merge(df_full, df_full_2[['modelId', 'all_table_list_dedup', 'all_title_list']], on='modelId', how='left')
-    del df_full, df_full_2
-    # get all valid model IDs
-    valid_model_ids= set(df['modelId'])
+    mask = (df['all_table_list_dedup'].apply(lambda x: isinstance(x, (list, np.ndarray)) and len(x) > 0) & df['all_title_list'].apply(lambda x: isinstance(x, (list, np.ndarray)) and len(x) > 0))
+    df = df.loc[mask, ['modelId', 'all_table_list_dedup', 'all_title_list', CARD_TAGS_KEY, CARD_README_KEY, 'downloads']]
+    return df
 
-    # get extracted_base_model from card_tags
-    df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(
-        r'base_model:\s*([^\s]+)',
-        flags=re.IGNORECASE,
-        expand=False
-    )
+HF_ID_RE    = re.compile(r"([A-Za-z0-9\-_]+)/([A-Za-z0-9\-_\.]+)")
+HF_Q_MODEL  = re.compile(r"[?&]model=([\w\-.\/]+)", re.I)
+HF_Q_SEARCH = re.compile(r"[?&]search=([\w\-.\/]+)", re.I)
+VALID_PAT   = re.compile(r"^[A-Za-z0-9_\-]+/[A-Za-z0-9_\-.]+$")
+
+def _clean_token(tok: str) -> str:
+    """strip trailing punctuation like ')', '\"', '>' …"""
+    return re.sub(r"[)\]\}\"'›>]+$", "", tok)
+
+def extract_modelids_from_readme(text: str, valid_models: set) -> list:
+    """Return *valid* modelIds found in README (robust, de-dup)."""
+    if not isinstance(text, str):
+        return []
+    ids = set()
+    # 1) https://huggingface.co/user/repo --------------------------------
+    for u, r in re.findall(r"https?://huggingface\.co/([^\s/]+)/([^\s/?#]+)", text, re.I):
+        ids.add(f"{u.lower()}/{_clean_token(r.lower())}")
+    # 2) query (?model= , ?search=) --------------------------------------
+    for m in HF_Q_MODEL.findall(text):                                    
+        if "/" in m: ids.add(_clean_token(m.lower()))                     
+    for s in HF_Q_SEARCH.findall(text):                                   
+        ids.add(_clean_token(s.lower()))                                  
+    # 3) bare org/repo tokens -------------------------------------------
+    for org, repo in HF_ID_RE.findall(text):                              
+        ids.add(f"{org.lower()}/{_clean_token(repo.lower())}")            
+    # validate pattern & membership -------------------------------------
+    clean_ids = [mid for mid in ids if VALID_PAT.match(mid) and mid in valid_models]
+    return sorted(clean_ids)
+
+def extract_datasetids_from_readme(text: str, valid_datasets: set) -> list:
+    if not isinstance(text, str):
+        return []
+    ds = set()
+    for org, name in re.findall(r"https?://huggingface\.co/datasets/([^\s/]+)/([^\s/]+)", text, re.I):
+        tok = f"{org.lower()}/{_clean_token(name.lower())}"
+        ds.add(tok)
+    return [d for d in ds if d in valid_datasets]
+
+"""def extract_basemodels_from_tags(tags_text: str, valid_models: set) -> list:
+    if not isinstance(tags_text, str):
+        return []
+    m = re.search(r"base_model:\s*([^\s,\]]+)", tags_text, re.I)
+    if not m:
+        return []
+    tok = _clean_token(re.sub(r"https?://huggingface\.co/", "", m.group(1), flags=re.I).lower())
+    return [valid_models[tok] if tok in valid_models else tok] if tok in valid_models else []
+"""
+def extract_datasets_from_tags(tags_text: str, valid_datasets: set) -> list:
+    ds, _ = extract_datasets_tags(tags_text)
+    return [d for d in ds if d in valid_datasets]
+
+def extract_basemodels_from_tags(df: pd.DataFrame) -> list:
+    df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(r'base_model:\s*([^\s]+)', flags=re.IGNORECASE, expand=False)
     cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\(\)\{\}]'
     df['extracted_base_model'] = (df['extracted_base_model'].str.replace(cleanup_pattern, '', regex=True))
     print(f"Unique extracted_base_model before filtering: {df['extracted_base_model'].nunique()}")
     # build mapping counts and identify invalid
     mapping_counts = df.groupby(['modelId','extracted_base_model']).size().reset_index(name='count')
     valid_map = {m.lower(): m for m in valid_model_ids}
-
     mapping_invalid = mapping_counts[~mapping_counts['extracted_base_model']\
         .fillna('')\
         .str.lower()\
         .isin(valid_map)]
     num_invalid = mapping_invalid['extracted_base_model'].nunique()
     print(f"Unique invalid extracted_base_model: {num_invalid}")
-
     # correction via repository merge
     models_df = df[['modelId','downloads']].drop_duplicates()
     models_df['repo'] = models_df['modelId'].str.split('/', n=1).str[1]
-
     invalid_df = pd.DataFrame(mapping_invalid['extracted_base_model'].unique(), columns=['extracted_base_model'])
     merged = invalid_df.merge(models_df, left_on='extracted_base_model', right_on='repo', how='left')
     merged_sorted = merged.sort_values(['extracted_base_model','downloads'], ascending=[True, False])
@@ -244,7 +165,6 @@ if __name__ == "__main__":
     correction_map = dict(zip(best['extracted_base_model'], best['modelId']))
     num_corrected = len(correction_map)
     print(f"Corrected invalid extracted_base_model: {num_corrected}")
-
     # clean & case-insensitive rematch
     unmatched = set(invalid_df['extracted_base_model']) - set(correction_map)
     cleaned = {u: re.sub(r"[\"'`]", "", u) for u in unmatched}
@@ -257,9 +177,8 @@ if __name__ == "__main__":
     final_unmatched = list(unmatched - set(correction_map))
     print("Final unmatched extracted_base_model:", len(final_unmatched))
     #print(final_unmatched)
-
     # corrected the unmatched base_model entries
-    salvage_count = 0     
+    salvage_count = 0
     for raw in tqdm(final_unmatched):
         if not isinstance(raw, str):
             continue
@@ -275,136 +194,194 @@ if __name__ == "__main__":
     print(f"Salvaged {salvage_count} unmatched base_model entries")
     print('-'*100)
     # the model which points to same base_model should link to each other
-    df['final_base_model'] = df['extracted_base_model'].map(correction_map).fillna(df['extracted_base_model'])
-    # extract HF links from README
-    assert CARD_README_KEY in df.columns
-    df[['hf_user','hf_repo']] = df[CARD_README_KEY].str.extract(r'https?://huggingface\.co/([^/\s]+)/([^/\s]+)')
-    df['hf_modelid'] = (df['hf_user'].str.lower() + '/' + df['hf_repo'].str.lower())
-    df['hf_modelid'] = df['hf_modelid'].map(valid_map).fillna(df['hf_modelid'])
-    # because some base_model is only partial, we need to makeup the full modelId
-    num_hf_links = df['hf_modelid'].notna().sum()
-    matched_hf = df['hf_modelid'].isin(valid_model_ids).sum()
-    print(f"Found HF model links: {num_hf_links}, matched: {matched_hf}, unmatched: {num_hf_links - matched_hf}")
-    # save HF model link lists to check
-    all_model_links = df['hf_modelid'].dropna().unique()
-    pd.Series(all_model_links).to_csv('data/tmp/all_hf_modelids.txt', index=False, header=False)
-    pd.Series([m for m in all_model_links if m not in valid_model_ids]).to_csv('data/tmp/unmatched_hf_modelids.txt', index=False, header=False)
+    df['tag_base_model_list'] = df['extracted_base_model'].map(correction_map).fillna(df['extracted_base_model'])
+    return df
 
-    ###################
-    # dataset
-    ###################
-    # grab datasets from tags
-    df[['datasets_tag_list','card_tag_list']] = (df[CARD_TAGS_KEY].apply(lambda txt: pd.Series(extract_datasets_tags(txt))) )
-    # grab datasets from README
-    df['hf_datasetid_list'] = df[CARD_README_KEY].str.findall(r'https?://huggingface\.co/datasets/([^/\s]+)/([^/\s]+)',  flags=re.I).apply(lambda lst: [f"{org.lower()}/{name.lower()}" for org, name in lst])
-    # merge YAML + README
-    df['all_dataset_list'] = df.apply(lambda r: list(set( (r['datasets_tag_list'] or []) + (r['hf_datasetid_list'] or []) )), axis=1)
-    # flatten to one row per (modelId, dataset)
-    df_ds = (df[['modelId','all_dataset_list']].explode('all_dataset_list').dropna(subset=['all_dataset_list']).rename(columns={'all_dataset_list':'dataset'}))
-    # only keep the whitelist dataset
-    before_cnt = len(df_ds)
-    df_ds      = df_ds[df_ds['dataset'].isin(valid_dataset_ids)]
-    print(f"Filtered datasets by whitelist: {before_cnt:,} → {len(df_ds):,}")
-    num_ds_links = len(df_ds)
-    all_dataset_links = df_ds['dataset'].unique()
-    print(f"Found HF dataset links total: {num_ds_links}, unique datasets: {len(all_dataset_links)}") 
-    # save HF dataset link lists
-    pd.Series(all_dataset_links).to_csv('data/tmp/all_hf_datasetids.txt', index=False, header=False) 
-    print('finished!')
-    
-    # build edges
-    model_index = sorted(valid_model_ids)
-    df_tag_rel = df[df['final_base_model'].isin(valid_model_ids)].copy()
-    build_edges_sql(df_tag_rel, valid_model_ids, db_path=MODEL_REL_DB)
+if __name__ == "__main__":
+    ########################################################################
+    # 0 )  LOAD DATA  ───────────────────────────────────────────────────────
+    ########################################################################
+    # get all valid dataset IDs
+    valid_ds_df = load_combined_data(data_type="datasetcard", file_path=os.path.expanduser("~/Repo/CitationLake/data/raw/"), columns=["datasetId"])
+    valid_dataset_ids = set(valid_ds_df["datasetId"].str.lower())
+    del valid_ds_df
+    print(f"Loaded {len(valid_dataset_ids)} valid dataset IDs")
 
-    df_hf_rel = df[df['hf_modelid'].isin(valid_model_ids)].copy()
-    df_hf_rel.rename(columns={'hf_modelid':'final_base_model'}, inplace=True)
-    build_edges_sql(df_hf_rel, valid_model_ids, db_path=MODEL_REL_DB)
+    # get df which contains modelId, card_tags, downloads and all_table_list_dedup
+    df = load_model_with_valid_table()
+    print(f"Loaded {len(df)} rows with valid table list")
+    # get all valid model IDs
+    valid_model_ids= set(df['modelId'])
 
-    print('building dataset_adj')
-    # 3) Dataset co-link matrix (models sharing datasets)
-    """dataset_groups = df_ds.groupby('dataset')['modelId'].unique()
-    M = len(model_index) 
-    pos = {m:i for i,m in enumerate(model_index)}
-    mat_ds = dok_matrix((M, M), dtype=bool)
-    for members in dataset_groups:
-        for m1 in members:
-            for m2 in members:
-                if m1 in pos and m2 in pos:
-                    mat_ds[pos[m1], pos[m2]] = True
-    for i in range(M): mat_ds[i, i] = True 
-    dataset_adj = mat_ds.tocsr()
-    # 4) Tag adjacency (shared YAML tags) ----------
-    df_tags = (df[['modelId','card_tag_list']]
-                 .explode('card_tag_list')
-                 .dropna(subset=['card_tag_list'])
-                 .rename(columns={'card_tag_list':'tag'}))
-    tag_groups = df_tags.groupby('tag')['modelId'].unique()
-    mat_tags = dok_matrix((M, M), dtype=bool)
-    for members in tag_groups:
-        for m1 in members:
-            for m2 in members:
-                if m1 in pos and m2 in pos:
-                    mat_tags[pos[m1], pos[m2]] = True
-    for i in range(M): mat_tags[i, i] = True
-    tags_adj = mat_tags.tocsr()"""
-    dataset_groups = df_ds.groupby('dataset')['modelId'].unique()
-    build_dataset_edges_sql(dataset_groups, db_path=DATASET_REL_DB)
-    # ------------------------------------------------
+    ########################################################################
+    # 1 )  EXTRACT HF LINKS, BASE-MODEL, DATASET
+    ########################################################################
+    df["readme_modelid_list"]   = df[CARD_README_KEY].apply(lambda txt: extract_modelids_from_readme(txt, valid_model_ids))
+    df["readme_datasetid_list"] = df[CARD_README_KEY].apply(lambda txt: extract_datasetids_from_readme(txt, valid_dataset_ids))
+    print(f"Updated readme_modelid_list and readme_datasetid_list")
+    df = extract_basemodels_from_tags(df)
+    #df["tag_base_model_list"]
+    print(f"Updated tag_base_model_list")
+    df["tag_dataset_list"]      = df[CARD_TAGS_KEY].apply(lambda txt: extract_datasets_from_tags(txt, valid_dataset_ids))
+    print(f"Updated tag_dataset_list")
+    def to_list(x):
+        if isinstance(x, (list,)):
+            return x
+        if isinstance(x, np.ndarray):
+            return x.tolist()
+        # 对 Pandas 的 NaN、None、pd.NaT 都识别并跳过
+        if pd.isna(x):
+            return []
+        return []
+    # combine: readme + tag + self modelid
+    df['tag_base_model_list']   = df['tag_base_model_list'].apply(to_list)
+    df['readme_modelid_list']   = df['readme_modelid_list'].apply(to_list)
+    # 再做拼接，r[...] 都是 list，不会再报错
+    df['hf_modelid_list'] = df.apply(
+        lambda r: sorted(set([r['modelId']]
+                            + r['tag_base_model_list']
+                            + r['readme_modelid_list'])),
+        axis=1
+    )
+    df["tag_dataset_list"] = df['tag_dataset_list'].apply(to_list)
+    df["readme_datasetid_list"] = df['readme_datasetid_list'].apply(to_list)
+    df["hf_datasetid_list"] = df.apply(
+        lambda r: sorted(set(r['tag_dataset_list']
+                            + r['readme_datasetid_list'])),
+        axis=1
+    )
+    num_hf_links = df["hf_modelid_list"].apply(len).sum()
+    matched_hf   = sum(any(m in valid_model_ids for m in lst) for lst in df["hf_modelid_list"])
+    print(f"Found HF model links: {num_hf_links}, matched rows: {matched_hf}")
+    #pd.Series(all_model_links).to_csv("data/tmp/all_hf_modelids.txt", index=False, header=False)
+    #pd.Series([m for m in all_model_links if m not in valid_model_ids]).to_csv("data/tmp/unmatched_hf_modelids.txt", index=False, header=False)
+    pd.Series(sorted({m for lst in df["tag_base_model_list"]   for m in lst})).to_csv("data/tmp/tag_base_modelids.txt", index=False, header=False)
+    pd.Series(sorted({m for lst in df["readme_modelid_list"]  for m in lst})).to_csv("data/tmp/readme_modelids.txt", index=False, header=False)
+    pd.Series(sorted({d for lst in df["tag_dataset_list"]     for d in lst})).to_csv("data/tmp/tag_datasetids.txt", index=False, header=False)
+    pd.Series(sorted({d for lst in df["readme_datasetid_list"]for d in lst})).to_csv("data/tmp/readme_datasetids.txt", index=False, header=False)
+    print(f'saved all hf modelids and datasetids to data/tmp/tag_base_modelids.txt, readme_modelids.txt, tag_datasetids.txt, readme_datasetids.txt')
+    ########################################################################
+    # 2 )  BUILD  *RELATED-MODEL LIST*  INSTEAD OF LARGE MATRICES ##########
+    ########################################################################
+    # drop rows with empty four lists (speed up later calculation)
+    """df = df[df.apply(lambda r: bool(r['tag_base_model_list'] or r['readme_modelid_list']
+                                       or r['tag_dataset_list']  or r['readme_datasetid_list']),
+                    axis=1)]
+    related_map = defaultdict(set)
+    # explode four lists, group by value, any intersection counts as related
+    for col in ["tag_base_model_list", "readme_modelid_list", "tag_dataset_list", "readme_datasetid_list"]:
+        exploded = df[["modelId", col]].explode(col).dropna()
+        for _, group in exploded.groupby(col)["modelId"]:
+            members = group.tolist()
+            for a, b in combinations(members, 2):
+                related_map[a].add(b)
+                related_map[b].add(a)
+    df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_map.get(m, [])))"""
+    ########################################################################
+    # 2a ) BUILD *MODEL-BASED* RELATED-MODEL LIST                              ########
+    ########################################################################
+    # 只保留至少有一个 base/model link 的 row
+    df_model = df[df.apply(lambda r: bool(r['tag_base_model_list'] or r['readme_modelid_list']), axis=1)]
+    related_model = defaultdict(set)                                                             
+    for col in ["tag_base_model_list", "readme_modelid_list"]:                                   
+        exploded = df_model[["modelId", col]].explode(col).dropna()                             
+        for _, grp in exploded.groupby(col)["modelId"]:                                         
+            mem = grp.tolist()                                                                  
+            for a, b in combinations(mem, 2):                                                   
+                related_model[a].add(b)                                                         
+                related_model[b].add(a)                                                         
+    df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_model.get(m, [])))    
 
-    print('building csv_groundtruth_dataset')
-    def _build_csv_gt(adj: csr_matrix, model_index: list, model_to_csvs: dict):
-        coo = adj.tocoo()
-        csv_gt = {}
-        for i, j in zip(coo.row, coo.col):
-            if i == j:
-                continue
-            m1, m2 = model_index[i], model_index[j]
-            c1 = model_to_csvs.get(m1, []) or []
-            c2 = model_to_csvs.get(m2, []) or []
-            for a in c1:
-                a_base = os.path.basename(a)
-                tgt = csv_gt.setdefault(a_base, set())
-                tgt.update(os.path.basename(b) for b in c2)
-        return {k: sorted(v - {k}) for k, v in csv_gt.items()}
+    ########################################################################
+    # 5 )  BUILD CSV-LEVEL GT via related_model_list （no self-pair） ########
+    ########################################################################
+    """model_to_csvs = df.set_index("modelId")["all_table_list_dedup"].to_dict()
+    csv_pair_counts = defaultdict(int)
+    for m, neighs in related_map.items():
+        csvs_m = model_to_csvs.get(m, [])
+        for n in neighs:
+            if m >= n:
+                continue  # ensure each unordered pair (m, n) is counted once
+            csvs_n = model_to_csvs.get(n, [])
+            for a, b in product(csvs_m, csvs_n):
+                if a == b:
+                    continue  # skip same CSV
+                key = tuple(sorted((a, b)))
+                csv_pair_counts[key] += 1
+    with open('data/gt/scilake_gt_modellink_related_csv_pair_counts.pkl', 'wb') as f:
+        pickle.dump(dict(csv_pair_counts), f)
+    # Convert to adjacency mapping {csv: [related_csvs]}
+    csv_adj = defaultdict(set)
+    for (a, b), cnt in csv_pair_counts.items():
+        if cnt > 0:
+            csv_adj[a].add(b)
+            csv_adj[b].add(a)
+    # Convert sets to sorted lists for JSON-friendliness
+    csv_adj = {k: sorted(v) for k, v in csv_adj.items()}
+    import json
+    with open('data/gt/scilake_gt_modellink_related.json', 'w') as f:
+        json.dump(csv_adj, f, indent=2)
+    print(f"✔️  Saved RELATED-LEVEL CSV pair counts ({len(csv_pair_counts):,} pairs)")
+    print(f"✔️  Saved RELATED-LEVEL CSV adjacency to data/gt/scilake_gt_modellink_related.json")
+    print(f"✔️  Done")"""
+    ########################################################################
+    # 5a ) BUILD CSV-LEVEL GT FROM related_model_list (Model-based)         ########
+    ########################################################################
+    model_to_csvs = df.set_index("modelId")["all_table_list_dedup"].to_dict()                 
+    csv_counts_model = defaultdict(int)                                                         
+    for m, neighs in related_model.items():                                                 
+        cs_m = model_to_csvs.get(m, [])                                                     
+        for n in neighs:                                                                    ########
+            if m >= n: continue  # 只计一次                                          ########
+            cs_n = model_to_csvs.get(n, [])                                                 ########
+            for a, b in product(cs_m, cs_n):                                                ########
+                if a == b: continue                                                          ########
+                key = tuple(sorted((a, b)))                                                 ########
+                csv_counts_model[key] += 1                                                  ########
+    # 保存原始 tuple→count
+    with open('data/gt/scilake_gt_modellink_model_counts.pkl', 'wb') as f:                   ########
+        pickle.dump(dict(csv_counts_model), f)                                              ########
+    # 转成邻接表并存 JSON
+    adj_model = defaultdict(set)                                                             ########
+    for (a, b), cnt in csv_counts_model.items():                                            ########
+        if cnt > 0:                                                                         ########
+            adj_model[a].add(b); adj_model[b].add(a)                                        ########
+    adj_model = {k: sorted(v) for k, v in adj_model.items()}                                ########
+    import json
+    with open('data/gt/scilake_gt_modellink_model_adj.json', 'w') as f:                      ########
+        json.dump(adj_model, f, indent=2)                                                   ########
+    print(f"✔️  Saved MODEL-BASED CSV adjacency ({len(adj_model):,} keys)")                   ########
 
-    model_to_csvs = (df.set_index('modelId')['all_table_list_dedup']
-                    .to_dict())
-    csv_gt_dataset = _build_csv_gt(dataset_adj, model_index, model_to_csvs)
-    with open('data/tmp/csv_groundtruth_dataset.json', 'w') as f:
-        json.dump(csv_gt_dataset, f, indent=2)
-    print(f"✔️  Saved DATASET-level GT: {len(csv_gt_dataset):,} keys")
-
-    modelcard_adj = (tag_adj.copy()
-                    .maximum(hfmodel_adj)
-                    .maximum(tags_adj))
-    csv_gt_modelcard = _build_csv_gt(modelcard_adj, model_index, model_to_csvs)
-    with open('data/tmp/csv_groundtruth_modelcard.json', 'w') as f:
-        json.dump(csv_gt_modelcard, f, indent=2)
-    print(f"✔️  Saved MODELCARD-level GT: {len(csv_gt_modelcard):,} keys")
-
-
-    print('saving / stats (dataset + YAML-tag only)')
-    # Save all three sparse matrices and the shared index
-    # Print relation statistics
-    # Tag-based matrix stats
-    # Save all three sparse matrices and the shared index
-    save_path = 'data/tmp/relations_all.pkl'
-    with open(save_path, 'wb') as f:
-        pickle.dump({
-            'model_index': model_index, 
-            'dataset_adj': dataset_adj,
-            'tags_adj'   : tags_adj
-        }, f)
-    print(f"✔️  Saved all relations (4 levels) to {save_path}") 
-
-    print(f"✔️  Saved adjacency to {MODEL_REL_PATH}")
-    print(f"✔️  Saved index to {MODEL_REL_INDEXPATH}")
-
-    df['extracted_base_model'].value_counts().to_frame('count').to_csv('data/tmp/extracted_base_model_counts.csv')
-    df['final_base_model'].value_counts().to_frame('count').to_csv('data/tmp/final_base_model_counts.csv')
-    df['hf_modelid'].value_counts().to_frame('count').to_csv('data/tmp/hf_modelid_counts.csv')
-
-    df['hf_datasetid'] = (df['hf_ds_org'].str.lower() + '/' + df['hf_ds_name'].str.lower())
-    df['hf_datasetid'].value_counts().to_frame('count').to_csv('data/tmp/hf_datasetid_counts.csv')
-
+    ########################################################################
+    # 5b ) BUILD CSV-LEVEL GT FROM related_dataset_list (Dataset-based)     ########
+    ########################################################################
+    # 先构造 dataset 关联 map
+    df_ds = df[df.apply(lambda r: bool(r['tag_dataset_list'] or r['readme_datasetid_list']), axis=1)] ########
+    related_ds = defaultdict(set)                                                            ########
+    for col in ["tag_dataset_list", "readme_datasetid_list"]:                                 ########
+        expl = df_ds[["modelId", col]].explode(col).dropna()                                 ########
+        for _, grp in expl.groupby(col)["modelId"]:                                          ########
+            mem = grp.tolist()                                                               ########
+            for a, b in combinations(mem, 2):                                                ########
+                related_ds[a].add(b); related_ds[b].add(a)                                   ########
+    # 交叉 model→csv to dataset-GT
+    csv_counts_ds = defaultdict(int)                                                        ########
+    for m, neighs in related_ds.items():                                                   ########
+        cs_m = model_to_csvs.get(m, [])                                                     ########
+        for n in neighs:                                                                   ########
+            if m >= n: continue                                                             ########
+            cs_n = model_to_csvs.get(n, [])                                                 ########
+            for a, b in product(cs_m, cs_n):                                                ########
+                if a == b: continue                                                          ########
+                key = tuple(sorted((a, b)))                                                 ########
+                csv_counts_ds[key] += 1                                                     ########
+    with open('data/gt/scilake_gt_modellink_dataset_counts.pkl', 'wb') as f:                 ########
+        pickle.dump(dict(csv_counts_ds), f)                                                 ########
+    adj_ds = defaultdict(set)                                                               ########
+    for (a, b), cnt in csv_counts_ds.items():                                              ########
+        if cnt > 0:                                                                        ########
+            adj_ds[a].add(b); adj_ds[b].add(a)                                             ########
+    adj_ds = {k: sorted(v) for k, v in adj_ds.items()}                                     ########
+    with open('data/gt/scilake_gt_modellink_dataset_adj.json', 'w') as f:                   ########
+        json.dump(adj_ds, f, indent=2)                                                     ########
+    print(f"✔️  Saved DATASET-BASED CSV adjacency ({len(adj_ds):,} keys)")                  ########
