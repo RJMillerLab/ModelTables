@@ -90,15 +90,17 @@ def load_model_with_valid_table():
     return df
 
 HF_ID_RE    = re.compile(r"([A-Za-z0-9\-_]+)/([A-Za-z0-9\-_\.]+)")
-HF_Q_MODEL  = re.compile(r"[?&]model=([\w\-.\/]+)", re.I)
-HF_Q_SEARCH = re.compile(r"[?&]search=([\w\-.\/]+)", re.I)
+#HF_Q_MODEL  = re.compile(r"[?&]model=([\w\-.\/]+)", re.I)
+#HF_Q_SEARCH = re.compile(r"[?&]search=([\w\-.\/]+)", re.I)
+HF_Q_MODEL  = re.compile(r"[?&]model=([^\)\]\}\s\"'>]+)", re.I)
+HF_Q_SEARCH = re.compile(r"[?&]search=([^\)\]\}\s\"'>]+)", re.I)
 VALID_PAT   = re.compile(r"^[A-Za-z0-9_\-]+/[A-Za-z0-9_\-.]+$")
 
 def _clean_token(tok: str) -> str:
     """strip trailing punctuation like ')', '\"', '>' …"""
-    return re.sub(r"[)\]\}\"'›>]+$", "", tok)
+    return re.sub(r"[)\]\}\"'›>\.,]+$", "", tok)
 
-def extract_modelids_from_readme(text: str, valid_models: set) -> list:
+def extract_modelids_from_readme(text: str, valid_models: set, repo_map: dict) -> list:
     """Return *valid* modelIds found in README (robust, de-dup)."""
     if not isinstance(text, str):
         return []
@@ -107,10 +109,25 @@ def extract_modelids_from_readme(text: str, valid_models: set) -> list:
     for u, r in re.findall(r"https?://huggingface\.co/([^\s/]+)/([^\s/?#]+)", text, re.I):
         ids.add(f"{u.lower()}/{_clean_token(r.lower())}")
     # 2) query (?model= , ?search=) --------------------------------------
+    #for m in HF_Q_MODEL.findall(text):                                    
+    #    if "/" in m: ids.add(_clean_token(m.lower())) 
     for m in HF_Q_MODEL.findall(text):                                    
-        if "/" in m: ids.add(_clean_token(m.lower()))                     
+        tok = _clean_token(m.lower())                                     
+        if "/" in tok:                                                   
+            ids.add(tok)                                                  
+        else:                                                             
+            # bare repo: resolve to highest-download modelId             
+            if tok in repo_map:                                          
+                ids.add(repo_map[tok][0])                               
+    #for s in HF_Q_SEARCH.findall(text):                                   
+    #    ids.add(_clean_token(s.lower()))   
     for s in HF_Q_SEARCH.findall(text):                                   
-        ids.add(_clean_token(s.lower()))                                  
+        tok = _clean_token(s.lower())                                     
+        if "/" in tok:                                                   
+            ids.add(tok)                                                  
+        else:                                                             
+            if tok in repo_map:                                          
+                ids.add(repo_map[tok][0])
     # 3) bare org/repo tokens -------------------------------------------
     for org, repo in HF_ID_RE.findall(text):                              
         ids.add(f"{org.lower()}/{_clean_token(repo.lower())}")            
@@ -142,8 +159,10 @@ def extract_datasets_from_tags(tags_text: str, valid_datasets: set) -> list:
 
 def extract_basemodels_from_tags(df: pd.DataFrame) -> list:
     df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(r'base_model:\s*([^\s]+)', flags=re.IGNORECASE, expand=False)
-    cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\(\)\{\}]'
+    #cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\(\)\{\}]'
+    cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\{\}]'
     df['extracted_base_model'] = (df['extracted_base_model'].str.replace(cleanup_pattern, '', regex=True))
+    df['extracted_base_model'] = df['extracted_base_model'].apply(lambda x: _clean_token(x) if isinstance(x, str) else x)
     print(f"Unique extracted_base_model before filtering: {df['extracted_base_model'].nunique()}")
     # build mapping counts and identify invalid
     mapping_counts = df.groupby(['modelId','extracted_base_model']).size().reset_index(name='count')
@@ -212,11 +231,21 @@ if __name__ == "__main__":
     print(f"Loaded {len(df)} rows with valid table list")
     # get all valid model IDs
     valid_model_ids= set(df['modelId'])
-
+    # build repo->modelId map, sorted by downloads
+    repo_map = defaultdict(list)
+    for mid, dl in zip(df['modelId'], df['downloads']):
+        repo = mid.split('/', 1)[1]
+        repo_map[repo].append((dl, mid))
+    # keep only highest-download first
+    for repo, lst in repo_map.items():
+        repo_map[repo] = [mid for _, mid in sorted(lst, reverse=True)]
     ########################################################################
     # 1 )  EXTRACT HF LINKS, BASE-MODEL, DATASET
     ########################################################################
-    df["readme_modelid_list"]   = df[CARD_README_KEY].apply(lambda txt: extract_modelids_from_readme(txt, valid_model_ids))
+    #df["readme_modelid_list"]   = df[CARD_README_KEY].apply(lambda txt: extract_modelids_from_readme(txt, valid_model_ids))
+    df["readme_modelid_list"] = df[CARD_README_KEY].apply(
+        lambda txt: extract_modelids_from_readme(txt, valid_model_ids, repo_map)
+    )
     df["readme_datasetid_list"] = df[CARD_README_KEY].apply(lambda txt: extract_datasetids_from_readme(txt, valid_dataset_ids))
     print(f"Updated readme_modelid_list and readme_datasetid_list")
     df = extract_basemodels_from_tags(df)
@@ -291,6 +320,7 @@ if __name__ == "__main__":
                 related_model[a].add(b)                                                         
                 related_model[b].add(a)                                                         
     df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_model.get(m, [])))    
+    df.to_parquet("data/processed/modelcard_gt_related_model.parquet")
 
     ########################################################################
     # 5 )  BUILD CSV-LEVEL GT via related_model_list （no self-pair） ########
