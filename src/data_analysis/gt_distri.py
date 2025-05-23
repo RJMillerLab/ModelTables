@@ -1,5 +1,3 @@
-# Updated `gt_distri` script with combined GT file support
-
 """
 Author: Zhengyuan Dong
 Created: 2025-04-11
@@ -10,7 +8,7 @@ Usage:
 """
 
 import os
-import gzip                              ########
+import gzip
 import pickle
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,181 +16,138 @@ from scipy.stats import gaussian_kde
 from tqdm import tqdm
 
 plt.rcParams.update({
-    'font.size': 22,     
-    'axes.titlesize': 22,
-    'axes.labelsize': 22,
-    'xtick.labelsize': 22,
-    'ytick.labelsize': 22,       
-    'legend.fontsize': 22,       
-    'figure.titlesize': 22     
+    'font.size': 28,
+    'axes.titlesize': 28,
+    'axes.labelsize': 28,
+    'xtick.labelsize': 28,
+    'ytick.labelsize': 28,
+    'figure.titlesize': 28,
+    'legend.fontsize': 22
 })
 
-# Output directory for saving figures
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Teal gradient-inspired color palette
-TEAL_PALETTE = {
-    "Ours": "#4e8094",
-    "SANTOS": "#50a89d",
-    "TUS": "#a5d2bc"
+PALETTE = {                                            ########
+    "paper":              "#4e8094",                   ########
+    "model":              "#50a89d",                   ########
+    "dataset":            "#a5d2bc",                   ########
+    "santos_large":       "#d96e44",                   ########
+    "santos_small":       "#f29e4c",                   ########
+    "tus_large":          "#8b2e2e",                   ########
+    "tus_small":          "#b74a3c",                   ########
 }
-NEW_PALETTE = {
-    "scilake_direct": "#8b2e2e",
-    "scilake_rate": "#d96e44",
-}
+# "#6f4e37","#c0c0c0",   
 
-# ================= Loader Class =================
+# -------- Loader --------
 class GTLengthLoader:
-    """Class to load pickle files and extract the length of list-type ground truth entries."""
-    def __init__(self, source_name: str, file_path: str, gt_key: str = None):  ########
-        self.source_name = source_name
-        self.file_path = file_path
-        self.gt_key = gt_key                                                  ########
+    def __init__(self, name: str, path: str, key: str | None = None):
+        self.name, self.path, self.key = name, path, key
 
-    def _load_data(self):
-        # Choose gzip or normal open based on file extension
-        if self.file_path.endswith(".gz"):                                    ########
-            with gzip.open(self.file_path, 'rb') as f:                        ########
-                data = pickle.load(f)
-        else:
-            with open(self.file_path, 'rb') as f:
-                data = pickle.load(f)
-        # Extract sub-dictionary if key provided
-        if self.gt_key:
-            data = data[self.gt_key]                                          ########
-        return data
+    def _load(self):
+        opener = gzip.open if self.path.endswith(".gz") else open
+        with opener(self.path, "rb") as f:
+            data = pickle.load(f)
+        return data[self.key] if self.key else data
 
-    def load_lengths(self):
-        print(f"[INFO] Loading {self.source_name} from {self.file_path} ...")
-        data = self._load_data()                                              ########
-        print(f"[INFO] {self.source_name} contains {len(data)} entries. Processing lengths...")
-        lengths = [len(v) for v in data.values() if isinstance(v, list)]
-        return lengths
-    
-    def get_large_entries(self, threshold=1000):
-        data = self._load_data()                                              ########
-        return [(k, len(v)) for k, v in data.items() if isinstance(v, list) and len(v) > threshold]
+    def lengths(self):
+        data = self._load()
+        return [len(v) for v in data.values() if isinstance(v, list)]
 
-# ================= Helper functions =================
-def print_large_keys(pickle_info, threshold=1000):
-    print(f"\n=== Entries with GT list length > {threshold} ===")
-    for source, info in pickle_info.items():
-        # info can be a path or (path, key)
-        if isinstance(info, tuple):                                         ########
-            path, key = info                                                ########
-        else:
-            path, key = info, None                                           ########
-        loader = GTLengthLoader(source, path, key)                          ########
-        large = loader.get_large_entries(threshold)
-        print(f"[{source}] Found {len(large)} entries > {threshold}")
-        for k, l in large:
-            print(f"  - {k} ({l})")
+# -------- Helper --------
+def load_lengths(path_map):
+    out = {}
+    for src, info in path_map.items():
+        path, key = info if isinstance(info, tuple) else (info, None)
+        out[src] = GTLengthLoader(src, path, key).lengths()
+    return out
 
-def load_all_lengths(pickle_info):
-    length_data = {}
-    for source, info in pickle_info.items():
-        if isinstance(info, tuple):                                         ########
-            path, key = info                                                ########
-        else:
-            path, key = info, None                                           ########
-        loader = GTLengthLoader(source, path, key)                          ########
-        length_data[source] = loader.load_lengths()
-    return length_data
-
-def plot_histogram(length_data, palette, title, output_prefix):
-    """Plot histogram with transparent bars and log scale."""
-    plt.figure(figsize=(10, 6))
-    # 修改：处理空列表，若数据为空则默认最大值为 0 ########
-    max_val = 0  ########
-    for v in length_data.values():  ########
-        if len(v) > 0:  ########
-            max_val = max(max_val, max(v))  ########
-    bins = np.arange(0, max_val + 2)  ########
-    for source, lengths in length_data.items():
-        if len(lengths) > 0:  ########
-            plt.hist(lengths, bins=bins, alpha=0.4, label=source,
-                     color=palette[source], edgecolor=None)
+def plot_kde(length_data, title, prefix):
+    plt.figure(figsize=(8, 8))
+    total = sum(len(v) for v in length_data.values())
+    for raw, lens in length_data.items():
+        if not lens: continue
+        w     = np.ones_like(lens) / total
+        kde   = gaussian_kde(lens, weights=w)
+        xs    = np.linspace(min(lens) - 1, max(lens) + 1, 200)
+        ys    = np.clip(kde(xs), 1e-12, None)         ########
+        label = raw
+        plt.fill_between(xs, ys, alpha=0.4, color=PALETTE[label], label=label)
+        plt.plot(xs, ys, color=PALETTE[label], linewidth=2)
     plt.title(title)
     plt.xlabel("List Length")
-    plt.ylabel("Frequency")
-    plt.xscale("log")
-    plt.legend()
-    plt.grid(False)
+    plt.ylabel("Proportion Density")
+    plt.xscale("log")                                 ########
+    plt.yscale("log")                                 ########
+    plt.legend(title="Source", fontsize=22)           ########
+    plt.grid(False); plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_kde.pdf"))
+
+def plot_histogram(length_data, palette, title, prefix):
+    plt.figure(figsize=(8, 8))
+    total = sum(len(v) for v in length_data.values())        ########
+    max_val = max(max(v) for v in length_data.values() if v)
+    bins = np.arange(0, max_val + 2)
+    for src, lengths in length_data.items():
+        if not lengths: continue
+        weights = np.ones_like(lengths) / total              ########
+        plt.hist(lengths, bins=bins, weights=weights,        ########
+                 alpha=0.4, label=src, color=palette[src],
+                 edgecolor=None)
+    plt.title(title); plt.xlabel("List Length"); plt.ylabel("Proportion") ########
+    plt.xscale("log"); plt.legend(); plt.grid(False); plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_hist.pdf"))
+
+def plot_log_boxplot(length_data, palette, title, prefix):
+    import matplotlib.patches as mpatches
+    plt.figure(figsize=(8, 8))
+
+    labels = []
+    data = []
+    colors = []
+    for src in length_data:
+        if not length_data[src]:
+            continue
+        labels.append(src)
+        data.append(length_data[src])
+        colors.append(palette[src])
+
+    box = plt.boxplot(data, patch_artist=True, showfliers=True)
+
+    for patch, color in zip(box['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.6)
+
+    plt.xticks(range(1, len(labels)+1), labels, rotation=30, fontsize=16)
+
+    plt.yscale('log')
+    plt.ylabel('List Length (log scale)', fontsize=20)
+    plt.title(title, fontsize=22)
+    plt.grid(True, which='both', axis='y', linestyle='--', alpha=0.5)
+
+    patches = [mpatches.Patch(color=palette[l], label=l) for l in labels]
+    plt.legend(handles=patches, title='Source', fontsize=16,
+               loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=len(labels))  # <--- 这里改了
+
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, f"{output_prefix}_histogram.png"))
-    plt.savefig(os.path.join(OUTPUT_DIR, f"{output_prefix}_histogram.pdf"))
-    # plt.show()
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
+    plt.show()
 
-def plot_kde(length_data, palette, title, output_prefix):
-    """Plot KDE smoothed distribution with fill and log scale."""
-    plt.figure(figsize=(10, 6))
-
-    def plot_kde_manual(data, label, color):
-        if len(data) == 0:  ########
-            return  ########
-        kde = gaussian_kde(data)
-        x_vals = np.linspace(min(data) - 1, max(data) + 1, 200)
-        y_vals = kde(x_vals)
-        plt.fill_between(x_vals, y_vals, alpha=0.4, label=label, color=color)
-        plt.plot(x_vals, y_vals, linewidth=2, color=color)
-
-    for source, lengths in length_data.items():
-        plot_kde_manual(lengths, source, palette[source])
-
-    plt.title(title)
-    plt.xlabel("List Length")
-    plt.ylabel("Density")
-    plt.xscale("log")
-    plt.legend(title="Source")
-    plt.grid(False)
-    plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, f"{output_prefix}_kde.png"))
-    plt.savefig(os.path.join(OUTPUT_DIR, f"{output_prefix}_kde.pdf"))
-    # plt.show()
-
-# ================= Original single-file pickles =================
-GT_FILE = "data/gt/scilake_gt_all_matrices__overlap_rate.pkl.gz"            ########
-PICKLE_PATHS_1 = {
-    "Ours": (GT_FILE, "csv_real_gt"),
-    "SANTOS": "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",
-    "TUS": "/Users/doradong/Repo/santos/groundtruth/tusUnionBenchmark.pickle"
-}
-print_large_keys(PICKLE_PATHS_1, threshold=1000)
-length_data_1 = load_all_lengths(PICKLE_PATHS_1)
-plot_histogram(length_data_1, TEAL_PALETTE, "Distribution of GT Lengths (Histogram)", "gt1")
-plot_kde(length_data_1, TEAL_PALETTE, "Distribution of GT Lengths (KDE)", "gt1")
-
-# ================ Combined GT file support ================
-SCILAKE_PICKLE_PATHS = {                                                     ########
-    "scilake_direct": (GT_FILE, "csv_real_gt"),                  ########
-    "scilake_rate":  (GT_FILE, "csv_real_gt")                    ########
+GT_DIR = "data/gt"
+PATHS = {
+    "paper":  os.path.join(GT_DIR, "csv_pair_adj_direct_label_processed.pkl"),
+    "model":         os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.pkl"),
+    "dataset":       os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.pkl"),
+    "santos_small":  "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",
+    "santos_large": "/Users/doradong/Repo/santos/groundtruth/real_tablesUnionBenchmark.pickle",
+    "tus_small":     "/Users/doradong/Repo/table-union-search-benchmark/tus_small_query_candidate.pkl",
+    "tus_large":     "/Users/doradong/Repo/table-union-search-benchmark/tus_large_query_candidate.pkl",
 }
 
-print_large_keys(SCILAKE_PICKLE_PATHS, threshold=1000)                       ########
-length_data_2 = load_all_lengths(SCILAKE_PICKLE_PATHS)                       ########
-# plots using NEW_PALETTE...
-plot_histogram(length_data_2, NEW_PALETTE, "Distribution of GT Lengths (Direct vs Rate)", "gt2")  ########
-plot_kde(length_data_2, NEW_PALETTE, "Distribution of GT Lengths (Direct vs Rate)", "gt2")        ########
-print("Saved to", OUTPUT_DIR)
+lengths = load_lengths(PATHS)
 
-PICKLE_PATHS_3 = {  ########
-    "santos_union": "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",  ########
-    "santos_joinable": "/Users/doradong/Repo/santos/groundtruth/santosIntentColumnBenchmark.pickle",  ########
-    "tus_union": "/Users/doradong/Repo/santos/groundtruth/tusUnionBenchmark.pickle",  ########
-    "tus_joinable": "/Users/doradong/Repo/santos/groundtruth/tusIntentColumnBenchmark.pickle",  ########
-    "realtables_union": "/Users/doradong/Repo/santos/groundtruth/real_tablesUnionBenchmark.pickle",  ########
-    "realtables_joinable": "/Users/doradong/Repo/santos/groundtruth/real_tablesIntentColumnBenchmark.pickle",  ########
-}
-SIX_PALETTE = {  ########
-    "santos_union": "#e41a1c",       ########
-    "santos_joinable": "#377eb8",    ########
-    "tus_union": "#4daf4a",          ########
-    "tus_joinable": "#984ea3",       ########
-    "realtables_union": "#ff7f00",   ########
-    "realtables_joinable": "#a65628" ########
-}
-length_data_3 = load_all_lengths(PICKLE_PATHS_3)  ########
-plot_histogram(length_data_3, SIX_PALETTE, "GT Length Distribution: Union vs Joinable", "gt3")  ########
-plot_kde(length_data_3, SIX_PALETTE, "GT Length Distribution: Union vs Joinable", "gt3")  ########
-print('Saved union vs joinable comparison to', OUTPUT_DIR)
+# plot_histogram(lengths, "GT Length (All Sources)", "gt_all")   ########
+#plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
+plot_log_boxplot(lengths, PALETTE, "GT Length Distribution (Boxplot, Log Scale)", "gt_boxplot")
+
+print("Plots saved →", OUTPUT_DIR)

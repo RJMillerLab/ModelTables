@@ -150,14 +150,15 @@ Final gt!
 python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
 # I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
 python -m src.data_gt.step3_gt # build up groundtruth
+python -m src.data_localindexing.turn_tus_into_pickle # process sqlite gt into pickle file
+python -m src.data_analysis.gt_distri # get distribution of groundtruth
 # (deprecate) python -m src.data_gt.gt_combine
 python -m src.data_gt.modelcard_matrix # (add modelcard level citation graph)
 # process
 python -m src.data_gt.gt_keep_basename # keep basename
 python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t
 # (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
-
-python -m src.data_analysis.gt_fig # plot stats
+# (deprecate) python -m src.data_analysis.gt_fig # plot stats
 ```
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
@@ -188,6 +189,8 @@ bash scripts/step1_pretrain.sh # finetune contrastive learning
 bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake items
 bash scripts/step3_search_hnsw.sh # data lake search (retrieve)
 bash scripts/step3_processmetrics.sh # extract metrics based on gt & result diff | plot fig
+# (Optional) bash eval_per_resource.sh # run ablation study on different results after getting results
+bash step3_ablation_diff_resources.sh # run ablation study on different results before getting results
 # bash scripts/step4_discovery.sh
 ```
 
@@ -195,8 +198,8 @@ Analysis on results
 ```bash  
 # get top-10 results from step3_search_hnsw
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
-# get distribution of groundtruth
-python -m src.data_analysis.gt_distri # get csv with gt list > 1000 # Input: /Users/doradong/Repo/CitationLake/data/gt/scilake_large_gt__direct_label.pickle # Output: figures
+# check the count of unique csvs
+python count_unique_csvs.py   --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json   --gt      /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
 python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log # check the related model of csv
 ```
 
