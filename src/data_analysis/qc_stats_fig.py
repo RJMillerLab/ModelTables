@@ -43,7 +43,7 @@ def annotate_bars(ax, fontsize=16):
         height = p.get_height()
         if height > 0:
             ax.annotate(f'{int(height)}',
-                        (p.get_x() + p.get_width() / 2, height*0.996),
+                        (p.get_x() + p.get_width() / 2, height*0.9),
                         ha='center', va='bottom', fontsize=fontsize, rotation=0)
 
 def plot_metrics_grid(df): 
@@ -57,17 +57,17 @@ def plot_metrics_grid(df):
     bar_width = 0.15
     gap = 0.4
     group_width = len(RESOURCES) * bar_width + gap
-    clusters = ['Benchmarks', 'Ours-dup', 'Ours-dedup', 'Ours-w/ title', 'Ours-w/ valid title']
+    clusters = ['Benchmarks', 'Ours-dup', 'Ours-dedup', 'Ours-w/ \n title', 'Ours-w/ \n valid title']
     resources = list(RESOURCES.keys())
 
     cluster_key_map = {
         'Ours-dup': " (duplicated)",
         'Ours-dedup': "",
-        'Ours-w/ title': "-title-dedup",
-        'Ours-w/ valid title': "-valid-dedup"
+        'Ours-w/ \n title': "-title-dedup",
+        'Ours-w/ \n valid title': "-valid-dedup"
     }
 
-    fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True, sharey=False, constrained_layout=True)
+    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True, sharey=False, constrained_layout=True)
 
     for ax, metric in zip(axes, metrics):
         heights = []
@@ -92,6 +92,10 @@ def plot_metrics_grid(df):
         ]
         xtick_labels = clusters
         ax.bar(positions, heights, width=bar_width, color=colors)
+        # add a small top margin (5%) to y-axis ########
+        #max_h = max(heights)
+        #bottom, top = ax.get_ylim()
+        #ax.set_ylim(bottom, max_h * 1.05)  # set top limit
         ax.set_yscale('log')
         annotate_bars(ax, fontsize=12)
         ax.set_ylabel(f"{metric}", fontsize=24) 
@@ -112,7 +116,7 @@ def plot_metrics_grid(df):
     fig.legend(
         handles_baseline + handles_resource,
         [h.get_label() for h in handles_baseline + handles_resource],
-        loc="lower center", bbox_to_anchor=(0.5, -0.11),
+        loc="lower center", bbox_to_anchor=(0.5, -0.15),
         ncol=4,
         fontsize=15,
         title="Legend", title_fontsize=13

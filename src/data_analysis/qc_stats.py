@@ -298,12 +298,5 @@ def main():
     results_df.to_parquet(results_path, index=False)
     print(f"\nSaved results to {results_path}")
 
-    plot_metric(results_df, "# Tables", "benchmark_tables.pdf")
-    plot_metric(results_df, "# Cols", "benchmark_cols.pdf")
-    plot_metric(results_df, "Avg # Rows", "benchmark_avg_rows.pdf")
-    print(f"Saved figure to {OUTPUT_DIR}/benchmark_tables.pdf")
-    print(f"Saved figure to {OUTPUT_DIR}/benchmark_cols.pdf")
-    print(f"Saved figure to {OUTPUT_DIR}/benchmark_avg_rows.pdf")
-
 if __name__ == "__main__":
     main()
