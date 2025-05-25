@@ -68,6 +68,7 @@ def plot_metrics_grid(df):
     }
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True, sharey=False, constrained_layout=True)
+    fig.suptitle("Statistic across different benchmarks", fontsize=22)  ########
 
     for ax, metric in zip(axes, metrics):
         heights = []
@@ -92,17 +93,13 @@ def plot_metrics_grid(df):
         ]
         xtick_labels = clusters
         ax.bar(positions, heights, width=bar_width, color=colors)
-        # add a small top margin (5%) to y-axis ########
-        #max_h = max(heights)
-        #bottom, top = ax.get_ylim()
-        #ax.set_ylim(bottom, max_h * 1.05)  # set top limit
         ax.set_yscale('log')
+        ax.margins(y=0.1)
         annotate_bars(ax, fontsize=12)
         ax.set_ylabel(f"{metric}", fontsize=24) 
 
     axes[-1].set_xticks(xtick_positions)
     axes[-1].set_xticklabels(xtick_labels, rotation=0, fontsize=17)
-    axes[-1].set_xlabel("Dataset Category", fontsize=24) 
 
     handles_baseline = [
         Patch(facecolor=palette_baseline[i], label=BENCHMARK_NAMES[i])
@@ -116,14 +113,14 @@ def plot_metrics_grid(df):
     fig.legend(
         handles_baseline + handles_resource,
         [h.get_label() for h in handles_baseline + handles_resource],
-        loc="lower center", bbox_to_anchor=(0.5, -0.15),
+        loc="lower center", bbox_to_anchor=(0.5, -0.1),
         ncol=4,
         fontsize=15,
-        title="Legend", title_fontsize=13
     )
 
     plt.savefig(os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.pdf"), dpi=300, bbox_inches='tight')
     plt.close()
+
 
 if __name__ == "__main__":
     results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")

@@ -21,29 +21,43 @@ import time
 #INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet" # original query id from online
 INPUT_PARQUET = "data/processed/extracted_annotations.parquet" # query title from online
 SIMILARITY_MODES = ["max_pr", "jaccard", "dice"]
+INTENTS = ["background", "methodology", "result", "methodology_or_result"]
 COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"
 
 THRESHOLD = 0.1
 SAVE_THRESHOLD_OVERLAP = True
 MODE = "reference"  # or "citation"
 
-def load_Id_lists(df, mode, influential=False):
+def load_Id_lists(df, mode, influential=False, intent=None):   ########
+    """
+    mode: 'reference' or 'citation'
+    intent: None → overall  / 'methodology' / 'result'
+    influential: bool
+    """
+    if intent == "methodology_or_result":                                                   ########
+        prefix = "ref_papers" if mode=="reference" else "cit_papers"                        ########
+        suffix = "_infl_ids" if influential else "_ids"                                    ########
+        col1 = f"{prefix}_methodology{suffix}"                                             ########
+        col2 = f"{prefix}_result{suffix}"                                                  ########
+    else:                                                                                   ########
+        prefix = "ref_papers" if mode == "reference" else "cit_papers"                     ########
+        base   = f"{prefix}_{'overall' if intent is None else intent}"                     ########
+        col    = f"{base}_{'infl_ids' if influential else 'ids'}"     
+
     Id_to_ids = {}
-    for index, row in df.iterrows():
-        pid = row["corpusid"]
-        if mode == "reference":
-            if influential:
-                Id_to_ids[pid] = set(row["ref_papers_overall_infl_ids"])
-            else:
-                Id_to_ids[pid] = set(row["ref_papers_overall_ids"])
-        elif mode == "citation":
-            if influential:
-                Id_to_ids[pid] = set(row["cit_papers_overall_infl_ids"])
-            else:
-                Id_to_ids[pid] = set(row["cit_papers_overall_ids"])
-    # turn to string list [1,2,3]->['1','2','3']
-    Id_to_ids = {str(i):list(map(str, Id_to_ids[i])) for i in Id_to_ids}
-    return Id_to_ids
+    for _, row in df.iterrows():
+        pid = str(row["corpusid"])
+        #ids = row[col]
+        if intent == "methodology_or_result":                                               ########
+            ids1 = row[col1]                                                       ########
+            ids2 = row[col2]                                                       ########
+            ids  = list(set(ids1) | set(ids2))                ########
+        else:                                                                              ########
+            ids = row[col] 
+        if not isinstance(ids, (list, tuple, np.ndarray)):
+            ids = []
+        Id_to_ids[pid] = set(map(str, ids))
+    return {pid: list(v) for pid, v in Id_to_ids.items()}
 
 def compute_overlap_matrices(Id_to_ref, paper_list):
     # Inverted index
@@ -114,61 +128,67 @@ def main():
     df = pd.read_parquet(INPUT_PARQUET)
     df['corpusid'] = df['corpusid'].astype(str)
     print(f"Loaded {len(df)} rows")
+    print('keys:', list(df.keys()))
 
-    Id_to_ref_inf  = load_Id_lists(df, mode="reference", influential=True)
-    Id_to_cite_inf = load_Id_lists(df, mode="citation",  influential=True)
-    Id_to_all_inf = {pid: Id_to_ref_inf.get(pid, []) + Id_to_cite_inf.get(pid, []) for pid in set(Id_to_ref_inf) | set(Id_to_cite_inf)}
+    for intent in INTENTS + [None]:
+        for mode, infl in [("reference", False), ("reference", True), ("citation", False), ("citation", True)]:
+            d = load_Id_lists(df, mode, influential=infl, intent=intent)
+            total_links = sum(len(v) for v in d.values())
+            name = f"{mode}_{intent or 'overall'}_{'infl' if infl else 'norm'}"
+        print(f"[DEBUG-LOAD] {name}: {len(d)} papers, total links = {total_links}")
 
-    Id_to_ref  = load_Id_lists(df, mode="reference", influential=False)
-    Id_to_cite = load_Id_lists(df, mode="citation",  influential=False)
-    Id_to_all = {pid: Id_to_ref.get(pid, []) + Id_to_cite.get(pid, []) for pid in set(Id_to_ref) | set(Id_to_cite)}
+    Id_to_ref        = load_Id_lists(df, "reference", influential=False)  ########
+    Id_to_ref_infl   = load_Id_lists(df, "reference", influential=True)   ########
+    Id_to_cite       = load_Id_lists(df, "citation",  influential=False)  ########
+    Id_to_cite_infl  = load_Id_lists(df, "citation",  influential=True)   ########
+    Id_to_all        = {pid: Id_to_ref.get(pid, []) + Id_to_cite.get(pid, [])            for pid in set(Id_to_ref)|set(Id_to_cite)}
+    Id_to_all_infl   = {pid: Id_to_ref_infl.get(pid, []) + Id_to_cite_infl.get(pid, [])  for pid in set(Id_to_ref_infl)|set(Id_to_cite_infl)}
     Id_list = sorted(set(df["corpusid"]))
 
     time_start = time.time()
-    overlap_all = compute_overlap_matrices(Id_to_ref, Id_list)
-    direct_data  = compute_direct_matrix(Id_to_all, Id_list)
-    print(f"Time taken for normal: {time.time() - time_start} seconds")
-        
-    # Compute influential
-    time_start = time.time()
-    inf_overlap_all = compute_overlap_matrices(Id_to_ref_inf, Id_list)
-    inf_direct_data  = compute_direct_matrix(Id_to_all_inf, Id_list)
+    overlap_all       = compute_overlap_matrices(Id_to_ref,       Id_list)
+    overlap_all_infl  = compute_overlap_matrices(Id_to_ref_infl,  Id_list)
+    direct            = compute_direct_matrix(Id_to_all,          Id_list)
+    direct_infl       = compute_direct_matrix(Id_to_all_infl,     Id_list)
+    print(f"[DEBUG] direct nnz={direct.nnz}, direct_infl nnz={direct_infl.nnz}")
     print(f"Time taken for normal: {time.time() - time_start} seconds")
 
-    # Threshold normal overlap
-    thresholds = {}
-    for key in ["max_pr","jaccard","dice"]:
-        m = overlap_all[key].copy()
-        mask = m.data < THRESHOLD
-        m.data[mask] = 0
-        m.eliminate_zeros()
-        thresholds[f"{key}_thresholded"] = m.astype(np.bool_)
+    # --- intent loops
+    intent_overlap       = {}
+    intent_overlap_infl  = {}
+    for intent in INTENTS:
+        d_norm = load_Id_lists(df, "reference", False, intent)
+        d_infl = load_Id_lists(df, "reference", True,  intent)
+        print(f"[DEBUG-LOAD] methodology_or_result? intent={intent}, norm links={sum(len(v) for v in d_norm.values())}, infl links={sum(len(v) for v in d_infl.values())}")
+        intent_overlap[intent]      = compute_overlap_matrices(d_norm, Id_list)
+        intent_overlap_infl[intent] = compute_overlap_matrices(d_infl, Id_list)
+        print(f"[DEBUG-OVR] {intent} non-zero per score: ", {k: mat.nnz for k,mat in intent_overlap[intent].items()})
+        print(f"[DEBUG-OVR] {intent} non-zero per score: ", {k: mat.nnz for k,mat in intent_overlap_infl[intent].items()})
 
-    # Threshold influential overlap
-    thresholds_inf = {}
-    for key in ["max_pr","jaccard","dice"]:
-        m = inf_overlap_all[key].copy()
-        mask = m.data < THRESHOLD
-        m.data[mask] = 0
-        m.eliminate_zeros()
-        thresholds_inf[f"{key}_influential_thresholded"] = m.astype(np.bool_)
+    # --- threshold helpers
+    def thresh(m):  ########
+        x = m.copy(); mask = (x.data < THRESHOLD); x.data[mask]=0; x.eliminate_zeros(); return x.astype(bool)
 
-    # Build combined dict
     combined = {
-        "paper_index": Id_list,
-        "direct_label": direct_data,
-        "direct_label_influential": inf_direct_data,
-        "max_pr":   overlap_all["max_pr"],
-        "jaccard":  overlap_all["jaccard"],
-        "dice":     overlap_all["dice"],
-        "max_pr_influential":   inf_overlap_all["max_pr"],
-        "jaccard_influential":  inf_overlap_all["jaccard"],
-        "dice_influential":     inf_overlap_all["dice"],
-        **thresholds,
-        **thresholds_inf
+        "paper_index":             Id_list,
+        "direct_label":            direct,
+        "direct_label_influential":direct_infl
     }
+    # overall
+    for k in SIMILARITY_MODES:
+        combined[k]                     = overlap_all[k]
+        combined[f"{k}_influential"]    = overlap_all_infl[k]
+        combined[f"{k}_thresholded"]    = thresh(overlap_all[k])
+        combined[f"{k}_influential_thresholded"] = thresh(overlap_all_infl[k])
+    # intents
+    for intent in INTENTS:
+        for k in SIMILARITY_MODES:
+            combined[f"{k}_{intent}"]                     = intent_overlap[intent][k]            ########
+            combined[f"{k}_{intent}_influential"]         = intent_overlap_infl[intent][k]       ########
+            combined[f"{k}_{intent}_thresholded"]         = thresh(intent_overlap[intent][k])    ########
+            combined[f"{k}_{intent}_influential_thresholded"] = thresh(intent_overlap_infl[intent][k]) ########
 
-    # Save everything
+    # Save
     os.makedirs(os.path.dirname(COMBINED_PATH), exist_ok=True)
     with gzip.open(COMBINED_PATH, "wb") as f:
         pickle.dump(combined, f)

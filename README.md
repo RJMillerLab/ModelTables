@@ -132,7 +132,7 @@ python -m src.data_gt.step3_pre_merge # merge all the table list into modelid fi
 # I: final_integration_with_paths.parquet. O: modelcard_citation_enriched.parquet
 python -m src.data_gt.step3_overlap_rate # paper level: compute paper-pair overlap score | 
 # I: extracted_annotations/modelcard_citation_enriched O: modelcard_rate/label.pickle
-python -m src.data_analysis.overlap_fig # plot stats
+python -m src.data_analysis.overlap_fig # plot violin fig of overlap rate
 python -m src.data_gt.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle from step3_overlap_rate
 ```
 Quality Control !!! | Run some analysis

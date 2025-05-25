@@ -148,15 +148,6 @@ def extract_datasetids_from_readme(text: str, valid_datasets: set) -> list:
         ds.add(tok)
     return [d for d in ds if d in valid_datasets]
 
-"""def extract_basemodels_from_tags(tags_text: str, valid_models: set) -> list:
-    if not isinstance(tags_text, str):
-        return []
-    m = re.search(r"base_model:\s*([^\s,\]]+)", tags_text, re.I)
-    if not m:
-        return []
-    tok = _clean_token(re.sub(r"https?://huggingface\.co/", "", m.group(1), flags=re.I).lower())
-    return [valid_models[tok] if tok in valid_models else tok] if tok in valid_models else []
-"""
 def extract_datasets_from_tags(tags_text: str, valid_datasets: set) -> list:
     ds, _ = extract_datasets_tags(tags_text)
     return [d for d in ds if d in valid_datasets]
@@ -302,23 +293,10 @@ if __name__ == "__main__":
     # 2 )  BUILD  *RELATED-MODEL LIST*  INSTEAD OF LARGE MATRICES ##########
     ########################################################################
     # drop rows with empty four lists (speed up later calculation)
-    """df = df[df.apply(lambda r: bool(r['tag_base_model_list'] or r['readme_modelid_list']
-                                       or r['tag_dataset_list']  or r['readme_datasetid_list']),
-                    axis=1)]
-    related_map = defaultdict(set)
-    # explode four lists, group by value, any intersection counts as related
-    for col in ["tag_base_model_list", "readme_modelid_list", "tag_dataset_list", "readme_datasetid_list"]:
-        exploded = df[["modelId", col]].explode(col).dropna()
-        for _, group in exploded.groupby(col)["modelId"]:
-            members = group.tolist()
-            for a, b in combinations(members, 2):
-                related_map[a].add(b)
-                related_map[b].add(a)
-    df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_map.get(m, [])))"""
     ########################################################################
     # 2a ) BUILD *MODEL-BASED* RELATED-MODEL LIST                              ########
     ########################################################################
-    # 只保留至少有一个 base/model link 的 row
+    # keep rows with at least one base/model link
     df_model = df[df.apply(lambda r: bool(r['tag_base_model_list'] or r['readme_modelid_list']), axis=1)]
     related_model = defaultdict(set)                                                             
     for col in ["tag_base_model_list", "readme_modelid_list"]:                                   
@@ -334,35 +312,7 @@ if __name__ == "__main__":
     ########################################################################
     # 5 )  BUILD CSV-LEVEL GT via related_model_list （no self-pair） ########
     ########################################################################
-    """model_to_csvs = df.set_index("modelId")["all_table_list_dedup"].to_dict()
-    csv_pair_counts = defaultdict(int)
-    for m, neighs in related_map.items():
-        csvs_m = model_to_csvs.get(m, [])
-        for n in neighs:
-            if m >= n:
-                continue  # ensure each unordered pair (m, n) is counted once
-            csvs_n = model_to_csvs.get(n, [])
-            for a, b in product(csvs_m, csvs_n):
-                if a == b:
-                    continue  # skip same CSV
-                key = tuple(sorted((a, b)))
-                csv_pair_counts[key] += 1
-    with open('data/gt/scilake_gt_modellink_related_csv_pair_counts.pkl', 'wb') as f:
-        pickle.dump(dict(csv_pair_counts), f)
-    # Convert to adjacency mapping {csv: [related_csvs]}
-    csv_adj = defaultdict(set)
-    for (a, b), cnt in csv_pair_counts.items():
-        if cnt > 0:
-            csv_adj[a].add(b)
-            csv_adj[b].add(a)
-    # Convert sets to sorted lists for JSON-friendliness
-    csv_adj = {k: sorted(v) for k, v in csv_adj.items()}
-    import json
-    with open('data/gt/scilake_gt_modellink_related.json', 'w') as f:
-        json.dump(csv_adj, f, indent=2)
-    print(f"✔️  Saved RELATED-LEVEL CSV pair counts ({len(csv_pair_counts):,} pairs)")
-    print(f"✔️  Saved RELATED-LEVEL CSV adjacency to data/gt/scilake_gt_modellink_related.json")
-    print(f"✔️  Done")"""
+
     ########################################################################
     # 5a ) BUILD CSV-LEVEL GT FROM related_model_list (Model-based)         ########
     ########################################################################
@@ -371,21 +321,21 @@ if __name__ == "__main__":
     for m, neighs in related_model.items():                                                 
         cs_m = model_to_csvs.get(m, [])                                                     
         for n in neighs:
-            if m >= n: continue  # 只计一次                                          
+            if m >= n: continue  # only count once for each pair
             cs_n = model_to_csvs.get(n, [])                                                 
             for a, b in product(cs_m, cs_n):                                                
                 if a == b: continue                                                         
                 key = tuple(sorted((a, b)))                                                
                 csv_counts_model[key] += 1                                                 
-    # 保存原始 tuple→count
+    # keep original tuple→count
     with open('data/gt/scilake_gt_modellink_model_counts.pkl', 'wb') as f:                  
         pickle.dump(dict(csv_counts_model), f)                                             
-    # 转成邻接表并存 JSON
+    # convert to adjacency mapping {csv: [related_csvs]}
     adj_model = defaultdict(set)                                                            
     for (a, b), cnt in csv_counts_model.items():                                           
         if cnt > 0:                                                                        
-            adj_model[a].add(b); adj_model[b].add(a)                                       
-    adj_model = {k: sorted(v) for k, v in adj_model.items()}                               
+            adj_model[a].add(b); adj_model[b].add(a)
+    adj_model = {k: sorted(v) for k, v in adj_model.items()}
     import json
     with open('data/gt/scilake_gt_modellink_model_adj.json', 'w') as f:                      
         json.dump(adj_model, f, indent=2)                                                  
@@ -394,7 +344,7 @@ if __name__ == "__main__":
     ########################################################################
     # 5b ) BUILD CSV-LEVEL GT FROM related_dataset_list (Dataset-based)     ########
     ########################################################################
-    # 先构造 dataset 关联 map
+    # Create dataset related map
     df_ds = df[df.apply(lambda r: bool(r['tag_dataset_list'] or r['readme_datasetid_list']), axis=1)]
     related_ds = defaultdict(set)                                                           
     for col in ["tag_dataset_list", "readme_datasetid_list"]:                                
@@ -403,7 +353,7 @@ if __name__ == "__main__":
             mem = grp.tolist()                                                              
             for a, b in combinations(mem, 2):                                               
                 related_ds[a].add(b); related_ds[b].add(a)                                  
-    # 交叉 model→csv to dataset-GT
+    # cross model→csv to dataset-GT
     csv_counts_ds = defaultdict(int)                                                       
     for m, neighs in related_ds.items():                                                  
         cs_m = model_to_csvs.get(m, [])                                                    
