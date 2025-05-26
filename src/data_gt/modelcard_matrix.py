@@ -336,9 +336,12 @@ if __name__ == "__main__":
         if cnt > 0:                                                                        
             adj_model[a].add(b); adj_model[b].add(a)
     adj_model = {k: sorted(v) for k, v in adj_model.items()}
-    import json
-    with open('data/gt/scilake_gt_modellink_model_adj.json', 'w') as f:                      
-        json.dump(adj_model, f, indent=2)                                                  
+    processed_model_adj = {                                                                         ########
+        os.path.basename(k): [os.path.basename(x) for x in v]                                       ########
+        for k, v in adj_model.items()                                                          ########
+    }
+    with open('data/gt/scilake_gt_modellink_model_adj_processed.pkl', 'wb') as f:
+        pickle.dump(processed_model_adj, f)
     print(f"✔️  Saved MODEL-BASED CSV adjacency ({len(adj_model):,} keys)")                  
 
     ########################################################################
@@ -370,7 +373,11 @@ if __name__ == "__main__":
     for (a, b), cnt in csv_counts_ds.items():                                             
         if cnt > 0:                                                                       
             adj_ds[a].add(b); adj_ds[b].add(a)                                            
-    adj_ds = {k: sorted(v) for k, v in adj_ds.items()}                                    
-    with open('data/gt/scilake_gt_modellink_dataset_adj.json', 'w') as f:                  
-        json.dump(adj_ds, f, indent=2)                                                    
+    adj_ds = {k: sorted(v) for k, v in adj_ds.items()}      
+    processed_ds_adj = {                                                                            ########
+        os.path.basename(k): [os.path.basename(x) for x in v]                                       ########
+        for k, v in adj_ds.items()                                                              ########
+    }                              
+    with open('data/gt/scilake_gt_modellink_dataset_adj_processed.pkl', 'wb') as f:
+        pickle.dump(processed_ds_adj, f)
     print(f"✔️  Saved DATASET-BASED CSV adjacency ({len(adj_ds):,} keys)")

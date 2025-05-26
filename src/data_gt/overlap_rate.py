@@ -21,7 +21,7 @@ import time
 #INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet" # original query id from online
 INPUT_PARQUET = "data/processed/extracted_annotations.parquet" # query title from online
 SIMILARITY_MODES = ["max_pr", "jaccard", "dice"]
-INTENTS = ["background", "methodology", "result", "methodology_or_result"]
+INTENTS = ["methodology_or_result"] # "background", "methodology", "result", 
 COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"
 
 THRESHOLD = 0.1
@@ -156,12 +156,16 @@ def main():
     # --- intent loops
     intent_overlap       = {}
     intent_overlap_infl  = {}
+    intent_direct       = {}
+    intent_direct_infl  = {}
     for intent in INTENTS:
         d_norm = load_Id_lists(df, "reference", False, intent)
         d_infl = load_Id_lists(df, "reference", True,  intent)
         print(f"[DEBUG-LOAD] methodology_or_result? intent={intent}, norm links={sum(len(v) for v in d_norm.values())}, infl links={sum(len(v) for v in d_infl.values())}")
         intent_overlap[intent]      = compute_overlap_matrices(d_norm, Id_list)
         intent_overlap_infl[intent] = compute_overlap_matrices(d_infl, Id_list)
+        intent_direct[intent]       = compute_direct_matrix(d_norm, Id_list)
+        intent_direct_infl[intent]  = compute_direct_matrix(d_infl, Id_list)
         print(f"[DEBUG-OVR] {intent} non-zero per score: ", {k: mat.nnz for k,mat in intent_overlap[intent].items()})
         print(f"[DEBUG-OVR] {intent} non-zero per score: ", {k: mat.nnz for k,mat in intent_overlap_infl[intent].items()})
 
@@ -183,10 +187,12 @@ def main():
     # intents
     for intent in INTENTS:
         for k in SIMILARITY_MODES:
-            combined[f"{k}_{intent}"]                     = intent_overlap[intent][k]            ########
-            combined[f"{k}_{intent}_influential"]         = intent_overlap_infl[intent][k]       ########
-            combined[f"{k}_{intent}_thresholded"]         = thresh(intent_overlap[intent][k])    ########
-            combined[f"{k}_{intent}_influential_thresholded"] = thresh(intent_overlap_infl[intent][k]) ########
+            combined[f"{k}_{intent}"]                           = intent_overlap[intent][k]
+            combined[f"{k}_{intent}_influential"]               = intent_overlap_infl[intent][k]
+            combined[f"{k}_{intent}_thresholded"]               = thresh(intent_overlap[intent][k])
+            combined[f"{k}_{intent}_influential_thresholded"]   = thresh(intent_overlap_infl[intent][k])
+        combined[f"direct_label_{intent}"]                            = intent_direct[intent]
+        combined[f"direct_label_{intent}_influential"]                = intent_direct_infl[intent]
 
     # Save
     os.makedirs(os.path.dirname(COMBINED_PATH), exist_ok=True)

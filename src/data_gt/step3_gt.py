@@ -234,10 +234,13 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
             csv_adj[a].append(b)
             csv_adj[b].append(a)
     csv_adj = {k: sorted(set(v)) for k, v in csv_adj.items()}
-
-    output_adj = f"{GT_DIR}/csv_pair_adj_{rel_mode.value}.pkl"
+    processed_csv_adj = {                                                                            ########
+        os.path.basename(k): [os.path.basename(x) for x in v]                                       ########
+        for k, v in csv_adj.items()                                                              ########
+    }
+    output_adj = f"{GT_DIR}/csv_pair_adj_{rel_mode.value}_processed.pkl"
     with open(output_adj, "wb") as f:
-        pickle.dump(csv_adj, f)
+        pickle.dump(processed_csv_adj, f)
     print(f"✅ CSV adjacency mapping saved to {output_adj}")
     
 

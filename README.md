@@ -130,10 +130,9 @@ python -m src.data_gt.step3_pre_merge # merge all the table list into modelid fi
 # I: final_integration_with_paths.parquet, modelcard_all_title_list.parquet → O: modelcard_step3_merged.parquet
 # (Only need if we not run s2orc_API_query) python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
 # I: final_integration_with_paths.parquet. O: modelcard_citation_enriched.parquet
-python -m src.data_gt.step3_overlap_rate # paper level: compute paper-pair overlap score | 
-# I: extracted_annotations/modelcard_citation_enriched O: modelcard_rate/label.pickle
-python -m src.data_analysis.overlap_fig # plot violin fig of overlap rate
-python -m src.data_gt.overlap # check whether thresholding for overlapping rate is reasonable | I: pickle from step3_overlap_rate
+python -m src.data_gt.overlap_rate # compute paper-pair overlap score | # I: extracted_annotations/modelcard_citation_enriched O: modelcard_rate/label.pickle
+python -m src.data_gt.overlap_fig # plot violin fig of overlap rate
+python -m src.data_gt.overlap # determining threshold
 ```
 Quality Control !!! | Run some analysis
 ```bash
@@ -153,9 +152,7 @@ python -m src.data_gt.step3_gt # build up groundtruth
 python -m src.data_localindexing.turn_tus_into_pickle # process sqlite gt into pickle file
 python -m src.data_analysis.gt_distri # get distribution of groundtruth
 # (deprecate) python -m src.data_gt.gt_combine
-python -m src.data_gt.modelcard_matrix # (add modelcard level citation graph)
-# process
-python -m src.data_gt.gt_keep_basename # keep basename
+python -m src.data_gt.modelcard_matrix # (add other two level citation graph)
 python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t
 # (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 # (deprecate) python -m src.data_analysis.gt_fig # plot stats
