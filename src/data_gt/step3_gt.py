@@ -16,6 +16,8 @@ python -m src.data_gt.step3_gt --overlap_rate_threshold 0.0 --rel_key [
     max_pr_methodology_or_result_influential
 ]
 """
+from multiprocessing import set_start_method
+set_start_method("fork", force=True)
 
 import os, json, gzip, pickle, time
 import pandas as pd
@@ -161,7 +163,7 @@ def compute_subset_pt_tm(FILES):
     comb_sub = (pt_sub @ tm_sub).astype(bool).tocsr()  # p x m
     return comb_sub, titles_list, model_list, paper_list
 
-def build_ground_truth(rel_key, overlap_rate_threshold):
+def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=False):
     # modelId-paperList-csvList, Our aim is to use paper-paper matrix to build {csv:[csv1, csv2]} related json
     """High‑level orchestration for building GT tables."""
     # ========== Step 1: Load paper-level info. Build paper-level adjacency matrix ==========
@@ -173,6 +175,7 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
     cid2titles = defaultdict(list)
     for cid, title in zip(title_df["corpusid"].astype(str), title_df["query"]):
         cid2titles[cid].append(title)
+    del title_df
 
     # ---------- Step 2: modelId → csv mapping ----------
     df_tables = load_table_source()
@@ -182,6 +185,7 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
         papers = row['all_title_list_valid']
         csvs   = row['all_table_list_dedup']  # updated col ########
         rows.append((papers, csvs))
+    del df_tables
 
     # Build reverse index: paper -> row IDs
     paper2rows = defaultdict(list)
@@ -203,18 +207,20 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
 
     # 1) intra-row: construct B for same-model CSV pairs
     row_b, col_b = [], []
-    for _, cs in tqdm(rows, desc="Building intra-row B"):
+    for _, cs in rows:
         for a, b in combinations(sorted(set(cs)), 2):
             ia, ib = csv2idx[a], csv2idx[b]
             row_b += [ia, ib]; col_b += [ib, ia]
     B = coo_matrix((np.ones(len(row_b), int), (row_b, col_b)),
                    shape=(len(all_csvs), len(all_csvs))).tocsr()
+    print(f"Step2: [Intra-row] Adjacency shape: {B.shape}: ", B.nnz)
+    del row_b, col_b
 
     # 2) inter-row: build A (paper→CSV) and compute C = Aᵀ·P·A
     corpus2pidx = {cid:i for i,cid in enumerate(paper_index)}
     title2cid   = {t:cid for cid,titles in cid2titles.items() for t in titles}
     row_i, col_i = [], []
-    for titles, cs in tqdm(rows, desc="Building inter-row A indices"):
+    for titles, cs in rows:
         for t in titles:
             cid = title2cid.get(t); p = corpus2pidx.get(cid)
             if p is None: continue
@@ -222,6 +228,8 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
                 row_i.append(p); col_i.append(csv2idx[c])
     A = coo_matrix((np.ones(len(row_i), bool),(row_i,col_i)), shape=(len(paper_index), len(all_csvs))).tocsr()
     C = A.T.dot(paper_paper_adj).dot(A).tocsr()
+    print(f"Step2: [Inter-row] Adjacency shape: {C.shape}: ", C.nnz)
+    del A, corpus2pidx, title2cid, row_i, col_i, paper_paper_adj
 
     # 3) sum and extract
     '''M = (B + C).tocsr()
@@ -234,40 +242,42 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
             processed_csv_adj[all_csvs[i]] = [ all_csvs[j] for j in nbrs ]'''
     # try to accelerate
     M = (B + C).tocsr()
-    matrix_path = f"{GT_DIR}/csv_pair_matrix_{rel_key}.npz"
-    save_npz(matrix_path, M)
-    print(f"✅ Sparse matrix saved to {matrix_path}")
+    del B, C
+    if save_matrix_flag:
+        matrix_path = f"{GT_DIR}/csv_pair_matrix_{rel_key}.npz"
+        save_npz(matrix_path, M)
+        print(f"✅ Sparse matrix saved to {matrix_path}")
 
     indptr   = M.indptr
     indices  = M.indices
-    nnz_per_row = np.diff(indptr)                     # 每行非零数
+    nnz_per_row = np.diff(indptr)
 
     processed_csv_adj = {}
-    rows_with_nbrs = np.where(nnz_per_row > 1)[0]     # 跳过全 0 或仅 self
+    rows_with_nbrs = np.where(nnz_per_row > 1)[0] # skip rows with no neighbors
     print(f"get {len(rows_with_nbrs)} non-empty rows, total {len(indptr)} rows")
 
     for i in tqdm(rows_with_nbrs, desc=f"Building CSV adjacency ({len(rows_with_nbrs)} non-empty rows)"):
         start, end = indptr[i], indptr[i+1]
         nbrs = indices[start:end]
-        if nbrs.size:                                 # 这里一定 >1，但再保险
-            # 排除对角线 i
-            nbrs = nbrs[nbrs != i]
+        if nbrs.size:
+            nbrs = nbrs[nbrs != i] # exclude self
             if nbrs.size:
                 processed_csv_adj[all_csvs[i]] = [all_csvs[j] for j in nbrs.tolist()]
     # keep basename
     processed_csv_adj = {os.path.basename(k): [os.path.basename(x) for x in v] for k, v in processed_csv_adj.items()}
+    print(f"!finished keeping only basename")
     # Save the processed adjacency mapping directly
     output_adj = f"{GT_DIR}/csv_pair_adj_{rel_key}_processed.pkl"
     with open(output_adj, "wb") as f:
         pickle.dump(processed_csv_adj, f)
     print(f"✅ CSV adjacency mapping saved to {output_adj}")
-    
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build SciLake union benchmark tables.")
     parser.add_argument("--rel_key", type=str, default='direct_label', help="Exact key inside combined pickle (e.g., 'max_pr', 'direct_label_influential').")
     parser.add_argument("--overlap_rate_threshold", type=float, default=0.0, help=("Numeric threshold for similarity/overlap matrices; ignored for 'direct_label*' keys."))
+    parser.add_argument("--save_matrix_flag", action="store_true", help="Save the sparse matrix to disk.")
     args = parser.parse_args()
 
-    build_ground_truth(rel_key=args.rel_key, overlap_rate_threshold=args.overlap_rate_threshold)
+    build_ground_truth(rel_key=args.rel_key, overlap_rate_threshold=args.overlap_rate_threshold, save_matrix_flag=args.save_matrix_flag)
