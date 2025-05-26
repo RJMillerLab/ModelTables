@@ -148,7 +148,10 @@ Final gt!
 ```bash
 python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
 # I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
-python -m src.data_gt.step3_gt # build up groundtruth
+#python -m src.data_gt.step3_gt # build up groundtruth
+bash src/data_gt/step3_gt.sh
+python -m src.data_gt.compare_gt_stats --gt_dir data/gt
+
 python -m src.data_localindexing.turn_tus_into_pickle # process sqlite gt into pickle file
 python -m src.data_analysis.gt_distri # get distribution of groundtruth
 # (deprecate) python -m src.data_gt.gt_combine

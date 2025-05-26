@@ -24,7 +24,8 @@ from tqdm import tqdm
 from enum import Enum
 from collections import defaultdict, Counter
 from itertools import combinations
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, coo_matrix
+
 
 # === Configuration ===
 DATA_DIR = "data/processed"
@@ -39,10 +40,6 @@ FILES = {
     "symlink_mapping": f"{DATA_DIR}/symlink_mapping.pickle",
     "valid_title": f"{DATA_DIR}/all_title_list_valid.parquet"
 }
-
-# ===== ENUMS =============================================================== #
-class TableSourceMode(str, Enum):
-    STEP3_MERGED = "step3_dedup"
 
 # ===== FACTORIES =========================================================== #
 def load_relationships(rel_key: str):
@@ -59,12 +56,12 @@ def load_relationships(rel_key: str):
     score_matrix = data[rel_key]
     return paper_index, score_matrix
 
-def load_table_source(mode: TableSourceMode):
+def load_table_source(file_key: str="step3_dedup"):
     """Factory loader for table‑list metadata."""
-    print(f"Loading table source ({mode.value}) from: {FILES[mode.value]}")
+    print(f"Loading table source from: {file_key}")
     # load valid_title, and merge by modelId
     df_valid_title = pd.read_parquet(FILES["valid_title"], columns=["modelId", "all_title_list_valid"])
-    df = pd.read_parquet(FILES[mode.value], columns=["modelId", "hugging_table_list_dedup", "github_table_list_dedup", "html_table_list_mapped_dedup", "llm_table_list_mapped_dedup"])
+    df = pd.read_parquet(FILES[file_key], columns=["modelId", "hugging_table_list_dedup", "github_table_list_dedup", "html_table_list_mapped_dedup", "llm_table_list_mapped_dedup"])
     df['all_table_list_dedup'] = df[[
         'hugging_table_list_dedup',
         'github_table_list_dedup',
@@ -170,11 +167,15 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
     # ========== Step 1: Load paper-level info. Build paper-level adjacency matrix ==========
     paper_index, score_matrix = load_relationships(rel_key)
     paper_paper_adj = build_paper_matrix(score_matrix, rel_key, overlap_rate_threshold)
-    print(f"Step1: [Paper-level] Adjacency shape: {paper_paper_adj.shape}")
-    print(paper_paper_adj.nnz)
+    print(f"Step1: [Paper-level] Adjacency shape: {paper_paper_adj.shape}: ", paper_paper_adj.nnz)
+
+    title_df = pd.read_parquet(FILES["integration"], columns=["corpusid", "query"])
+    cid2titles = defaultdict(list)
+    for cid, title in zip(title_df["corpusid"].astype(str), title_df["query"]):
+        cid2titles[cid].append(title)
 
     # ---------- Step 2: modelId → csv mapping ----------
-    df_tables = load_table_source(TableSourceMode.STEP3_MERGED) # fixed here!
+    df_tables = load_table_source()
     # Filter rows with nonempty paper & csv lists
     rows = []
     for _, row in df_tables.iterrows():
@@ -187,30 +188,122 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
     for rid, (papers, _) in enumerate(rows):
         for p in papers:
             paper2rows[p].append(rid)
+    sample_pid = next(iter(paper2rows))
+    print(f"[DEBUG] paper2rows first key → {sample_pid!r} , type={type(sample_pid)}")
+    print(f"[DEBUG] idx2pid[0] → {paper_index[0]!r} , type={type(paper_index[0])}")
+    print(f"[DEBUG] idx2pid[0] == sample?  {paper_index[0]==sample_pid}")
 
     # Dictionary for flat tuple-key counts
     csv_pair_cnt = defaultdict(int)
 
-    # 1) Intra-row counting
+    '''# 1) Intra-row counting
     for _, csvs in rows:
         for a, b in combinations(sorted(set(csvs)), 2):
             csv_pair_cnt[(a, b)] += 1  ######## marker for updated logic
 
     # 2) Inter-row counting for paper-paper edges
+    # === NEW ---- C = Aᵀ · P · A ======================
+    print("[INFO]  Building paper→CSV sparse matrix ...")
+    all_csvs = sorted({c for _, cs in rows for c in cs})
+    csv2idx  = {c: i for i, c in enumerate(all_csvs)}
+    corpus2pidx = {cid: i for i, cid in enumerate(paper_index)}
+    title2cid = {}
+    for cid, tlist in cid2titles.items():
+        for t in tlist:
+            title2cid[t] = cid
+
+    row_inds, col_inds = [], []
+    for titles, cs in rows:
+        for title in titles:
+            cid = title2cid.get(title)
+            if cid is None:
+                continue
+            p_idx = corpus2pidx.get(cid)
+            if p_idx is None:
+                continue
+            for c in cs:
+                row_inds.append(p_idx)
+                col_inds.append(csv2idx[c])
+
+    A = coo_matrix((np.ones(len(row_inds), dtype=bool), (row_inds, col_inds)), shape=(len(paper_index), len(all_csvs))).tocsr()
+
+    print("[INFO]  Multiplying Aᵀ · P · A ...")
+    C = A.transpose().dot(paper_paper_adj).dot(A).tocoo()
+
+    for i, j, v in tqdm(zip(C.row, C.col, C.data),
+                       total=len(C.data),
+                       desc="Aggregating CSV pairs"):
+        if i < j and v > 0:
+            csv_pair_cnt[(all_csvs[i], all_csvs[j])] += int(v)'''
+    # -- Vectorized CSV pair counting via sparse matrices --
+    # build global CSV list & index
+    all_csvs = sorted({c for _, cs in rows for c in cs})
+    csv2idx  = {c:i for i,c in enumerate(all_csvs)}
+
+    # 1) intra-row: construct B for same-model CSV pairs
+    row_b, col_b = [], []
+    for _, cs in tqdm(rows, desc="Building intra-row B"):
+        for a, b in combinations(sorted(set(cs)), 2):
+            ia, ib = csv2idx[a], csv2idx[b]
+            row_b += [ia, ib]; col_b += [ib, ia]
+    B = coo_matrix((np.ones(len(row_b), int), (row_b, col_b)),
+                   shape=(len(all_csvs), len(all_csvs))).tocsr()
+
+    # 2) inter-row: build A (paper→CSV) and compute C = Aᵀ·P·A
+    corpus2pidx = {cid:i for i,cid in enumerate(paper_index)}
+    title2cid   = {t:cid for cid,titles in cid2titles.items() for t in titles}
+    row_i, col_i = [], []
+    for titles, cs in tqdm(rows, desc="Building inter-row A indices"):
+        for t in titles:
+            cid = title2cid.get(t); p = corpus2pidx.get(cid)
+            if p is None: continue
+            for c in cs:
+                row_i.append(p); col_i.append(csv2idx[c])
+    A = coo_matrix((np.ones(len(row_i), bool),(row_i,col_i)), shape=(len(paper_index), len(all_csvs))).tocsr()
+    C = A.T.dot(paper_paper_adj).dot(A).tocsr()
+
+    # 3) sum and extract
+    M = B + C
+    M_coo = M.tocoo()
+    '''for i, j, v in zip(M_coo.row, M_coo.col, M_coo.data):
+        if i < j:
+            csv_pair_cnt[(all_csvs[i], all_csvs[j])] = int(v)'''
+    row_arr  = M_coo.row
+    col_arr  = M_coo.col
+    data_arr = M_coo.data.astype(int)
+    csvs      = all_csvs
+    # boolean mask, only keep i<j and v>0
+    mask = (row_arr < col_arr) & (data_arr > 0)
+    ii   = row_arr[mask]
+    jj   = col_arr[mask]
+    vv   = data_arr[mask]
+    # build dict
+    csv_pair_cnt = { (csvs[i], csvs[j]): v for i, j, v in zip(ii, jj, vv) }
+    print(f"csv_pair_cnt: {len(csv_pair_cnt)} pairs found.")
+    """idx2pid = paper_index
     pr, pc = paper_paper_adj.nonzero()
-    for p_idx, q_idx in zip(pr, pc):
-        if p_idx >= q_idx:
-            continue
-        for r in paper2rows.get(p_idx, []):
-            for s in paper2rows.get(q_idx, []):
-                if r == s:
-                    continue
-                for a in rows[r][1]:
-                    for b in rows[s][1]:
-                        if a == b:
+    edge_iter = zip(pr, pc)
+    edge_iter = ((i, j) for i, j in edge_iter if i < j)
+    total_edges = paper_paper_adj.nnz // 2
+
+    for p_idx, q_idx in tqdm(edge_iter, total=total_edges, desc="Cross-paper edges"):
+        cid_i = paper_index[p_idx]
+        cid_j = paper_index[q_idx]
+        #if p_idx >= q_idx:
+        #    continue
+        for title_i in cid2titles[cid_i]:
+            for title_j in cid2titles[cid_j]:
+                for r in paper2rows[title_i]:
+                    for s in paper2rows[title_j]:
+                        if r == s:
                             continue
-                        x, y = sorted((a, b))
-                        csv_pair_cnt[(x, y)] += 1  ########
+                        for a in rows[r][1]:
+                            for b in rows[s][1]:
+                                if a == b:
+                                    continue
+                                #print('!!!there exist non-zero pair', a, b)
+                                csv_pair_cnt[tuple(sorted((a, b)))] += 1
+    """
      # Save the counts
     output_path = f"{GT_DIR}/csv_pair_counts_{rel_key}.pkl"
     with open(output_path, "wb") as f:
@@ -240,8 +333,7 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build SciLake union benchmark tables.")
-    parser.add_argument("--rel_key", type=str, default='direct_label', help="Exact key inside combined pickle (e.g., "
-                             "'max_pr', 'direct_label_influential').")
+    parser.add_argument("--rel_key", type=str, default='direct_label', help="Exact key inside combined pickle (e.g., 'max_pr', 'direct_label_influential').")
     parser.add_argument("--overlap_rate_threshold", type=float, default=0.0, help=("Numeric threshold for similarity/overlap matrices; ignored for 'direct_label*' keys."))
     args = parser.parse_args()
 
