@@ -5,7 +5,16 @@ Last Modified: 2025-04-16
 Description: Build SciLake union benchmark tables.
 
 Usage:
-    python -m src.data_gt.step3_gt --rel_mode [overlap_rate, direct_label]
+python -m src.data_gt.step3_gt --overlap_rate_threshold 0.0 --rel_key [
+    direct_label, 
+    direct_label_influential, 
+    direct_label_methodology_or_result, 
+    direct_label_methodology_or_result_influential, 
+    max_pr, 
+    max_pr_influential, 
+    max_pr_methodology_or_result, 
+    max_pr_methodology_or_result_influential
+]
 """
 
 import os, json, gzip, pickle, time
@@ -21,8 +30,6 @@ from scipy.sparse import csr_matrix
 DATA_DIR = "data/processed"
 GT_DIR = "data/gt"
 
-GT_COMBINED_PATH = f"{GT_DIR}/scilake_gt_all_matrices.pkl.gz"
-
 # ---- default files (can be overridden by CLI/kwargs) ----
 FILES = {
     "combined": f"{DATA_DIR}/modelcard_citation_all_matrices.pkl.gz",
@@ -33,38 +40,23 @@ FILES = {
     "valid_title": f"{DATA_DIR}/all_title_list_valid.parquet"
 }
 
-MODEL_GT_PATH = f"{GT_DIR}/groundtruth_model_pairs.pickle"
-MAPPED_GT_PATH = f"{GT_DIR}/groundtruth_mapped_pairs.pickle"
-CSV_PAIR_FREQ_PATH = f"{GT_DIR}/csv_pair_frequency.pickle"
-
-OUTPUT_GT_PATH = f"{GT_DIR}/scilakeUnionBenchmark_by_ids.pickle"
-DISCOUNT_RATE = 0.5
-IS_STRICT_MODE = True
-THRESHOLD = 0.1 # for overlap_rate only
-
 # ===== ENUMS =============================================================== #
-class RelationshipMode(str, Enum):
-    OVERLAP_RATE = "overlap_rate"
-    DIRECTED_CITE = "direct_label"
-
 class TableSourceMode(str, Enum):
     STEP3_MERGED = "step3_dedup"
 
 # ===== FACTORIES =========================================================== #
-def load_relationships(mode: RelationshipMode):
+def load_relationships(rel_key: str):
     """Factory loader for paperId‑level relationship graphs."""
     path = FILES["combined"]
     print(f"Loading relationships (combined) from: {path}")
     with gzip.open(path, "rb") as f:
         data = pickle.load(f)
     paper_index = data["paper_index"]
+    if rel_key not in data:                           ########
+        raise KeyError(
+            f"Key '{rel_key}' not found. Available keys: {list(data.keys())[:10]} ...")  ########
     # Select the proper score matrix from the new keys
-    if mode == RelationshipMode.OVERLAP_RATE:
-        score_matrix = data["max_pr"]                             
-    elif mode == RelationshipMode.DIRECTED_CITE:
-        score_matrix = data["direct_label"]
-    else:
-        raise ValueError(f"Unsupported relationship mode: {mode}")
+    score_matrix = data[rel_key]
     return paper_index, score_matrix
 
 def load_table_source(mode: TableSourceMode):
@@ -109,9 +101,11 @@ def load_symlink_mapping():
         mapping = pickle.load(f)
     return mapping
 
-def build_paper_matrix(score_matrix: csr_matrix, paper_index: list, rel_mode: RelationshipMode, thr: float=THRESHOLD):
-    thr = 1.0 if rel_mode == RelationshipMode.DIRECTED_CITE else thr
-    paper_adj = (score_matrix >= thr).astype(np.bool_)
+def build_paper_matrix(score_matrix: csr_matrix, rel_key: str, overlap_rate_threshold: float):
+    if rel_key.startswith("direct_label"):
+        paper_adj = (score_matrix >= 1.0).astype(np.bool_)
+    else:
+        paper_adj = (score_matrix > overlap_rate_threshold).astype(np.bool_)
     paper_adj.setdiag(True)
     return paper_adj.tocsr()
 
@@ -170,15 +164,14 @@ def compute_subset_pt_tm(FILES):
     comb_sub = (pt_sub @ tm_sub).astype(bool).tocsr()  # p x m
     return comb_sub, titles_list, model_list, paper_list
 
-def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RATE):
+def build_ground_truth(rel_key, overlap_rate_threshold):
     # modelId-paperList-csvList, Our aim is to use paper-paper matrix to build {csv:[csv1, csv2]} related json
-    suffix = f"__{rel_mode.value}"
     """High‑level orchestration for building GT tables."""
     # ========== Step 1: Load paper-level info. Build paper-level adjacency matrix ==========
-    paper_index, score_matrix = load_relationships(rel_mode)
-    paper_paper_adj = build_paper_matrix(score_matrix, paper_index, rel_mode)
+    paper_index, score_matrix = load_relationships(rel_key)
+    paper_paper_adj = build_paper_matrix(score_matrix, rel_key, overlap_rate_threshold)
     print(f"Step1: [Paper-level] Adjacency shape: {paper_paper_adj.shape}")
-    print(paper_paper_adj[0])
+    print(paper_paper_adj.nnz)
 
     # ---------- Step 2: modelId → csv mapping ----------
     df_tables = load_table_source(TableSourceMode.STEP3_MERGED) # fixed here!
@@ -219,7 +212,7 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
                         x, y = sorted((a, b))
                         csv_pair_cnt[(x, y)] += 1  ########
      # Save the counts
-    output_path = f"{GT_DIR}/csv_pair_counts_{rel_mode.value}.pkl"
+    output_path = f"{GT_DIR}/csv_pair_counts_{rel_key}.pkl"
     with open(output_path, "wb") as f:
         pickle.dump(dict(csv_pair_cnt), f)
     print(f"✅ CSV pair counts saved to {output_path}")
@@ -234,11 +227,11 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
             csv_adj[a].append(b)
             csv_adj[b].append(a)
     csv_adj = {k: sorted(set(v)) for k, v in csv_adj.items()}
-    processed_csv_adj = {                                                                            ########
-        os.path.basename(k): [os.path.basename(x) for x in v]                                       ########
-        for k, v in csv_adj.items()                                                              ########
+    processed_csv_adj = {
+        os.path.basename(k): [os.path.basename(x) for x in v]
+        for k, v in csv_adj.items()
     }
-    output_adj = f"{GT_DIR}/csv_pair_adj_{rel_mode.value}_processed.pkl"
+    output_adj = f"{GT_DIR}/csv_pair_adj_{rel_key}_processed.pkl"
     with open(output_adj, "wb") as f:
         pickle.dump(processed_csv_adj, f)
     print(f"✅ CSV adjacency mapping saved to {output_adj}")
@@ -247,7 +240,9 @@ def build_ground_truth(rel_mode: RelationshipMode = RelationshipMode.OVERLAP_RAT
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build SciLake union benchmark tables.")
-    parser.add_argument("--rel_mode", choices=[m.value for m in RelationshipMode], default=RelationshipMode.OVERLAP_RATE.value, help="Relationship graph mode.")
+    parser.add_argument("--rel_key", type=str, default='direct_label', help="Exact key inside combined pickle (e.g., "
+                             "'max_pr', 'direct_label_influential').")
+    parser.add_argument("--overlap_rate_threshold", type=float, default=0.0, help=("Numeric threshold for similarity/overlap matrices; ignored for 'direct_label*' keys."))
     args = parser.parse_args()
 
-    build_ground_truth( rel_mode=RelationshipMode(args.rel_mode))
+    build_ground_truth(rel_key=args.rel_key, overlap_rate_threshold=args.overlap_rate_threshold)
