@@ -24,7 +24,7 @@ from tqdm import tqdm
 from enum import Enum
 from collections import defaultdict, Counter
 from itertools import combinations
-from scipy.sparse import csr_matrix, coo_matrix
+from scipy.sparse import csr_matrix, coo_matrix, save_npz
 
 
 # === Configuration ===
@@ -196,45 +196,6 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
     # Dictionary for flat tuple-key counts
     csv_pair_cnt = defaultdict(int)
 
-    '''# 1) Intra-row counting
-    for _, csvs in rows:
-        for a, b in combinations(sorted(set(csvs)), 2):
-            csv_pair_cnt[(a, b)] += 1  ######## marker for updated logic
-
-    # 2) Inter-row counting for paper-paper edges
-    # === NEW ---- C = Aᵀ · P · A ======================
-    print("[INFO]  Building paper→CSV sparse matrix ...")
-    all_csvs = sorted({c for _, cs in rows for c in cs})
-    csv2idx  = {c: i for i, c in enumerate(all_csvs)}
-    corpus2pidx = {cid: i for i, cid in enumerate(paper_index)}
-    title2cid = {}
-    for cid, tlist in cid2titles.items():
-        for t in tlist:
-            title2cid[t] = cid
-
-    row_inds, col_inds = [], []
-    for titles, cs in rows:
-        for title in titles:
-            cid = title2cid.get(title)
-            if cid is None:
-                continue
-            p_idx = corpus2pidx.get(cid)
-            if p_idx is None:
-                continue
-            for c in cs:
-                row_inds.append(p_idx)
-                col_inds.append(csv2idx[c])
-
-    A = coo_matrix((np.ones(len(row_inds), dtype=bool), (row_inds, col_inds)), shape=(len(paper_index), len(all_csvs))).tocsr()
-
-    print("[INFO]  Multiplying Aᵀ · P · A ...")
-    C = A.transpose().dot(paper_paper_adj).dot(A).tocoo()
-
-    for i, j, v in tqdm(zip(C.row, C.col, C.data),
-                       total=len(C.data),
-                       desc="Aggregating CSV pairs"):
-        if i < j and v > 0:
-            csv_pair_cnt[(all_csvs[i], all_csvs[j])] += int(v)'''
     # -- Vectorized CSV pair counting via sparse matrices --
     # build global CSV list & index
     all_csvs = sorted({c for _, cs in rows for c in cs})
@@ -263,67 +224,39 @@ def build_ground_truth(rel_key, overlap_rate_threshold):
     C = A.T.dot(paper_paper_adj).dot(A).tocsr()
 
     # 3) sum and extract
-    M = B + C
-    M_coo = M.tocoo()
-    '''for i, j, v in zip(M_coo.row, M_coo.col, M_coo.data):
-        if i < j:
-            csv_pair_cnt[(all_csvs[i], all_csvs[j])] = int(v)'''
-    row_arr  = M_coo.row
-    col_arr  = M_coo.col
-    data_arr = M_coo.data.astype(int)
-    csvs      = all_csvs
-    # boolean mask, only keep i<j and v>0
-    mask = (row_arr < col_arr) & (data_arr > 0)
-    ii   = row_arr[mask]
-    jj   = col_arr[mask]
-    vv   = data_arr[mask]
-    # build dict
-    csv_pair_cnt = { (csvs[i], csvs[j]): v for i, j, v in zip(ii, jj, vv) }
-    print(f"csv_pair_cnt: {len(csv_pair_cnt)} pairs found.")
-    """idx2pid = paper_index
-    pr, pc = paper_paper_adj.nonzero()
-    edge_iter = zip(pr, pc)
-    edge_iter = ((i, j) for i, j in edge_iter if i < j)
-    total_edges = paper_paper_adj.nnz // 2
+    '''M = (B + C).tocsr()
+    processed_csv_adj = {}
+    for i in tqdm(range(M.shape[0]), desc="Building processed CSV adjacency mapping"):
+        start, end = M.indptr[i], M.indptr[i+1]
+        # collect all non-zero columns except self
+        nbrs = [j for j in M.indices[start:end] if j != i]
+        if nbrs:
+            processed_csv_adj[all_csvs[i]] = [ all_csvs[j] for j in nbrs ]'''
+    # try to accelerate
+    M = (B + C).tocsr()
+    matrix_path = f"{GT_DIR}/csv_pair_matrix_{rel_key}.npz"
+    save_npz(matrix_path, M)
+    print(f"✅ Sparse matrix saved to {matrix_path}")
 
-    for p_idx, q_idx in tqdm(edge_iter, total=total_edges, desc="Cross-paper edges"):
-        cid_i = paper_index[p_idx]
-        cid_j = paper_index[q_idx]
-        #if p_idx >= q_idx:
-        #    continue
-        for title_i in cid2titles[cid_i]:
-            for title_j in cid2titles[cid_j]:
-                for r in paper2rows[title_i]:
-                    for s in paper2rows[title_j]:
-                        if r == s:
-                            continue
-                        for a in rows[r][1]:
-                            for b in rows[s][1]:
-                                if a == b:
-                                    continue
-                                #print('!!!there exist non-zero pair', a, b)
-                                csv_pair_cnt[tuple(sorted((a, b)))] += 1
-    """
-     # Save the counts
-    output_path = f"{GT_DIR}/csv_pair_counts_{rel_key}.pkl"
-    with open(output_path, "wb") as f:
-        pickle.dump(dict(csv_pair_cnt), f)
-    print(f"✅ CSV pair counts saved to {output_path}")
-    # stats
-    print('number of csv pairs: ', len(csv_pair_cnt))
-    print('number of unique single csv: ',)
-    print('sum of counts: ', sum(csv_pair_cnt.values()))
+    indptr   = M.indptr
+    indices  = M.indices
+    nnz_per_row = np.diff(indptr)                     # 每行非零数
 
-    csv_adj = defaultdict(list)
-    for (a, b), cnt in csv_pair_cnt.items():
-        if cnt > 0:
-            csv_adj[a].append(b)
-            csv_adj[b].append(a)
-    csv_adj = {k: sorted(set(v)) for k, v in csv_adj.items()}
-    processed_csv_adj = {
-        os.path.basename(k): [os.path.basename(x) for x in v]
-        for k, v in csv_adj.items()
-    }
+    processed_csv_adj = {}
+    rows_with_nbrs = np.where(nnz_per_row > 1)[0]     # 跳过全 0 或仅 self
+    print(f"get {len(rows_with_nbrs)} non-empty rows, total {len(indptr)} rows")
+
+    for i in tqdm(rows_with_nbrs, desc=f"Building CSV adjacency ({len(rows_with_nbrs)} non-empty rows)"):
+        start, end = indptr[i], indptr[i+1]
+        nbrs = indices[start:end]
+        if nbrs.size:                                 # 这里一定 >1，但再保险
+            # 排除对角线 i
+            nbrs = nbrs[nbrs != i]
+            if nbrs.size:
+                processed_csv_adj[all_csvs[i]] = [all_csvs[j] for j in nbrs.tolist()]
+    # keep basename
+    processed_csv_adj = {os.path.basename(k): [os.path.basename(x) for x in v] for k, v in processed_csv_adj.items()}
+    # Save the processed adjacency mapping directly
     output_adj = f"{GT_DIR}/csv_pair_adj_{rel_key}_processed.pkl"
     with open(output_adj, "wb") as f:
         pickle.dump(processed_csv_adj, f)
