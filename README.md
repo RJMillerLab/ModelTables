@@ -151,11 +151,22 @@ python -m src.data_gt.step3_create_symlinks # create the symbolic link on differ
 #python -m src.data_gt.step3_gt # build up groundtruth
 bash src/data_gt/step3_gt.sh
 python -m src.data_gt.compare_gt_stats --gt_dir data/gt
+python -m src.data_gt.debug_npz --matrix data/gt/csv_pair_matrix_direct_label.npz --csvlist data/gt/csv_list_direct_label.pkl --row 0
 
 python -m src.data_localindexing.turn_tus_into_pickle # process sqlite gt into pickle file
 python -m src.data_analysis.gt_distri # get distribution of groundtruth
 # (deprecate) python -m src.data_gt.gt_combine
 python -m src.data_gt.modelcard_matrix # (add other two level citation graph)
+python -m src.data_gt.convert_adj_to_npz --input data/gt/scilake_gt_modellink_dataset_adj_processed.pkl --output-prefix data/gt/scilake_gt_modellink_dataset # pkl2npz
+python -m src.data_gt.merge_union \
+  --matrices data/gt/csv_pair_matrix_direct_label.npz \
+            data/gt/scilake_gt_modellink_model.npz \
+            data/gt/scilake_gt_modellink_dataset.npz \
+  --lists data/gt/csv_list_direct_label.pkl \
+          data/gt/scilake_gt_modellink_model_csv_list.pkl \
+          data/gt/scilake_gt_modellink_dataset_csv_list.pkl \
+  --output-prefix data/gt/csv_pair_union
+
 python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t
 # (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 # (deprecate) python -m src.data_analysis.gt_fig # plot stats

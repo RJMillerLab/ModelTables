@@ -223,6 +223,7 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True):
             if p is None: continue
             for c in cs:
                 row_i.append(p); col_i.append(csv2idx[c])
+    print('finished building A')
     A = coo_matrix((np.ones(len(row_i), bool),(row_i,col_i)), shape=(len(paper_index), len(all_csvs))).astype(bool).tocsr()
     C = A.T.dot(paper_paper_adj).dot(A).tocsr()
     print(f"Step2: [Inter-row] Adjacency shape: {C.shape}: ", C.nnz)

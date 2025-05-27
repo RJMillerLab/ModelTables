@@ -314,7 +314,7 @@ if __name__ == "__main__":
     ########################################################################
 
     ########################################################################
-    # 5a ) BUILD CSV-LEVEL GT FROM related_model_list (Model-based)         ########
+    # 5a ) BUILD CSV-LEVEL GT FROM related_model_list (Model-based)
     ########################################################################
     model_to_csvs = df.set_index("modelId")["all_table_list_dedup"].to_dict()                 
     csv_counts_model = defaultdict(int)                                                         
@@ -336,16 +336,16 @@ if __name__ == "__main__":
         if cnt > 0:                                                                        
             adj_model[a].add(b); adj_model[b].add(a)
     adj_model = {k: sorted(v) for k, v in adj_model.items()}
-    processed_model_adj = {                                                                         ########
-        os.path.basename(k): [os.path.basename(x) for x in v]                                       ########
-        for k, v in adj_model.items()                                                          ########
+    processed_model_adj = {
+        os.path.basename(k): [os.path.basename(x) for x in v]
+        for k, v in adj_model.items()
     }
     with open('data/gt/scilake_gt_modellink_model_adj_processed.pkl', 'wb') as f:
         pickle.dump(processed_model_adj, f)
     print(f"✔️  Saved MODEL-BASED CSV adjacency ({len(adj_model):,} keys)")                  
 
     ########################################################################
-    # 5b ) BUILD CSV-LEVEL GT FROM related_dataset_list (Dataset-based)     ########
+    # 5b ) BUILD CSV-LEVEL GT FROM related_dataset_list (Dataset-based)
     ########################################################################
     # Create dataset related map
     df_ds = df[df.apply(lambda r: bool(r['tag_dataset_list'] or r['readme_datasetid_list']), axis=1)]
