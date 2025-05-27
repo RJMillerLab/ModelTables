@@ -43,6 +43,7 @@ def main(gt_dir):
         if not os.path.exists(path):
             print(f"{lvl}: MISSING")
             continue
+        print(f"loading {path}")
         adjs[lvl] = load_gt(path)
         hashes[lvl] = hash_file(path)
 

@@ -1,12 +1,12 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 LOG=logs/step3_gt_0526.log
 
 REL_KEYS=(
-  direct_label
-  direct_label_influential
-  direct_label_methodology_or_result
-  direct_label_methodology_or_result_influential
+  #direct_label
+  #direct_label_influential
+  #direct_label_methodology_or_result
+  #direct_label_methodology_or_result_influential
   max_pr
   max_pr_influential
   max_pr_methodology_or_result
