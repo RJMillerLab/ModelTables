@@ -1,6 +1,6 @@
 import os
 import argparse
-import pickle
+import pickle5 as pickle
 import numpy as np
 from scipy.sparse import coo_matrix, csr_matrix, save_npz
 

@@ -322,7 +322,7 @@ if __name__ == "__main__":
         for a, b in combinations(sorted(set(csvs)), 2):
             if a != b:
                 key = tuple(sorted((a, b)))
-                csv_counts_model[key] += 1          ######## NEW           
+                csv_counts_model[key] += 1          ######## NEW
     # between models                            
     for m, neighs in related_model.items():
         cs_m = model_to_csvs.get(m, [])
