@@ -349,14 +349,25 @@ if __name__ == "__main__":
     M_model = (A_model.T.dot(P_model).dot(A_model)).astype(bool).tocsr()
     M_model.setdiag(False) # remove self-loop
 
-    # 5) save npz + csv_list
-    save_npz('data/gt/scilake_gt_modellink_model.npz', M_model, compressed=True)
-    all_csvs_m = [os.path.basename(c) for c in all_csvs_m]
-    with open('data/gt/scilake_gt_modellink_model_csv_list.pkl','wb') as f:
-        pickle.dump(all_csvs_m, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"✔️  Saved MODEL-BASED CSV adjacency via matrix ({M_model.nnz} edges)")
-
-    '''                 
+    # 5) save npz + csv_list for MODEL-BASED adjacency
+    # (a) Print size before trimming
+    print(f"[INFO] MODEL csv adjacency before trim: {M_model.shape[0]} items")
+    # (b) Trim zero rows/cols
+    row_sums = np.array(M_model.sum(axis=1)).ravel()
+    keep_idx = np.where(row_sums > 0)[0]
+    print(f"[INFO] Dropping {M_model.shape[0] - keep_idx.size} zero rows/cols for MODEL")
+    M_model = M_model[keep_idx][:, keep_idx]
+    all_csvs_model = [all_csvs_m[i] for i in keep_idx]
+    # (c) Print size after trimming
+    print(f"[INFO] MODEL csv adjacency after trim: {M_model.shape[0]} items")
+    # (d) Save trimmed matrix and updated CSV list
+    save_npz('data/gt/scilake_gt_modellink_model_adj.npz', M_model, compressed=True)
+    all_csvs_model = [os.path.basename(c) for c in all_csvs_model]
+    with open('data/gt/scilake_gt_modellink_model_adj_csv_list.pkl','wb') as f:
+        pickle.dump(all_csvs_model, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"✔️ Saved MODEL-BASED CSV adjacency matrix ({M_model.nnz} edges) after trimming")
+    '''
+    # original for-loop version
     csv_counts_model = defaultdict(int)    
     # inside model               
     for m, csvs in model_to_csvs.items():
@@ -408,7 +419,9 @@ if __name__ == "__main__":
             mem = grp.tolist()
             for a, b in combinations(mem, 2):
                 related_ds[a].add(b); related_ds[b].add(a)                                  
-    '''# cross model→csv to dataset-GT
+    '''
+    # original for-loop version
+    # cross model→csv to dataset-GT
     csv_counts_ds = defaultdict(int)
     # intra-model
     for m, csvs in model_to_csvs.items():
@@ -460,9 +473,20 @@ if __name__ == "__main__":
     # 4) calculate dataset-level csv adjacency: M_ds = A^T · P_ds · A
     M_ds = (A_model.T.dot(P_ds).dot(A_model)).astype(bool).tocsr()
     M_ds.setdiag(False)  # remove self-loop
-    # 5) save npz + csv_list
-    save_npz('data/gt/scilake_gt_modellink_dataset.npz', M_ds, compressed=True)
-    all_csvs_m = [os.path.basename(c) for c in all_csvs_m]
-    with open('data/gt/scilake_gt_modellink_dataset_csv_list.pkl','wb') as f:
-        pickle.dump(all_csvs_m, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"✔️  Saved DATASET-BASED CSV adjacency via matrix ({M_ds.nnz} edges)")
+    # 5) save npz + csv_list for DATASET-BASED adjacency
+    # (a) Print size before trimming
+    print(f"[INFO] DATASET csv adjacency before trim: {M_ds.shape[0]} items")
+    # (b) Trim zero rows/cols
+    row_sums_ds = np.array(M_ds.sum(axis=1)).ravel()
+    keep_idx_ds = np.where(row_sums_ds > 0)[0]
+    print(f"[INFO] Dropping {M_ds.shape[0] - keep_idx_ds.size} zero rows/cols for DATASET")
+    M_ds = M_ds[keep_idx_ds][:, keep_idx_ds]
+    all_csvs_dataset = [all_csvs_m[i] for i in keep_idx_ds]
+    # (c) Print size after trimming
+    print(f"[INFO] DATASET csv adjacency after trim: {M_ds.shape[0]} items")
+    # (d) Save trimmed matrix and updated CSV list
+    save_npz('data/gt/scilake_gt_modellink_dataset_adj.npz', M_ds, compressed=True)
+    all_csvs_dataset = [os.path.basename(c) for c in all_csvs_dataset]
+    with open('data/gt/scilake_gt_modellink_dataset_adj_csv_list.pkl','wb') as f:
+        pickle.dump(all_csvs_dataset, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"✔️ Saved DATASET-BASED CSV adjacency matrix ({M_ds.nnz} edges) after trimming")
