@@ -39,6 +39,8 @@ def dict_to_boolean_csr(adj_dict):
         i = index[src]
         for dst in neighbors:
             j = index[dst]
+            if i == j: # skip self-pair
+                continue
             rows.extend([i, j])
             cols.extend([j, i])
 

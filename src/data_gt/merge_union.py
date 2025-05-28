@@ -40,7 +40,14 @@ def build_union_matrix(matrix_paths, list_paths=None):
     mats = [load_bool_matrix(p) for p in matrix_paths]
 
     # Build global union of IDs
-    union_ids = sorted({id_ for lst in lists for id_ in lst})
+    #union_ids = sorted({id_ for lst in lists for id_ in lst}) # order shuffled
+    seen = set()
+    union_ids = []
+    for lst in lists:
+        for id_ in lst:
+            if id_ not in seen:
+                seen.add(id_)
+                union_ids.append(id_)
     n = len(union_ids)
     print(f"Union of IDs → {n} total entries")
     id_to_idx = {id_: i for i, id_ in enumerate(union_ids)}
