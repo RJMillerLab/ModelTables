@@ -296,16 +296,21 @@ if __name__ == "__main__":
     # 2a ) BUILD *MODEL-BASED* RELATED-MODEL LIST                              ########
     ########################################################################
     # keep rows with at least one base/model link
+    # e.g. B -> A, C -> A
     df_model = df[df.apply(lambda r: bool(r['tag_base_model_list'] or r['readme_modelid_list']), axis=1)]
     related_model = defaultdict(set)                                                             
-    for col in ["tag_base_model_list", "readme_modelid_list"]:                                   
-        exploded = df_model[["modelId", col]].explode(col).dropna()                             
-        for _, grp in exploded.groupby(col)["modelId"]:                                         
-            mem = grp.tolist()                                                                  
-            for a, b in combinations(mem, 2):                                                   
-                related_model[a].add(b)                                                         
-                related_model[b].add(a)                                                         
-    df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_model.get(m, [])))    
+    for col in ["tag_base_model_list", "readme_modelid_list"]:
+        exploded = df_model[["modelId", col]].explode(col).dropna()
+        for target, grp in exploded.groupby(col)["modelId"]:
+            mem = grp.tolist()
+            for a, b in combinations(mem, 2): # (B,C)
+                related_model[a].add(b)
+                related_model[b].add(a)
+            if target in valid_model_ids: # (A,B), (A,C)
+                for m in mem:
+                    related_model[m].add(target)
+                    related_model[target].add(m)
+    df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_model.get(m, [])))
     df.to_parquet("data/processed/modelcard_gt_related_model.parquet")
 
     ########################################################################
