@@ -22,7 +22,7 @@ from src.utils import load_combined_data
 from itertools import combinations
 from collections import defaultdict
 from itertools import product
-from scipy.sparse import save_npz
+from scipy.sparse import save_npz, coo_matrix
 
 DATA_PATH           = "data/processed/modelcard_step1.parquet" 
 DATA_2_PATH         = "data/processed/modelcard_step3_dedup.parquet"
@@ -315,7 +315,48 @@ if __name__ == "__main__":
     ########################################################################
     # 5a ) BUILD CSV-LEVEL GT FROM related_model_list (Model-based)
     ########################################################################
-    model_to_csvs = df.set_index("modelId")["all_table_list_dedup"].to_dict()                 
+    model_to_csvs = df.set_index("modelId")["all_table_list_dedup"].to_dict()
+    # 1) full model and csv list
+    model_ids = list(model_to_csvs.keys())
+    all_csvs_m = sorted({c for cs in model_to_csvs.values() for c in cs})
+    # 2) construct incidence matrix A_model (models × csvs)
+    model2idx = {m:i for i,m in enumerate(model_ids)}
+    csv2idx   = {c:i for i,c in enumerate(all_csvs_m)}
+    rows, cols = [], []
+    for m, cs in model_to_csvs.items():
+        i = model2idx[m]
+        for c in cs:
+            rows.append(i); cols.append(csv2idx[c])
+    data = np.ones(len(rows), dtype=bool)
+    A_model = coo_matrix((data, (rows, cols)),
+                        shape=(len(model_ids), len(all_csvs_m)),
+                        dtype=bool).tocsr()
+
+    # 3) construct model-level adjacency matrix P_model (first inter-model, then self-loop to include intra-model)
+    row_p, col_p = [], []
+    for m, neighs in related_model.items():
+        i = model2idx[m]
+        for n in neighs:
+            j = model2idx[n]
+            row_p += [i, j]; col_p += [j, i]
+    P_model = coo_matrix((np.ones(len(row_p), bool),
+                         (row_p, col_p)),
+                        shape=(len(model_ids), len(model_ids)),
+                        dtype=bool).tocsr()
+    P_model.setdiag(True)   # diag=True auto-count intra-model pairs
+
+    # 4) calculate csv-level adjacency: M_model = A^T · P_model · A
+    M_model = (A_model.T.dot(P_model).dot(A_model)).astype(bool).tocsr()
+    M_model.setdiag(False) # remove self-loop
+
+    # 5) save npz + csv_list
+    save_npz('data/gt/scilake_gt_modellink_model.npz', M_model, compressed=True)
+    all_csvs_m = [os.path.basename(c) for c in all_csvs_m]
+    with open('data/gt/scilake_gt_modellink_model_csv_list.pkl','wb') as f:
+        pickle.dump(all_csvs_m, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"✔️  Saved MODEL-BASED CSV adjacency via matrix ({M_model.nnz} edges)")
+
+    '''                 
     csv_counts_model = defaultdict(int)    
     # inside model               
     for m, csvs in model_to_csvs.items():
@@ -353,7 +394,7 @@ if __name__ == "__main__":
         pickle.dump(list(M_csv_list), f, protocol=pickle.HIGHEST_PROTOCOL)
     #with open('data/gt/scilake_gt_modellink_model_adj_processed.pkl', 'wb') as f:
     #    pickle.dump(processed_model_adj, f)
-    print(f"✔️  Saved MODEL-BASED CSV adjacency ({len(adj_model):,} keys)")
+    print(f"✔️  Saved MODEL-BASED CSV adjacency ({len(adj_model):,} keys)")'''
 
     ########################################################################
     # 5b ) BUILD CSV-LEVEL GT FROM related_dataset_list (Dataset-based)
@@ -367,7 +408,7 @@ if __name__ == "__main__":
             mem = grp.tolist()
             for a, b in combinations(mem, 2):
                 related_ds[a].add(b); related_ds[b].add(a)                                  
-    # cross model→csv to dataset-GT
+    '''# cross model→csv to dataset-GT
     csv_counts_ds = defaultdict(int)
     # intra-model
     for m, csvs in model_to_csvs.items():
@@ -401,4 +442,27 @@ if __name__ == "__main__":
         pickle.dump(list(D_csv_list), f, protocol=pickle.HIGHEST_PROTOCOL)
     #with open('data/gt/scilake_gt_modellink_dataset_adj_processed.pkl', 'wb') as f:
     #    pickle.dump(processed_ds_adj, f)
-    print(f"✔️  Saved DATASET-BASED CSV adjacency ({len(adj_ds):,} keys)")
+    print(f"✔️  Saved DATASET-BASED CSV adjacency ({len(adj_ds):,} keys)")'''
+    # 1) Full model and csv list (same as above model_ids & all_csvs_m)
+    # 2) incidence matrix A_model already constructed (same as above)
+    # 3) construct dataset-level adjacency P_ds
+    row_d, col_d = [], []
+    for m, neighs in related_ds.items():
+        i = model2idx[m]
+        for n in neighs:
+            j = model2idx[n]
+            row_d += [i, j]; col_d += [j, i]
+    P_ds = coo_matrix((np.ones(len(row_d), bool),
+                      (row_d, col_d)),
+                      shape=(len(model_ids), len(model_ids)),
+                      dtype=bool).tocsr()
+    P_ds.setdiag(True)  # include model-specific csv pairs
+    # 4) calculate dataset-level csv adjacency: M_ds = A^T · P_ds · A
+    M_ds = (A_model.T.dot(P_ds).dot(A_model)).astype(bool).tocsr()
+    M_ds.setdiag(False)  # remove self-loop
+    # 5) save npz + csv_list
+    save_npz('data/gt/scilake_gt_modellink_dataset.npz', M_ds, compressed=True)
+    all_csvs_m = [os.path.basename(c) for c in all_csvs_m]
+    with open('data/gt/scilake_gt_modellink_dataset_csv_list.pkl','wb') as f:
+        pickle.dump(all_csvs_m, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"✔️  Saved DATASET-BASED CSV adjacency via matrix ({M_ds.nnz} edges)")
