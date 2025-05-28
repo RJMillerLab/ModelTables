@@ -55,17 +55,9 @@ def dict_to_boolean_csr(adj_dict):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description="Convert a CSV adjacency pickle into a boolean CSR matrix + CSV list"
-    )
-    parser.add_argument(
-        '--input', required=True,
-        help="Path to the input pickle file (adjacency dict)"
-    )
-    parser.add_argument(
-        '--output-prefix', required=True,
-        help="Output prefix for the .npz and _csv_list.pkl files"
-    )
+    parser = argparse.ArgumentParser(description="Convert a CSV adjacency pickle into a boolean CSR matrix + CSV list")
+    parser.add_argument('--input', required=True, help="Path to the input pickle file (adjacency dict)")
+    parser.add_argument('--output-prefix', required=True, help="Output prefix for the .npz and _csv_list.pkl files")
     args = parser.parse_args()
 
     # Load the adjacency dictionary

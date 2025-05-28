@@ -13,7 +13,9 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import gaussian_kde
+from scipy.sparse import load_npz
 from tqdm import tqdm
+
 
 plt.rcParams.update({
     'font.size': 28,
@@ -29,9 +31,9 @@ OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PALETTE = {
-    "Paper GT":              "#4e8094",
-    "Model GT":              "#50a89d",
-    "Dataset GT":            "#a5d2bc",
+    "Paper GT":           "#4e8094",
+    "Model GT":           "#50a89d",
+    "Dataset GT":         "#a5d2bc",
     "SANTOS Large":       "#f29e4c",
     "SANTOS Small":       "#8b2e2e",
     "TUS Large":          "#d96e44",
@@ -43,15 +45,30 @@ class GTLengthLoader:
     def __init__(self, name: str, path: str, key: str | None = None):
         self.name, self.path, self.key = name, path, key
 
-    def _load(self):
+    def _load_pkl(self):
         opener = gzip.open if self.path.endswith(".gz") else open
         with opener(self.path, "rb") as f:
             data = pickle.load(f)
         return data[self.key] if self.key else data
+    
+    # def _load(self):
+    #     if self.path.endswith(".npz"):
+    #         # delegate to our new helper
+    #         return None  # signal to use lengths_from_npz
+    #     else:
+    #         # old pickle path
+    #         return self._load_pkl()
 
+    #def lengths(self):
+    #    data = self._load()
+    #    return [len(v) for v in data.values() if isinstance(v, list)]
     def lengths(self):
-        data = self._load()
-        return [len(v) for v in data.values() if isinstance(v, list)]
+        if self.path.endswith(".npz"):
+            M = load_npz(self.path).tocsr()
+            return M.getnnz(axis=1).tolist()
+        else:
+            data = self._load_pkl()
+            return [len(v) for v in data.values() if isinstance(v, list)]
 
 # -------- Helper --------
 def load_lengths(path_map):
@@ -124,30 +141,34 @@ def plot_log_boxplot(length_data, palette, title, prefix):
 
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
+    print("Plots saved →", os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
     #plt.show()
 
-GT_DIR = "data/gt"
-PATHS = {
-    "SANTOS Small":  "/Users/doradong/Repo/santos/groundtruth/santosUnionBenchmark.pickle",
-    "TUS Small":     "/Users/doradong/Repo/table-union-search-benchmark/tus_small_query_candidate.pkl",
-    "TUS Large":     "/Users/doradong/Repo/table-union-search-benchmark/tus_large_query_candidate.pkl",
-    "SANTOS Large":  "/Users/doradong/Repo/santos/groundtruth/real_tablesUnionBenchmark.pickle",
-    "Paper GT":  os.path.join(GT_DIR, "csv_pair_adj_direct_label_processed.pkl"),
-    "Model GT":         os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.pkl"),
-    "Dataset GT":       os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.pkl"),
-}
+if __name__ == "__main__":
+    GT_DIR = "data/gt"
+    ROOT_DIR = "/Users/doradong/Repo"
+    PATHS = {
+        "SANTOS Small": os.path.join(ROOT_DIR, "santos/groundtruth/santosUnionBenchmark.pickle"),
+        "TUS Small":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_small_query_candidate.pkl"),
+        "TUS Large":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_large_query_candidate.pkl"),
+        "SANTOS Large": os.path.join(ROOT_DIR, "santos/groundtruth/real_tablesUnionBenchmark.pickle"),
+        #"Paper GT":     os.path.join(GT_DIR, "csv_pair_adj_direct_label_processed.pkl"),
+        #"Model GT":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.pkl"),
+        #"Dataset GT":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.pkl"),
+        "Paper GT":     os.path.join(GT_DIR, "csv_pair_matrix_direct_label.npz"),
+        "Model GT":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj.npz"),
+        "Dataset GT":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj.npz"),
+    }
 
-lengths = load_lengths(PATHS)
+    lengths = load_lengths(PATHS)
 
-# Debug prints: each dataset's count, min, max
-for src, vals in lengths.items():
-    if vals:
-        print(f"{src}: count={len(vals)}, min={min(vals)}, max={max(vals)}")
-    else:
-        print(f"{src}: no data")
+    # Debug prints: each dataset's count, min, max
+    for src, vals in lengths.items():
+        if vals:
+            print(f"{src}: count={len(vals)}, min={min(vals)}, max={max(vals)}")
+        else:
+            print(f"{src}: no data")
 
-# plot_histogram(lengths, "GT Length (All Sources)", "gt_all")   ########
-#plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
-plot_log_boxplot(lengths, PALETTE, "GT Length Boxplot", "gt_boxplot")
-
-print("Plots saved →", OUTPUT_DIR)
+    # plot_histogram(lengths, "GT Length (All Sources)", "gt_all")   ########
+    #plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
+    plot_log_boxplot(lengths, PALETTE, "GT Length Boxplot", "gt_boxplot")
