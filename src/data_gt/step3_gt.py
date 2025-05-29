@@ -48,11 +48,13 @@ def load_relationships(rel_key: str):
     with gzip.open(path, "rb") as f:
         data = pickle.load(f)
     paper_index = data["paper_index"]
-    if rel_key not in data:                           ########
+    print(f"[DEBUG] Loaded paper_index with length: {len(paper_index)}")
+    if rel_key not in data:                           
         raise KeyError(
-            f"Key '{rel_key}' not found. Available keys: {list(data.keys())[:10]} ...")  ########
+            f"Key '{rel_key}' not found. Available keys: {list(data.keys())[:10]} ...")  
     # Select the proper score matrix from the new keys
     score_matrix = data[rel_key]
+    print(f"[DEBUG] Loaded score_matrix with shape: {score_matrix.shape}")
     return paper_index, score_matrix
 
 def load_table_source(file_key: str="step3_dedup"):
@@ -60,7 +62,9 @@ def load_table_source(file_key: str="step3_dedup"):
     print(f"Loading table source from: {file_key}")
     # load valid_title, and merge by modelId
     df_valid_title = pd.read_parquet(FILES["valid_title"], columns=["modelId", "all_title_list_valid"])
+    print(f"[DEBUG] Loaded df_valid_title with shape: {df_valid_title.shape}")
     df = pd.read_parquet(FILES[file_key], columns=["modelId", "hugging_table_list_dedup", "github_table_list_dedup", "html_table_list_mapped_dedup", "llm_table_list_mapped_dedup"])
+    print(f"[DEBUG] Loaded df with shape: {df.shape}")
     df['all_table_list_dedup'] = df[[
         'hugging_table_list_dedup',
         'github_table_list_dedup',
@@ -76,6 +80,7 @@ def load_table_source(file_key: str="step3_dedup"):
         axis=1
     )
     df_tables = pd.merge(df[['modelId', 'all_table_list_dedup']], df_valid_title, how="left", on="modelId")
+    print(f"[DEBUG] After merge, df_tables shape: {df_tables.shape}")
     # drop rows with no valid title or no table list
     print("before filtering invalid rows: ", len(df_tables))
     mask = (
@@ -96,6 +101,7 @@ def build_paper_matrix(score_matrix: csr_matrix, rel_key: str, overlap_rate_thre
     else:
         paper_adj = (score_matrix > overlap_rate_threshold).astype(np.bool_)
     paper_adj.setdiag(True)
+    print(f"[DEBUG] Built paper_adj matrix with shape: {paper_adj.shape}, nnz: {paper_adj.nnz}")
     return paper_adj.tocsr()
 
 """def naive_subset_adj(B: csr_matrix, A: csr_matrix):
@@ -162,11 +168,23 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True):
     paper_paper_adj = paper_paper_adj.astype(bool).tocsr()
     assert paper_paper_adj.data.dtype == np.bool_
     print(f"Step1: [Paper-level] Adjacency shape: {paper_paper_adj.shape}: ", paper_paper_adj.nnz)
+    print(f"[DEBUG] Paper-paper adjacency matrix statistics:")
+    print(f"  - Total papers: {len(paper_index)}")
+    print(f"  - Non-zero elements: {paper_paper_adj.nnz}")
+    print(f"  - Average connections per paper: {paper_paper_adj.nnz / len(paper_index):.2f}")
+    
+    # Check paper ID formats
+    print("\n[DEBUG] Paper ID format check:")
+    print(f"  - First 3 paper_index IDs: {list(paper_index)[:3]}")
+    print(f"  - First 3 paper_index ID types: {[type(x) for x in list(paper_index)[:3]]}")
 
     title_df = pd.read_parquet(FILES["integration"], columns=["corpusid", "query"])
+    print(f"[DEBUG] Loaded title_df with shape: {title_df.shape}")
     cid2titles = defaultdict(list)
     for cid, title in zip(title_df["corpusid"].astype(str), title_df["query"]):
         cid2titles[cid].append(title)
+    print(f"[DEBUG] Built cid2titles with {len(cid2titles)} unique corpusids")
+    print(f"[DEBUG] Sample of cid2titles (first 3 items): {dict(list(cid2titles.items())[:3])}")
     del title_df
 
     # ---------- Step 2: modelId → csv mapping ----------
@@ -177,6 +195,7 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True):
         papers = row['all_title_list_valid']
         csvs   = row['all_table_list_dedup']  # updated col ########
         rows.append((papers, csvs))
+    print(f"[DEBUG] Built rows list with length: {len(rows)}")
     del df_tables
 
     # Build reverse index: paper -> row IDs
@@ -184,6 +203,24 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True):
     for rid, (papers, _) in enumerate(rows):
         for p in papers:
             paper2rows[p].append(rid)
+    print(f"[DEBUG] Built paper2rows with {len(paper2rows)} unique papers")
+    
+    # Check paper2rows against paper_index
+    valid_papers = set(paper_index)
+    papers_in_rows = set(paper2rows.keys())
+    print(f"[DEBUG] Paper mapping statistics:")
+    print(f"  - Papers in paper_index: {len(valid_papers)}")
+    print(f"  - Papers in paper2rows: {len(papers_in_rows)}")
+    print(f"  - Papers in both: {len(valid_papers.intersection(papers_in_rows))}")
+    print(f"  - Papers only in paper2rows: {len(papers_in_rows - valid_papers)}")
+    print(f"  - Papers only in paper_index: {len(valid_papers - papers_in_rows)}")
+    
+    # Check paper ID formats in paper2rows
+    print("\n[DEBUG] Paper2rows ID format check:")
+    sample_papers = list(paper2rows.keys())[:3]
+    print(f"  - First 3 paper2rows keys: {sample_papers}")
+    print(f"  - First 3 paper2rows key types: {[type(x) for x in sample_papers]}")
+    
     sample_pid = next(iter(paper2rows))
     print(f"[DEBUG] paper2rows first key → {sample_pid!r} , type={type(sample_pid)}")
     print(f"[DEBUG] idx2pid[0] → {paper_index[0]!r} , type={type(paper_index[0])}")
@@ -194,13 +231,11 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True):
 
     # -- Vectorized CSV pair counting via sparse matrices --
     # build global CSV list & index
-    #all_csvs = sorted({c for _, cs in rows for c in cs})
-    #csv2idx  = {c:i for i,c in enumerate(all_csvs)}
-    # build global CSV list & index (basename + preserve first-seen order)
-    #flat = [os.path.basename(c) for _, cs in rows for c in cs]
     flat = [c for _, cs in rows for c in cs]
     all_csvs = list(dict.fromkeys(flat))
+    print(f"[DEBUG] Built all_csvs list with length: {len(all_csvs)}")
     csv2idx  = {c: i for i, c in enumerate(all_csvs)}
+    print(f"[DEBUG] Built csv2idx with length: {len(csv2idx)}")
 
     # 1) intra-row: construct B for same-model CSV pairs
     row_b, col_b = [], []
@@ -215,36 +250,97 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True):
 
     # 2) inter-row: build A (paper→CSV) and compute C = Aᵀ·P·A
     corpus2pidx = {cid:i for i,cid in enumerate(paper_index)}
+    print(f"[DEBUG] Built corpus2pidx with length: {len(corpus2pidx)}")
     title2cid   = {t:cid for cid,titles in cid2titles.items() for t in titles}
+    print(f"[DEBUG] Built title2cid with length: {len(title2cid)}")
+    print(f"[DEBUG] Sample of title2cid (first 3 items): {dict(list(title2cid.items())[:3])}")
+    print('length of title2cid: ', len(title2cid))
+    print('length of cid2titles: ', len(cid2titles))
+    
+    # Track get() operations
+    missing_title_count = 0
+    missing_cid_count = 0
+    missing_p_count = 0
+    total_titles = 0
+    successful_mappings = 0
+    
+    # Track sample of missing mappings
+    missing_title_samples = set()
+    missing_cid_samples = set()
+    
     row_i, col_i = [], []
     for titles, cs in rows:
         for t in titles:
-            cid = title2cid.get(t); p = corpus2pidx.get(cid)
-            if p is None: continue
+            total_titles += 1
+            cid = title2cid.get(t)
+            if cid is None:
+                missing_title_count += 1
+                if len(missing_title_samples) < 3:
+                    missing_title_samples.add(t)
+                continue
+            p = corpus2pidx.get(cid)
+            if p is None:
+                missing_cid_count += 1
+                if len(missing_cid_samples) < 3:
+                    missing_cid_samples.add(f"{t} -> {cid}")
+                continue
+            successful_mappings += 1
             for c in cs:
-                row_i.append(p); col_i.append(csv2idx[c])
+                row_i.append(p)
+                col_i.append(csv2idx[c])
+    
+    print(f"\n[DEBUG] Detailed mapping statistics:")
+    print(f"  - Total titles processed: {total_titles}")
+    print(f"  - Titles not found in title2cid: {missing_title_count} ({missing_title_count/total_titles*100:.2f}%)")
+    print(f"  - CIDs not found in corpus2pidx: {missing_cid_count} ({missing_cid_count/total_titles*100:.2f}%)")
+    print(f"  - Successfully mapped titles: {successful_mappings} ({successful_mappings/total_titles*100:.2f}%)")
+    print(f"\n[DEBUG] Sample of missing mappings:")
+    print(f"  - Missing title samples: {list(missing_title_samples)}")
+    print(f"  - Missing CID samples: {list(missing_cid_samples)}")
+    
+    print(f"[DEBUG] Built row_i and col_i with lengths: {len(row_i)}, {len(col_i)}")
     print('finished building A')
     A = coo_matrix((np.ones(len(row_i), bool),(row_i,col_i)), shape=(len(paper_index), len(all_csvs))).astype(bool).tocsr()
+    print(f"[DEBUG] Built A matrix with shape: {A.shape}, nnz: {A.nnz}")
     C = A.T.dot(paper_paper_adj).dot(A).tocsr()
     print(f"Step2: [Inter-row] Adjacency shape: {C.shape}: ", C.nnz)
-    del A, corpus2pidx, title2cid, row_i, col_i, paper_paper_adj
+    #del A, corpus2pidx, title2cid, row_i, col_i, paper_paper_adj
 
     # 3) sum and extract
-    '''M = (B + C).tocsr()
-    processed_csv_adj = {}
-    for i in tqdm(range(M.shape[0]), desc="Building processed CSV adjacency mapping"):
-        start, end = M.indptr[i], M.indptr[i+1]
-        # collect all non-zero columns except self
-        nbrs = [j for j in M.indices[start:end] if j != i]
-        if nbrs:
-            processed_csv_adj[all_csvs[i]] = [ all_csvs[j] for j in nbrs ]'''
-    # try to accelerate
     M = (B + C).astype(bool).tocsr() # we didn't care count
     M.setdiag(False)
-    # how many nonzero rows
-    #nnz_rows = np.diff(M.indptr)
-    #print(f"number of nonzero rows: {len(nnz_rows)}")
+    print(f"[DEBUG] Final M matrix shape: {M.shape}, nnz: {M.nnz}")
     del B, C
+
+    # Add detailed mapping checks
+    print("\n[DEBUG] Detailed mapping integrity check:")
+    
+    # Check title2cid mapping
+    print("\n1. Title to CID mapping check:")
+    sample_titles = list(title2cid.keys())[:3]
+    print(f"  - Sample titles: {sample_titles}")
+    print(f"  - Their CIDs: {[title2cid[t] for t in sample_titles]}")
+    print(f"  - CIDs in paper_index: {[cid in paper_index for cid in [title2cid[t] for t in sample_titles]]}")
+    
+    # Check corpus2pidx mapping
+    print("\n2. CID to matrix index mapping check:")
+    sample_cids = list(corpus2pidx.keys())[:3]
+    print(f"  - Sample CIDs: {sample_cids}")
+    print(f"  - Their matrix indices: {[corpus2pidx[cid] for cid in sample_cids]}")
+    
+    # Check csv2idx mapping
+    print("\n3. CSV to index mapping check:")
+    sample_csvs = list(csv2idx.keys())[:3]
+    print(f"  - Sample CSVs: {sample_csvs}")
+    print(f"  - Their indices: {[csv2idx[csv] for csv in sample_csvs]}")
+    
+    # Check row_i and col_i construction
+    print("\n4. Row and column index construction check:")
+    print(f"  - First 5 row_i values: {row_i[:5]}")
+    print(f"  - First 5 col_i values: {col_i[:5]}")
+    print(f"  - Corresponding papers: {[paper_index[i] for i in row_i[:5]]}")
+    print(f"  - Corresponding CSVs: {[all_csvs[i] for i in col_i[:5]]}")
+    
     if save_matrix_flag:
         time1 = time.time()
         print('saving matrix and csv list')
@@ -260,38 +356,11 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True):
         time2 = time.time()
         print(f"time cost: {time2 - time1} seconds")
 
-    '''
-    # comment the original gt building process
-    indptr   = M.indptr
-    indices  = M.indices
-    nnz_per_row = np.diff(indptr)
-
-    processed_csv_adj = {}
-    rows_with_nbrs = np.where(nnz_per_row > 1)[0] # skip rows with no neighbors
-    print(f"get {len(rows_with_nbrs)} non-empty rows, total {len(indptr)} rows")
-
-    for i in tqdm(rows_with_nbrs, desc=f"Building CSV adjacency ({len(rows_with_nbrs)} non-empty rows)"):
-        start, end = indptr[i], indptr[i+1]
-        nbrs = indices[start:end]
-        if nbrs.size:
-            nbrs = nbrs[nbrs != i] # exclude self
-            if nbrs.size:
-                processed_csv_adj[os.path.basename(all_csvs[i])] = [os.path.basename(all_csvs[j]) for j in nbrs.tolist()]
-    # keep basename
-    #processed_csv_adj = {os.path.basename(k): [os.path.basename(x) for x in v] for k, v in processed_csv_adj.items()}
-    print(f"!finished keeping only basename")
-    # Save the processed adjacency mapping directly
-    output_adj = f"{GT_DIR}/csv_pair_adj_{rel_key}_processed.pkl"
-    with open(output_adj, "wb") as f:
-        pickle.dump(processed_csv_adj, f)
-    print(f"✅ CSV adjacency mapping saved to {output_adj}")'''
-
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build SciLake union benchmark tables.")
     parser.add_argument("--rel_key", type=str, default='direct_label', help="Exact key inside combined pickle (e.g., 'max_pr', 'direct_label_influential').")
     parser.add_argument("--overlap_rate_threshold", type=float, default=0.0, help=("Numeric threshold for similarity/overlap matrices; ignored for 'direct_label*' keys."))
-    #parser.add_argument("--save_matrix_flag", action="store_true", help="Save the sparse matrix to disk.")
     args = parser.parse_args()
 
     build_ground_truth(rel_key=args.rel_key, overlap_rate_threshold=args.overlap_rate_threshold)
