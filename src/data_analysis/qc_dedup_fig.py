@@ -16,7 +16,7 @@ import seaborn as sns
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 
-from src.data_analysis.qc_dedup import save_heatmap
+from src.data_analysis.qc_dedup import save_heatmap, save_heatmap_percentage
 
 OUTPUT_DIR = "data/deduped"
 FIG_DIR = "data/analysis"
@@ -33,4 +33,6 @@ if __name__ == "__main__":
     with open(stats_file, "r") as f:
         stats = json.load(f)
 
+    # Generate both absolute and percentage heatmaps
     save_heatmap(dup_matrix, stats["cross_unique_counts"], FIG_DIR)
+    save_heatmap_percentage(dup_matrix, stats["cross_unique_counts"], FIG_DIR)

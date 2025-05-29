@@ -234,8 +234,8 @@ def update_row(row, duplicate_mapping, resource_priority):
     # ---- Step 2: decide the target resource for each canonical file ------
     designated = {}
     for canonical in ordered_canonical:
-        # 2a. If the canonical path already appears in one of the row’s lists,
-        #     we keep it under that column’s resource.
+        # 2a. If the canonical path already appears in one of the row's lists,
+        #     we keep it under that column's resource.
         target_resource = None
         for col, res in resource_of_col.items():
             lst = row[col] if isinstance(row[col], (list, tuple, np.ndarray)) else []
@@ -246,7 +246,7 @@ def update_row(row, duplicate_mapping, resource_priority):
         if target_resource is None:
             target_resource = infer_resource_from_path(canonical)
         # 2c. Fallback: if still unknown, choose the highest‑priority resource
-        #     among duplicates present in this row; if none, default to ‘hugging’.
+        #     among duplicates present in this row; if none, default to 'hugging'.
         if target_resource is None:
             dup_resources = {resource_of_col[c]
                              for c in resource_of_col
@@ -294,8 +294,8 @@ def compute_dup_matrix_from_sha(files_info):
     cross_unique_counts = {r: 0 for r in keys}
     cross_unique_files = {r: [] for r in keys}
     overall_unique = []
-    for h, group in hash_groups.items():
-        group_sorted = sorted(group, key=lambda x: (x["priority"], x["order"]))
+    for h, group_sorted in hash_groups.items():
+        group_sorted = sorted(group_sorted, key=lambda x: (x["priority"], x["order"]))
         canonical = group_sorted[0]
         res = canonical["resource"]
         cross_unique_counts[res] += 1
@@ -323,7 +323,7 @@ class BiasedLogNorm(LogNorm):
         scaled = super().__call__(value, clip)
         return np.power(scaled, self.bias)
 
-def save_heatmap(dup_matrix, unique_counts, output_dir):
+def save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=False):
     fontsize = 18
     plt.rcParams.update({
         'font.size': 18,           
@@ -336,40 +336,81 @@ def save_heatmap(dup_matrix, unique_counts, output_dir):
     })
     figsize = (12, 6)
 
-    # ---- Rename resources for better labels ---- ########
+    # ---- Rename resources for better labels ----
     name_map = {
         "hugging": "Hugging",
         "github": "GitHub",
         "html": "HTML",
         "llm": "S2ORC"
     }
-    dup_matrix = dup_matrix.rename(index=name_map, columns=name_map) ########
-    unique_counts = {name_map[k]: v for k, v in unique_counts.items()} ########
+    dup_matrix = dup_matrix.rename(index=name_map, columns=name_map)
+    unique_counts = {name_map[k]: v for k, v in unique_counts.items()}
 
-    # Step 1: prepare plotting matrix using the original values
-    dup_matrix_plot = dup_matrix.copy()
-    dup_matrix_plot[dup_matrix_plot < 10] = 10
+    # Step 1: prepare plotting matrix
+    if is_percentage:
+        # Calculate total files per resource from parquet
+        df = pd.read_parquet(INPUT_PARQUET)
+        total_files = {}
+        for res, col in {
+            "Hugging": "hugging_table_list",
+            "GitHub": "github_table_list",
+            "HTML": "html_table_list_mapped",
+            "S2ORC": "llm_table_list_mapped"
+        }.items():
+            total_files[res] = df[col].apply(lambda x: len(x) if isinstance(x, (list, tuple, np.ndarray)) else 0).sum()
+        
+        # Calculate percentages based on total files
+        dup_matrix_plot = dup_matrix.copy()
+        print("\nPercentage calculation details:")
+        print("Total files per resource (denominator):")
+        for res, count in total_files.items():
+            print(f"{res}: {count}")
+        print("\nOriginal overlap values (numerator):")
+        print(dup_matrix_plot)
+        # Convert to percentages using total files as denominator
+        for idx in dup_matrix_plot.index:
+            denominator = total_files[idx]
+            dup_matrix_plot.loc[idx] = (dup_matrix_plot.loc[idx] / denominator) * 100
+        # Round to 1 decimal place for display
+        dup_matrix_plot = dup_matrix_plot.round(1)
+        print("\nCalculated percentages:")
+        print(dup_matrix_plot)
+        vmin, vmax = 0, 100
+        fmt = ".1f"
+    else:
+        dup_matrix_plot = dup_matrix.copy()
+        dup_matrix_plot[dup_matrix_plot < 10] = 10
+        vmin, vmax = 10, 1000
+        fmt = ".0f"
 
-    # Step 2: define teal color map
-    teal_colors = ["#a5d2bc", "#50a89d", "#4e8094", "#486f90"]
-    teal_cmap = LinearSegmentedColormap.from_list("teal_gradient", teal_colors)
+    # Step 2: define color map - use same teal colors for both
+    colors = ["#a5d2bc", "#50a89d", "#4e8094", "#486f90"]
+    cmap = LinearSegmentedColormap.from_list("teal_gradient", colors)
     
-    # Step 3: use log normalization
-    from matplotlib.colors import LogNorm
-    norm = LogNorm(vmin=10, vmax=1000)
+    # Step 3: use appropriate normalization
+    if is_percentage:
+        norm = None  # Linear normalization for percentages
+    else:
+        norm = LogNorm(vmin=vmin, vmax=vmax)
 
     # Step 4: plot
     plt.figure(figsize=(6, 5))
     ax = sns.heatmap(
         dup_matrix_plot,
-        annot=dup_matrix,
-        cmap=teal_cmap,
-        fmt=".0f",
+        annot=dup_matrix if not is_percentage else dup_matrix_plot,
+        cmap=cmap,
+        fmt=fmt,
         square=True,
         cbar=True,
         xticklabels=False,
         norm=norm
     )
+    
+    # Add percentage sign to colorbar if showing percentages
+    if is_percentage:
+        cbar = ax.collections[0].colorbar
+        cbar.ax.set_ylabel('Percentage (%)', fontsize=fontsize)
+    
     ax.set_xlabel("")
     ax.set_ylabel("")
     plt.setp(ax.get_yticklabels())
@@ -386,9 +427,18 @@ def save_heatmap(dup_matrix, unique_counts, output_dir):
             fontsize=fontsize
         )
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "heatmap_overlap.pdf"))
-    print("Heatmap saved to", os.path.join(output_dir, "heatmap_overlap.pdf"))
+    
+    # Save with appropriate filename
+    suffix = "percentage" if is_percentage else "overlap"
+    plt.savefig(os.path.join(output_dir, f"heatmap_{suffix}.pdf"))
+    print(f"Heatmap saved to {os.path.join(output_dir, f'heatmap_{suffix}.pdf')}")
 
+def save_heatmap_percentage(dup_matrix, unique_counts, output_dir):
+    """
+    Save a heatmap showing the percentage of overlap between resources.
+    The percentages are calculated based on the row totals.
+    """
+    save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=True)
 
 def main():
     time_start = time.time()
@@ -534,7 +584,9 @@ def main():
     dup_matrix.to_pickle(dup_matrix_file)
     print(f"Dup matrix saved to {dup_matrix_file}")
 
+    # Save both absolute and percentage heatmaps
     save_heatmap(dup_matrix, stats["cross_unique_counts"], FIG_DIR)
+    save_heatmap_percentage(dup_matrix, stats["cross_unique_counts"], FIG_DIR)
     print(f"Time taken: {time.time() - time_start} seconds")
 
 if __name__ == "__main__":
