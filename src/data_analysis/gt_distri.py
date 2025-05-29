@@ -79,7 +79,7 @@ def load_lengths(path_map):
     return out
 
 def plot_kde(length_data, title, prefix):
-    plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(8, 4))
     total = sum(len(v) for v in length_data.values())
     for raw, lens in length_data.items():
         if not lens: continue
@@ -100,7 +100,7 @@ def plot_kde(length_data, title, prefix):
     plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_kde.pdf"))
 
 def plot_histogram(length_data, palette, title, prefix):
-    plt.figure(figsize=(6, 6))
+    plt.figure(figsize=(6, 3))
     total = sum(len(v) for v in length_data.values())
     max_val = max(max(v) for v in length_data.values() if v)
     bins = np.arange(0, max_val + 2)
@@ -115,7 +115,7 @@ def plot_histogram(length_data, palette, title, prefix):
     plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_hist.pdf"))
 
 def plot_log_boxplot(length_data, palette, title, prefix):
-    plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(8, 4))
     labels = []
     data = []
     colors = []
@@ -145,7 +145,7 @@ def plot_log_boxplot(length_data, palette, title, prefix):
     #plt.show()
 
 def plot_violin(length_data, palette, title, prefix):
-    plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(8, 4))
     labels = []
     data = []
     colors = []
@@ -161,7 +161,7 @@ def plot_violin(length_data, palette, title, prefix):
     # Customize violin plot colors
     for i, pc in enumerate(violin['bodies']):
         pc.set_facecolor(colors[i])
-        pc.set_alpha(0.6)
+        pc.set_alpha(1.0)
     
     # Customize median and mean lines
     #violin['cmedians'].set_color('black')
