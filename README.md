@@ -150,11 +150,11 @@ python -m src.data_gt.step3_create_symlinks # create the symbolic link on differ
 # I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
 #python -m src.data_gt.step3_gt # build up groundtruth
 bash src/data_gt/step3_gt.sh
-python -m src.data_gt.compare_gt_stats --gt_dir data/gt
+python -m src.data_gt.compare_gt_stats --gt_dir data/gt # non-zero edge stats
 python -m src.data_gt.debug_npz --gt-dir data/gt/ # check whether gt satisfy some validcondition
 
 python -m src.data_localindexing.turn_tus_into_pickle # process sqlite gt into pickle file
-python -m src.data_analysis.gt_distri # compare groundtruth across groundtruth
+python -m src.data_analysis.gt_distri # compare GT
 # (deprecate) python -m src.data_gt.gt_combine
 python -m src.data_gt.modelcard_matrix # (add other two level citation graph)
 # (test)python -m src.data_gt.test_modelcard_update --mode dataset # check whether matrix multiplication and for loop obtain the same results
@@ -163,7 +163,7 @@ python -m src.data_gt.modelcard_matrix # (add other two level citation graph)
 python -m src.data_gt.merge_union --level direct
 # produce union gt (TODO: accelerate it, add npz to modelcard_matrix)
 
-python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t
+# (depreate) python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t for pkl files
 # (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 # (deprecate) python -m src.data_analysis.gt_fig # plot stats
 ```

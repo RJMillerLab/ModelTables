@@ -22,7 +22,7 @@ plt.rcParams.update({
     'axes.titlesize': 28,
     'axes.labelsize': 28,
     'xtick.labelsize': 28,
-    'ytick.labelsize': 18,
+    'ytick.labelsize': 10,
     'figure.titlesize': 28,
     'legend.fontsize': 18
 })
@@ -136,7 +136,7 @@ def plot_log_boxplot(length_data, palette, title, prefix):
     plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
 
     plt.yscale('log')
-    plt.ylabel('Candidate Table Length (log-scale)', fontsize=20)
+    plt.ylabel('GT Length', fontsize=22)
     plt.title(title, fontsize=22)
 
     plt.tight_layout()
@@ -145,7 +145,7 @@ def plot_log_boxplot(length_data, palette, title, prefix):
     #plt.show()
 
 def plot_violin(length_data, palette, title, prefix):
-    plt.figure(figsize=(8, 4))
+    plt.figure(figsize=(10, 4))
     labels = []
     data = []
     colors = []
@@ -171,7 +171,7 @@ def plot_violin(length_data, palette, title, prefix):
     plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
 
     plt.yscale('log')
-    plt.ylabel('Candidate Table Length (log-scale)', fontsize=20)
+    plt.ylabel('GT Length', fontsize=24)
     plt.title(title, fontsize=22)
 
     plt.tight_layout()
@@ -205,5 +205,5 @@ if __name__ == "__main__":
 
     # plot_histogram(lengths, "GT Length (All Sources)", "gt_all")   ########
     #plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
-    plot_log_boxplot(lengths, PALETTE, "GT Length Boxplot", "gt_boxplot")
-    plot_violin(lengths, PALETTE, "GT Length Violin Plot", "gt_violin")
+    plot_log_boxplot(lengths, PALETTE, "Log-scale GT length distribution across benchmarks", "gt_boxplot")
+    plot_violin(lengths, PALETTE, "Log-scale GT length distribution across benchmarks", "gt_violin")

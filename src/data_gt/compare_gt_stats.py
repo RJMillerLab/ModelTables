@@ -64,15 +64,6 @@ def main(gt_dir):
 
     adjs = {}
     hashes = {}
-    '''for lvl in LEVELS:
-        fname = f"csv_pair_adj_{lvl}_processed.pkl"
-        path = os.path.join(gt_dir, fname)
-        if not os.path.exists(path):
-            print(f"{lvl}: MISSING")
-            continue
-        print(f"loading {path}")
-        adjs[lvl] = load_gt(path)
-        hashes[lvl] = hash_file(path)'''
     for lvl in LEVELS:
         npz_path     = os.path.join(gt_dir, f"csv_pair_matrix_{lvl}.npz")
         csvlist_path = os.path.join(gt_dir, f"csv_list_{lvl}.pkl")
