@@ -126,7 +126,7 @@ def plot_log_boxplot(length_data, palette, title, prefix):
         data.append(length_data[src])
         colors.append(palette[src])
 
-    box = plt.boxplot(data, patch_artist=True, showfliers=True)
+    box = plt.boxplot(data, patch_artist=True, showmeans=False, showbox=True, showcaps=True, showfliers=True, medianprops={'visible': False})  
 
     for patch, color in zip(box['boxes'], colors):
         patch.set_facecolor(color)
@@ -143,6 +143,40 @@ def plot_log_boxplot(length_data, palette, title, prefix):
     plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
     print("Plots saved →", os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
     #plt.show()
+
+def plot_violin(length_data, palette, title, prefix):
+    plt.figure(figsize=(8, 8))
+    labels = []
+    data = []
+    colors = []
+    for src in length_data:
+        if not length_data[src]:
+            continue
+        labels.append(src)
+        data.append(length_data[src])
+        colors.append(palette[src])
+
+    violin = plt.violinplot(data, showmeans=False, showmedians=False)
+    
+    # Customize violin plot colors
+    for i, pc in enumerate(violin['bodies']):
+        pc.set_facecolor(colors[i])
+        pc.set_alpha(0.6)
+    
+    # Customize median and mean lines
+    #violin['cmedians'].set_color('black')
+    #violin['cmeans'].set_color('red')
+
+    split_labels = [l.replace(' ', '\n') for l in labels]
+    plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
+
+    plt.yscale('log')
+    plt.ylabel('Candidate Table Length (log-scale)', fontsize=20)
+    plt.title(title, fontsize=22)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_violin.pdf"))
+    print("Violin plot saved →", os.path.join(OUTPUT_DIR, f"{prefix}_violin.pdf"))
 
 if __name__ == "__main__":
     GT_DIR = "data/gt"
@@ -172,3 +206,4 @@ if __name__ == "__main__":
     # plot_histogram(lengths, "GT Length (All Sources)", "gt_all")   ########
     #plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
     plot_log_boxplot(lengths, PALETTE, "GT Length Boxplot", "gt_boxplot")
+    plot_violin(lengths, PALETTE, "GT Length Violin Plot", "gt_violin")
