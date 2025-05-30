@@ -164,7 +164,7 @@ python -m src.data_gt.nonzeroedge # non-zero edge stats
 
 python -m src.data_gt.merge_union --level direct
 # produce union gt (TODO: accelerate it, add npz to modelcard_matrix)
-
+python -m src.data_gt.create_csvlist_variants --level direct # update _s for *csv_list.pkl
 # (depreate) python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t for pkl files
 # (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 # (deprecate) python -m src.data_analysis.gt_fig # plot stats
@@ -199,7 +199,7 @@ bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake 
 bash scripts/step3_search_hnsw.sh # data lake search (retrieve)
 bash scripts/step3_processmetrics.sh # extract metrics based on gt & result diff | plot fig
 # (Optional) bash eval_per_resource.sh # run ablation study on different results after getting results
-bash step3_ablation_diff_resources.sh # run ablation study on different results before getting results
+bash eval_per_resource.sh # run ablation study on different results before getting results
 # bash scripts/step4_discovery.sh
 ```
 
