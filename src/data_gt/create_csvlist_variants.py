@@ -27,6 +27,9 @@ LEVEL_CSVLIST = {
     "max_pr_influential": "csv_list_max_pr_influential.pkl",
     "max_pr_methodology_or_result": "csv_list_max_pr_methodology_or_result.pkl",
     "max_pr_methodology_or_result_influential": "csv_list_max_pr_methodology_or_result_influential.pkl",
+    "model": "scilake_gt_modellink_model_adj_csv_list.pkl",
+    "dataset": "scilake_gt_modellink_dataset_adj_csv_list.pkl",
+    "union": "csv_pair_union_direct_csv_list.pkl",
 }
 
 SUFFIXES = {
