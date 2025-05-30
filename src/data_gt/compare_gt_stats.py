@@ -64,6 +64,15 @@ def main(gt_dir):
 
     adjs = {}
     hashes = {}
+    '''for lvl in LEVELS:
+        fname = f"csv_pair_adj_{lvl}_processed.pkl"
+        path = os.path.join(gt_dir, fname)
+        if not os.path.exists(path):
+            print(f"{lvl}: MISSING")
+            continue
+        print(f"loading {path}")
+        adjs[lvl] = load_gt(path)
+        hashes[lvl] = hash_file(path)'''
     for lvl in LEVELS:
         npz_path     = os.path.join(gt_dir, f"csv_pair_matrix_{lvl}.npz")
         csvlist_path = os.path.join(gt_dir, f"csv_list_{lvl}.pkl")
@@ -128,17 +137,3 @@ if __name__ == '__main__':
     parser.add_argument('--gt_dir', type=str, default='data/gt', help='Directory of GT pickles')
     args = parser.parse_args()
     main(args.gt_dir)
-
-
-"""
-Basic GT stats:
-Level                                      Nodes     Edges    AvgDeg
-----------------------------------------------------------------------
-direct_label                               92975 354094236   7616.98
-direct_label_influential                   92975 151405647   3256.91
-direct_label_methodology_or_result         92975 249816596   5373.84
-direct_label_methodology_or_result_influential   92975 134481534   2892.85
-max_pr_influential                         92975 430407751   9258.57
-max_pr_methodology_or_result               929751117322182  24034.90
-max_pr_methodology_or_result_influential   92975 348318147   7492.73
-"""

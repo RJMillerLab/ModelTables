@@ -4,21 +4,15 @@ Print number of non-zero elements and density for each matrix file.
 
 import os
 from scipy.sparse import load_npz
-import pickle
 import numpy as np
 
-def load_gt_npz(matrix_path, csv_list_path):
-    """Load a boolean CSR matrix (npz) and its csv_list (pickle)."""
-    M = load_npz(matrix_path).tocsr()
-    with open(csv_list_path, 'rb') as f:
-        csv_list = pickle.load(f)
-    return M, csv_list
-
-def get_nonzero_dims(M):
-    """Get number of non-zero rows and columns."""
-    nonzero_rows = np.unique(M.nonzero()[0])
-    nonzero_cols = np.unique(M.nonzero()[1])
-    return len(nonzero_rows), len(nonzero_cols)
+def compute_nnz_density(npz_path):
+    M = load_npz(npz_path).tocsr()
+    nnz = M.nnz
+    row_nnz = M.getnnz(axis=1)
+    nz_rows = np.sum(row_nnz > 0)
+    density = nnz / (nz_rows * nz_rows) if nz_rows > 0 else 0
+    return nnz,density
 
 def main(gt_dir):
     LEVELS = [
@@ -37,22 +31,21 @@ def main(gt_dir):
 
     for lvl in LEVELS:
         npz_path = os.path.join(gt_dir, f"csv_pair_matrix_{lvl}.npz")
-        csvlist_path = os.path.join(gt_dir, f"csv_list_{lvl}.pkl")
-        
-        if os.path.exists(npz_path) and os.path.exists(csvlist_path):
-            print(f"Loading {lvl}...")
-            M, _ = load_gt_npz(npz_path, csvlist_path)
-            nnz = M.nnz
-            
-            # Get non-zero dimensions and calculate density
-            nz_rows, nz_cols = get_nonzero_dims(M)
-            assert nz_rows == nz_cols, f"Non-zero rows ({nz_rows}) != non-zero cols ({nz_cols}) for {lvl}"
-            density = nnz / (nz_rows * nz_cols) if nz_rows > 0 else 0
-            
-            print(f"{lvl:<40}{nnz:>12,}{density:>12.6f}")
-            del M  # Explicitly delete to free memory
-        else:
-            print(f"{lvl:<40}{'MISSING':>12}{'MISSING':>12}")
+        nnz, density = compute_nnz_density(npz_path)
+        print(f"{lvl:<40}{nnz:>12,}{density:>12.6f}")
+    # extra model
+    npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_model_adj.npz")
+    nnz, density = compute_nnz_density(npz_path)
+    print(f"{'Model':<40}{nnz:>12,}{density:>12.6f}")
+    # extra dataset
+    npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_dataset_adj.npz")
+    nnz, density = compute_nnz_density(npz_path)
+    print(f"{'Dataset':<40}{nnz:>12,}{density:>12.6f}")
+    # extra union
+    npz_path = os.path.join(gt_dir, f"csv_pair_union_direct.npz")
+    nnz, density = compute_nnz_density(npz_path)
+    print(f"{'Union':<40}{nnz:>12,}{density:>12.6f}")
+
 
 if __name__ == '__main__':
     import argparse
@@ -60,3 +53,19 @@ if __name__ == '__main__':
     parser.add_argument('--gt_dir', type=str, default='data/gt', help='Directory of GT files')
     args = parser.parse_args()
     main(args.gt_dir)
+
+"""
+Level                                            NNZ     Density
+-----------------------------------------------------------------
+direct_label                             708,281,447    0.081936
+direct_label_influential                 302,904,269    0.035041
+direct_label_methodology_or_result       499,726,167    0.057810
+direct_label_methodology_or_result_influential 269,056,043    0.031125
+max_pr                                  3,721,596,269    0.430524
+max_pr_influential                       860,908,477    0.099592
+max_pr_methodology_or_result            2,234,737,339    0.258520
+max_pr_methodology_or_result_influential 696,729,269    0.080599
+Model                                     18,308,662    0.001759
+Dataset                                   36,894,918    0.003615
+Union                                    720,963,231    0.068290
+"""

@@ -150,13 +150,15 @@ python -m src.data_gt.step3_create_symlinks # create the symbolic link on differ
 # I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
 #python -m src.data_gt.step3_gt # build up groundtruth
 bash src/data_gt/step3_gt.sh
-python -m src.data_gt.compare_gt_stats --gt_dir data/gt # non-zero edge stats
+
+# (deprecate) python -m src.data_gt.compare_gt_stats --gt_dir data/gt # compare pkl hash
 python -m src.data_gt.debug_npz --gt-dir data/gt/ # check whether gt satisfy some validcondition
 
 python -m src.data_localindexing.turn_tus_into_pickle # process sqlite gt into pickle file
-python -m src.data_analysis.gt_distri # compare GT
 # (deprecate) python -m src.data_gt.gt_combine
 python -m src.data_gt.modelcard_matrix # (add other two level citation graph)
+python -m src.data_analysis.gt_distri # GT length distribution boxplot/violin
+python -m src.data_gt.nonzeroedge # non-zero edge stats
 # (test)python -m src.data_gt.test_modelcard_update --mode dataset # check whether matrix multiplication and for loop obtain the same results
 #(test)python -m src.data_gt.convert_adj_to_npz --input data/gt/scilake_gt_modellink_dataset_adj_processed.pkl --output-prefix data/gt/scilake_gt_modellink_dataset # pkl2npz
 

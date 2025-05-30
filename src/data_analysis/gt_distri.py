@@ -31,13 +31,14 @@ OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PALETTE = {
-    "Paper GT":           "#4e8094",
-    "Model GT":           "#50a89d",
-    "Dataset GT":         "#a5d2bc",
+    "Paper GT":           "#486f90",
+    "Model GT":           "#4e8094",
+    "Dataset GT":         "#50a89d",
     "SANTOS Large":       "#f29e4c",
     "SANTOS Small":       "#8b2e2e",
     "TUS Large":          "#d96e44",
     "TUS Small":          "#b74a3c",
+    "Union GT":           "#a5d2bc",
 }
 
 # -------- Loader --------
@@ -115,7 +116,7 @@ def plot_histogram(length_data, palette, title, prefix):
     plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_hist.pdf"))
 
 def plot_log_boxplot(length_data, palette, title, prefix):
-    plt.figure(figsize=(8, 4))
+    plt.figure(figsize=(10, 4))
     labels = []
     data = []
     colors = []
@@ -130,19 +131,18 @@ def plot_log_boxplot(length_data, palette, title, prefix):
 
     for patch, color in zip(box['boxes'], colors):
         patch.set_facecolor(color)
-        #patch.set_alpha(0.6)
+        patch.set_alpha(1.0)
 
     split_labels = [l.replace(' ', '\n') for l in labels]
     plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
 
     plt.yscale('log')
-    plt.ylabel('GT Length', fontsize=22)
+    plt.ylabel('GT Length', fontsize=24)
     plt.title(title, fontsize=22)
 
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
-    print("Plots saved →", os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
-    #plt.show()
+    print("Boxplot saved →", os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
 
 def plot_violin(length_data, palette, title, prefix):
     plt.figure(figsize=(10, 4))
@@ -192,6 +192,7 @@ if __name__ == "__main__":
         "Paper GT":     os.path.join(GT_DIR, "csv_pair_matrix_direct_label.npz"),
         "Model GT":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj.npz"),
         "Dataset GT":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj.npz"),
+        "Union GT":        os.path.join(GT_DIR, "csv_pair_union_direct.npz"),
     }
 
     lengths = load_lengths(PATHS)
