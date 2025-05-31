@@ -4,7 +4,7 @@ Date: 2025-05-31
 
 This script is used to check if a csv pair is related in GT matrices.
 Usage:
-    python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 csv1.csv --csv2 csv2.csv
+    python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 1810.04805_table1.csv --csv2 1908.04577_table4.csv 2001.09694_table12.csv 2410.06581_table1.csv 2307.06942_table3.csv 2209.06638_table11.csv 2405.18406v3_table8.csv 237485280_table3.csv 2205.12644_table10.csv 2010.12148_table10.csv 
 """
 import os
 import argparse
@@ -37,7 +37,7 @@ LEVEL_CSVLIST = {
     "dataset": "scilake_gt_modellink_dataset_adj_csv_list_processed.pkl",
 }
 
-def check_pair_fast(gt_dir, csv1, csv2):
+def check_pair_fast(gt_dir, csv1, csv2_list):
     for level in LEVELS:
         npz_path = os.path.join(gt_dir, LEVEL_NPZ[level])
         csvlist_path = os.path.join(gt_dir, LEVEL_CSVLIST[level])
@@ -48,14 +48,18 @@ def check_pair_fast(gt_dir, csv1, csv2):
             csv_list = pickle.load(f)
         try:
             idx1 = csv_list.index(csv1)
-            idx2 = csv_list.index(csv2)
         except ValueError:
-            print(f"{level:8}: not found in csv_list")
+            print(f"{level:8}: {csv1} not found in csv_list")
             continue
         M = load_npz(npz_path)
-        related = M[idx1, idx2] != 0 or M[idx2, idx1] != 0
-        print(f"{level:8}: {'related' if related else 'not related'}")
-        # 释放内存
+        for csv2 in csv2_list:
+            try:
+                idx2 = csv_list.index(csv2)
+            except ValueError:
+                print(f"{level:8}: {csv2} not found in csv_list")
+                continue
+            related = M[idx1, idx2] != 0 or M[idx2, idx1] != 0
+            print(f"{level:8}: {csv1} <-> {csv2}: {'related' if related else 'not related'}")
         del M
         del csv_list
         gc.collect()
@@ -64,8 +68,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Check if a csv pair is related in GT matrices.")
     parser.add_argument('--gt-dir', required=True, help="Directory containing the ground-truth .npz and .pkl files")
     parser.add_argument('--csv1', required=True, help="First CSV filename (with extension)")
-    parser.add_argument('--csv2', required=True, help="Second CSV filename (with extension)")
+    parser.add_argument('--csv2', required=True, nargs='+', help="Second CSV filename(s) (with extension)")
     args = parser.parse_args()
 
-    print(f"\nResults for pair: {args.csv1} <-> {args.csv2}")
+    print(f"\nResults for {args.csv1} <-> {args.csv2}")
     check_pair_fast(args.gt_dir, args.csv1, args.csv2) 

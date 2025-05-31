@@ -5,6 +5,8 @@ Last Modified: 2025-04-08
 Description: Generate a markdown report for table retrieval results, automatically from JSON files.
 Usage: 
  python -m src.data_analysis.report_generation
+ python -m src.data_analysis.report_generation --start_idx 10 --end_idx 20
+ python -m src.data_analysis.report_generation --query_table 1810.04805_table1.csv
 """
 
 import json
@@ -85,7 +87,7 @@ def build_table_model_title_maps():
                     table_to_models[os.path.basename(tbl)].add(mid)
     return table_to_models, model_to_titles
 
-def generate_md_report(json_path, include_raw, include_valid, output_file=None):
+def generate_md_report(json_path, include_raw, include_valid, output_file=None, query_table=None, start_idx=0, end_idx=10):
     if not output_file:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         output_file = f"table_report_{timestamp}.md"
@@ -93,10 +95,12 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None):
     with open(json_path, 'r') as f:
         data = json.load(f)
     
-    # only print first 10
     print(f"Loaded {len(data)} records from {json_path}")
-    # change index!
-    data = {k: v for i, (k, v) in enumerate(data.items()) if 10 <= i < 20}
+
+    if query_table:
+        data = {query_table: data[query_table]} if query_table in data else {}
+    else:
+        data = {k: v for i, (k, v) in enumerate(data.items()) if start_idx <= i < end_idx}
     print(f"Filtered to {len(data)} records for report generation.")
     table_to_models, model_to_titles = build_table_model_title_maps()
     print('Build table to model and model to titles mapping')
@@ -164,8 +168,11 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate a markdown report from JSON files.")
-    parser.add_argument("--json_path", type=str, default="results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json", help="Path to the JSON file.")
+    parser.add_argument("--json_path", type=str, default="results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json", help="Path to the JSON file.")
+    parser.add_argument("--query_table", type=str, default=None, help="Specify a single query table to output.")
+    parser.add_argument("--start_idx", type=int, default=0, help="Start index for query tables (inclusive).")
+    parser.add_argument("--end_idx", type=int, default=10, help="End index for query tables (exclusive).")
     include_valid = True
     include_raw = False
     args = parser.parse_args()
-    generate_md_report(args.json_path, include_raw, include_valid)
+    generate_md_report(args.json_path, include_raw, include_valid, query_table=args.query_table, start_idx=args.start_idx, end_idx=args.end_idx)
