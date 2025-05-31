@@ -25,9 +25,9 @@ LEVEL_NPZ = {
     "max_pr_influential": "csv_pair_matrix_max_pr_influential.npz",
     "max_pr_methodology_or_result": "csv_pair_matrix_max_pr_methodology_or_result.npz",
     "max_pr_methodology_or_result_influential": "csv_pair_matrix_max_pr_methodology_or_result_influential.npz",
-    "union": "csv_pair_union.npz",
-    "model": "scilake_gt_modellink_model_adj.npz",
-    "dataset": "scilake_gt_modellink_dataset_adj.npz",
+    "union": "csv_pair_union_direct_processed.npz",
+    "model": "scilake_gt_modellink_model_adj_processed.npz",
+    "dataset": "scilake_gt_modellink_dataset_adj_processed.npz",
 }
 
 # Mapping of level names to CSV list pickle filenames
@@ -40,9 +40,9 @@ LEVEL_CSVLIST = {
     "max_pr_influential": "csv_list_max_pr_influential.pkl",
     "max_pr_methodology_or_result": "csv_list_max_pr_methodology_or_result.pkl",
     "max_pr_methodology_or_result_influential": "csv_list_max_pr_methodology_or_result_influential.pkl",
-    "union": "csv_pair_union_csv_list.pkl",
-    "model": "scilake_gt_modellink_model_csv_list.pkl",
-    "dataset": "scilake_gt_modellink_dataset_csv_list.pkl",
+    "union": "csv_pair_union_direct_processed_csv_list.pkl",
+    "model": "scilake_gt_modellink_model_adj_csv_list_processed.pkl",
+    "dataset": "scilake_gt_modellink_dataset_adj_csv_list_processed.pkl",
 }
 
 def inspect_npz(matrix_path, csvlist_path, row_idx):

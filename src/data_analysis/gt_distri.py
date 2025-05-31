@@ -186,13 +186,10 @@ if __name__ == "__main__":
         "TUS Small":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_small_query_candidate.pkl"),
         "TUS Large":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_large_query_candidate.pkl"),
         "SANTOS Large": os.path.join(ROOT_DIR, "santos/groundtruth/real_tablesUnionBenchmark.pickle"),
-        #"Paper GT":     os.path.join(GT_DIR, "csv_pair_adj_direct_label_processed.pkl"),
-        #"Model GT":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.pkl"),
-        #"Dataset GT":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.pkl"),
         "Paper GT":     os.path.join(GT_DIR, "csv_pair_matrix_direct_label.npz"),
-        "Model GT":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj.npz"),
-        "Dataset GT":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj.npz"),
-        "Union GT":        os.path.join(GT_DIR, "csv_pair_union_direct.npz"),
+        "Model GT":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.npz"),
+        "Dataset GT":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.npz"),
+        "Union GT":     os.path.join(GT_DIR, "csv_pair_union_direct_processed.npz"),
     }
 
     lengths = load_lengths(PATHS)
@@ -204,7 +201,7 @@ if __name__ == "__main__":
         else:
             print(f"{src}: no data")
 
-    # plot_histogram(lengths, "GT Length (All Sources)", "gt_all")   ########
+    # plot_histogram(lengths, "GT Length (All Sources)", "gt_all")
     #plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
     plot_log_boxplot(lengths, PALETTE, "Log-scale GT length distribution across benchmarks", "gt_boxplot")
     plot_violin(lengths, PALETTE, "Log-scale GT length distribution across benchmarks", "gt_violin")

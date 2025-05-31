@@ -121,26 +121,96 @@ def build_union_matrix(matrix_paths, list_paths=None):
     print(f"Final union matrix nnz={U.nnz}")
     return U, union_ids
 
+def process_matrix_by_paper_list(matrix_path, list_path, paper_list):
+    """Process a matrix to only keep rows/cols that exist in paper_list and remove all-zero rows/cols."""
+    # Load matrix and its list
+    M = load_bool_matrix(matrix_path)
+    with open(list_path, 'rb') as f:
+        matrix_list = pickle.load(f)
+    
+    print(f"\nProcessing {os.path.basename(matrix_path)}:")
+    print(f"  Original matrix shape: {M.shape}, nnz: {M.nnz}")
+    print(f"  Original list length: {len(matrix_list)}")
+    
+    # Create mapping from matrix list to paper list
+    paper_set = set(paper_list)
+    keep_indices = [i for i, id_ in enumerate(matrix_list) if id_ in paper_set]
+    
+    if not keep_indices:
+        raise ValueError(f"No matching IDs found between {list_path} and paper list")
+    
+    # Trim matrix to only keep matching rows/cols
+    M = M[keep_indices][:, keep_indices]
+    new_list = [matrix_list[i] for i in keep_indices]
+    
+    print(f"  After paper list filtering:")
+    print(f"    Matrix shape: {M.shape}, nnz: {M.nnz}")
+    print(f"    List length: {len(new_list)}")
+    print(f"    Removed {len(matrix_list) - len(new_list)} entries not in paper list")
+    
+    # Remove all-zero rows/cols
+    row_sums = np.array(M.sum(axis=1)).ravel()
+    col_sums = np.array(M.sum(axis=0)).ravel()
+    keep_idx = np.where((row_sums > 0) & (col_sums > 0))[0]
+    
+    M = M[keep_idx][:, keep_idx]
+    new_list = [new_list[i] for i in keep_idx]
+    
+    print(f"  After removing zero rows/cols:")
+    print(f"    Matrix shape: {M.shape}, nnz: {M.nnz}")
+    print(f"    List length: {len(new_list)}")
+    print(f"    Removed {len(new_list) - len(keep_idx)} zero rows/cols")
+    
+    return M, new_list
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Compute union of multiple boolean adjacency NPZs with progress")
     parser.add_argument('--level', required=True, choices=list(LEVEL_NPZ.keys()), help='Which citation‑pair level to use as PRIMARY (e.g. direct, max_pr_influential, union …)')
     args = parser.parse_args()
 
     primary_key = args.level
-    primary_npz = _full(LEVEL_NPZ[primary_key])  ########
-    primary_lst = _full(LEVEL_CSVLIST[primary_key])  ########
+    primary_npz = _full(LEVEL_NPZ[primary_key])
+    primary_lst = _full(LEVEL_CSVLIST[primary_key])
 
-    # Fixed model & dataset components
-    model_npz  = _full(LEVEL_NPZ['model'])  ########
-    model_lst  = _full(LEVEL_CSVLIST['model'])  ########
-    ds_npz     = _full(LEVEL_NPZ['dataset'])  ########
-    ds_lst     = _full(LEVEL_CSVLIST['dataset'])  ########
+    # Load paper list first
+    with open(primary_lst, 'rb') as f:
+        paper_list = pickle.load(f)
+    print(f"Loaded paper list with {len(paper_list)} entries")
 
-    matrices = [primary_npz, model_npz, ds_npz]
-    csvlists = [primary_lst, model_lst, ds_lst]
+    # Process model and dataset matrices
+    model_npz = _full(LEVEL_NPZ['model'])
+    model_lst = _full(LEVEL_CSVLIST['model'])
+    ds_npz = _full(LEVEL_NPZ['dataset'])
+    ds_lst = _full(LEVEL_CSVLIST['dataset'])
+
+    # Process model matrix
+    print("Processing model matrix...")
+    model_matrix, model_list = process_matrix_by_paper_list(model_npz, model_lst, paper_list)
+    model_processed_npz = _full(LEVEL_NPZ['model'].replace('.npz', '_processed.npz'))
+    model_processed_lst = _full(LEVEL_CSVLIST['model'].replace('.pkl', '_processed.pkl'))
+    save_npz(model_processed_npz, model_matrix, compressed=True)
+    with open(model_processed_lst, 'wb') as f:
+        pickle.dump(model_list, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"Saved processed model matrix → {model_processed_npz}")
+    print(f"Saved processed model list → {model_processed_lst}")
+
+    # Process dataset matrix
+    print("Processing dataset matrix...")
+    ds_matrix, ds_list = process_matrix_by_paper_list(ds_npz, ds_lst, paper_list)
+    ds_processed_npz = _full(LEVEL_NPZ['dataset'].replace('.npz', '_processed.npz'))
+    ds_processed_lst = _full(LEVEL_CSVLIST['dataset'].replace('.pkl', '_processed.pkl'))
+    save_npz(ds_processed_npz, ds_matrix, compressed=True)
+    with open(ds_processed_lst, 'wb') as f:
+        pickle.dump(ds_list, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"Saved processed dataset matrix → {ds_processed_npz}")
+    print(f"Saved processed dataset list → {ds_processed_lst}")
+
+    # Build union matrix with processed files
+    matrices = [primary_npz, model_processed_npz, ds_processed_npz]
+    csvlists = [primary_lst, model_processed_lst, ds_processed_lst]
 
     # Output prefix reflects primary level
-    output_prefix = _full(f"csv_pair_union_{primary_key}")  ########
+    output_prefix = _full(f"csv_pair_union_{primary_key}_processed")
 
     U, union_ids = build_union_matrix(matrices, csvlists)
 

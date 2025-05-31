@@ -34,15 +34,15 @@ def main(gt_dir):
         nnz, density = compute_nnz_density(npz_path)
         print(f"{lvl:<40}{nnz:>12,}{density:>12.6f}")
     # extra model
-    npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_model_adj.npz")
+    npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_model_adj_processed.npz")
     nnz, density = compute_nnz_density(npz_path)
     print(f"{'Model':<40}{nnz:>12,}{density:>12.6f}")
     # extra dataset
-    npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_dataset_adj.npz")
+    npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_dataset_adj_processed.npz")
     nnz, density = compute_nnz_density(npz_path)
     print(f"{'Dataset':<40}{nnz:>12,}{density:>12.6f}")
     # extra union
-    npz_path = os.path.join(gt_dir, f"csv_pair_union_direct.npz")
+    npz_path = os.path.join(gt_dir, f"csv_pair_union_direct_label_processed.npz")
     nnz, density = compute_nnz_density(npz_path)
     print(f"{'Union':<40}{nnz:>12,}{density:>12.6f}")
 
