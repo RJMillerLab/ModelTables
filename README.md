@@ -169,6 +169,7 @@ python -m src.data_gt.create_csvlist_variants --level direct # update _s for *cs
 # (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 # (deprecate) python -m src.data_analysis.gt_fig # plot stats
 ```
+
 5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
 ```bash
 # go to starmie folder, and copy this sh file to run 
@@ -202,6 +203,28 @@ bash scripts/step3_processmetrics.sh # extract metrics based on gt & result diff
 bash eval_per_resource.sh # run ablation study on different results before getting results
 # bash scripts/step4_discovery.sh
 ```
+
+7. Baseline
+```bash
+# 1. Generate table embeddings using SentenceTransformer
+python src/baseline/table_embedding.py
+# 2. Run retrieval for all tables
+python src/baseline/run_retrieval.py
+# 3. Simplify retrieval results format
+python src/baseline/simplify_retrieval.py
+```
+
+The baseline system consists of three main scripts:
+1. `table_embedding.py`: Generates embeddings for all tables using SentenceTransformer model
+2. `run_retrieval.py`: Performs retrieval for all tables and saves detailed results
+3. `simplify_retrieval.py`: Converts detailed retrieval results into a simplified format
+
+Output files are saved in `data/processed/embeddings_output/`:
+- `table_embeddings_st.pkl`: Table embeddings
+- `table_structure_st.json`: Table structure information
+- `retrieval_results_st.json`: Detailed retrieval results
+- `retrieval_results_simplified.json`: Simplified retrieval results (query -> retrieved tables mapping)
+
 
 Analysis on results
 ```bash  
@@ -251,7 +274,7 @@ The goal is to create a reliable and minimal dataset by filtering and validating
 1. Contains valid and verified metadata (BibTeX entries, paper links, GitHub repositories).
 2. Has no duplicate entries—retain only the card with the highest `downloads` count if duplicates exist.
 3. Downloads the associated data locally and reads it for further processing.
-4. Annotates the dataset with citation information to build a **citation graph** that reflects inter-card relationships (i.e., a card’s associated paper cites another card's associated paper).  
+4. Annotates the dataset with citation information to build a **citation graph** that reflects inter-card relationships (i.e., a card's associated paper cites another card's associated paper).  
 
 We will leverage a **Citation Graph API** to annotate and establish these relationships.
 
@@ -276,7 +299,7 @@ We will leverage a **Citation Graph API** to annotate and establish these relati
 
 #### 3. **Citation Annotation Phase**
    - Use the **Citation Graph API** to analyze and annotate each card by identifying citations between associated papers.
-   - Establish inter-card relationships (i.e., identify which card’s paper cites another).
+   - Establish inter-card relationships (i.e., identify which card's paper cites another).
 
 #### 4. **Final Dataset Construction**
    - Create a structured and annotated dataset that includes:
