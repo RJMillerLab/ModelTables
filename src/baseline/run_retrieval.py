@@ -13,54 +13,34 @@ def load_embeddings(embeddings_path: str):
         return pickle.load(f)
 
 def run_retrieval(embeddings_path: str, output_path: str, top_k: int = 5, batch_size: int = 32):
-    """Run retrieval for all tables and save results with GPU acceleration"""
+    """Run retrieval for all tables and save results"""
     # Load embeddings
     print("Loading embeddings...")
     embeddings = load_embeddings(embeddings_path)
     
     # Initialize retriever
+    print("Initializing retriever...")
     retriever = TableRetriever(embeddings)
-    
-    # Convert embeddings to GPU tensors
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
-    
-    # Pre-compute all embeddings on GPU
-    all_embeddings = torch.tensor(
-        np.stack([emb["table_embedding"] for emb in embeddings.values()]),
-        device=device
-    )
-    all_embeddings = all_embeddings / torch.norm(all_embeddings, dim=1, keepdim=True)
     
     # Get all table IDs
     table_ids = list(embeddings.keys())
+    print(f"Total number of tables: {len(table_ids)}")
     
     # Run retrieval in batches
     results = {}
     for i in tqdm(range(0, len(table_ids), batch_size), desc="Running retrieval"):
         batch_ids = table_ids[i:i + batch_size]
         
-        # Get batch embeddings
-        batch_embeddings = all_embeddings[i:i + batch_size]
-        
-        # Calculate similarities for the batch
-        with torch.no_grad():
-            similarities = torch.matmul(all_embeddings, batch_embeddings.t())
+        # Process each query in the batch
+        for query_id in batch_ids:
+            query_embedding = embeddings[query_id]
+            retrieved_results = retriever.retrieve(query_embedding, top_k=top_k)
             
-            # Get top-k for each query in batch
-            top_k_values, top_k_indices = torch.topk(similarities, k=top_k + 1, dim=0)
-            
-            # Process results for each query in batch
-            for j, query_id in enumerate(batch_ids):
-                # Remove self-similarity (first result)
-                retrieved_indices = top_k_indices[1:, j].cpu().numpy()
-                scores = top_k_values[1:, j].cpu().numpy()
-                
-                # Store results
-                results[query_id] = {
-                    "retrieved_tables": [table_ids[idx] for idx in retrieved_indices],
-                    "similarity_scores": [float(score) for score in scores]
-                }
+            # Store results
+            results[query_id] = {
+                "retrieved_tables": [table_id for table_id, _ in retrieved_results],
+                "similarity_scores": [float(score) for _, score in retrieved_results]
+            }
     
     # Save results
     with open(output_path, "w") as f:
@@ -104,17 +84,17 @@ def analyze_results(results_path: str, structure_path: str):
     print(f"Average rows: {np.mean(structure_stats['num_rows']):.2f} ± {np.std(structure_stats['num_rows']):.2f}")
     print(f"Average columns: {np.mean(structure_stats['num_cols']):.2f} ± {np.std(structure_stats['num_cols']):.2f}")
     print("\nColumn Type Distribution:")
-    for dtype, count in structure_stats["column_types"].items():
+    for dtype, count in sorted(structure_stats["column_types"].items(), key=lambda x: x[1], reverse=True):
         print(f"{dtype}: {count}")
 
 def main():
     # Paths
     base_path = "data/processed"
-    embeddings_path = os.path.join(base_path, "table_embeddings.pkl")
-    output_path = os.path.join(base_path, "retrieval_results.json")
-    structure_path = os.path.join(base_path, "table_structure.json")
+    embeddings_path = os.path.join(base_path, "embeddings_output", "table_embeddings_st.pkl")
+    output_path = os.path.join(base_path, "embeddings_output", "retrieval_results_st.json")
+    structure_path = os.path.join(base_path, "embeddings_output", "table_structure_st.json")
     
-    # Run retrieval with GPU acceleration
+    # Run retrieval
     run_retrieval(embeddings_path, output_path, batch_size=32)
     
     # Analyze results
