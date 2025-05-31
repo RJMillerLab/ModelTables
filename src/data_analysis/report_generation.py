@@ -14,16 +14,17 @@ import pandas as pd
 from datetime import datetime
 from collections import defaultdict
 import numpy as np
+from tqdm import tqdm
 
 BASE_PATH = "/Users/doradong/Repo/CitationLake"
 
 DATA_DIR  = os.path.join(BASE_PATH, "data/processed")
 FILES = {
-    "step4_symlink": f"{DATA_DIR}/modelcard_step4.parquet",    
+    "step3": f"{DATA_DIR}/modelcard_step3_dedup.parquet",    
     "valid_title"  : f"{DATA_DIR}/all_title_list_valid.parquet"
 }
 
-TABLE_SOURCE_PARQUET = os.path.join(BASE_PATH, "data/processed/modelcard_step4.parquet")
+TABLE_SOURCE_PARQUET = os.path.join(BASE_PATH, "data/processed/modelcard_step3_dedup.parquet")
 VALID_TITLE_PARQUET = os.path.join(BASE_PATH, "data/processed/all_title_list_valid.parquet")
 
 def get_file_path(filename):
@@ -53,7 +54,8 @@ def build_table_model_title_maps():
        - table_to_models: csv filename → set of modelIds
        - model_to_titles: modelId → list of valid titles
     """
-    df_tables = pd.read_parquet(FILES["step4_symlink"])
+    df_tables = pd.read_parquet(FILES["step3"])
+    print('df_tables keys: ', df_tables.keys())
     df_titles = pd.read_parquet(FILES["valid_title"], columns=["modelId", "all_title_list", "all_title_list_valid"])
     df_tables = df_tables.merge(df_titles, on="modelId", how="left")
     table_cols = [c for c in df_tables.columns if c.endswith("_sym") or c.endswith("_dedup")]
@@ -93,15 +95,15 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None):
     
     # only print first 10
     print(f"Loaded {len(data)} records from {json_path}")
-    data = {k: v for i, (k, v) in enumerate(data.items()) if i < 10}
+    # change index!
+    data = {k: v for i, (k, v) in enumerate(data.items()) if 10 <= i < 20}
     print(f"Filtered to {len(data)} records for report generation.")
-    # Build table to model and model to titles mapping
     table_to_models, model_to_titles = build_table_model_title_maps()
+    print('Build table to model and model to titles mapping')
     
     report = []
-    for query_file, retrieved_files in data.items():
+    for query_file, retrieved_files in tqdm(data.items()):
         report.append(f"# Query Table: `{query_file}`\n")
-        
         try:
             query_path = get_file_path(query_file)
             query_df = pd.read_csv(query_path)
@@ -141,7 +143,7 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None):
             tbl_key = os.path.basename(file)
             models = table_to_models.get(tbl_key, [])
             if models:
-                report.append("\n**Model → Titles**")
+                report.append("\n**Model → Titles**")
                 for m in sorted(models):
                     titles = model_to_titles.get(m, {"raw": [], "valid": []})
                     report.append(f"- **{m}**:")
@@ -162,7 +164,7 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate a markdown report from JSON files.")
-    parser.add_argument("--json_path", type=str, default="test_hnsw_search_scilake_large_first10.json", help="Path to the JSON file.")
+    parser.add_argument("--json_path", type=str, default="results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json", help="Path to the JSON file.")
     include_valid = True
     include_raw = False
     args = parser.parse_args()

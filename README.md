@@ -212,24 +212,16 @@ python src/baseline/table_embedding.py
 python src/baseline/run_retrieval.py
 # 3. Simplify retrieval results format
 python src/baseline/simplify_retrieval.py
+# 4. under starmie
+bash scripts/step3_processmetrics_baseline.sh # run baseline metrics computation
 ```
-
-The baseline system consists of three main scripts:
-1. `table_embedding.py`: Generates embeddings for all tables using SentenceTransformer model
-2. `run_retrieval.py`: Performs retrieval for all tables and saves detailed results
-3. `simplify_retrieval.py`: Converts detailed retrieval results into a simplified format
-
-Output files are saved in `data/processed/embeddings_output/`:
-- `table_embeddings_st.pkl`: Table embeddings
-- `table_structure_st.json`: Table structure information
-- `retrieval_results_st.json`: Detailed retrieval results
-- `retrieval_results_simplified.json`: Simplified retrieval results (query -> retrieved tables mapping)
-
 
 Analysis on results
 ```bash  
 # get top-10 results from step3_search_hnsw
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
+python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1.csv 
+--csv2 096d51652d_table1.csv # check csv-pair in gt is related or not 
 # check the count of unique csvs
 python count_unique_csvs.py   --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json   --gt      /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
 python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log # check the related model of csv
