@@ -168,7 +168,7 @@ def main():
     
     # Load mask list if provided
     mask_list = None
-    mask_file = os.path.join(base_path, "valid_tables.txt")
+    mask_file = os.path.join("data/analysis/all_valid_title_valid.txt")
     if os.path.exists(mask_file):
         with open(mask_file, "r") as f:
             mask_list = [line.strip() for line in f if line.strip()]

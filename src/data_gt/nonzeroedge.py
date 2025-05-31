@@ -16,14 +16,14 @@ def compute_nnz_density(npz_path):
 
 def main(gt_dir):
     LEVELS = [
-        "direct_label",
-        "direct_label_influential",
-        "direct_label_methodology_or_result",
-        "direct_label_methodology_or_result_influential",
-        "max_pr",
-        "max_pr_influential",
-        "max_pr_methodology_or_result",
-        "max_pr_methodology_or_result_influential",
+        # "direct_label",
+        # "direct_label_influential",
+        # "direct_label_methodology_or_result",
+        # "direct_label_methodology_or_result_influential",
+        # "max_pr",
+        # "max_pr_influential",
+        # "max_pr_methodology_or_result",
+        # "max_pr_methodology_or_result_influential",
     ]
 
     print(f"{'Level':<40}{'NNZ':>12}{'Density':>12}")
@@ -33,16 +33,16 @@ def main(gt_dir):
         npz_path = os.path.join(gt_dir, f"csv_pair_matrix_{lvl}.npz")
         nnz, density = compute_nnz_density(npz_path)
         print(f"{lvl:<40}{nnz:>12,}{density:>12.6f}")
-    # extra model
-    npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_model_adj_processed.npz")
-    nnz, density = compute_nnz_density(npz_path)
-    print(f"{'Model':<40}{nnz:>12,}{density:>12.6f}")
-    # extra dataset
-    npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_dataset_adj_processed.npz")
-    nnz, density = compute_nnz_density(npz_path)
-    print(f"{'Dataset':<40}{nnz:>12,}{density:>12.6f}")
+    # # extra model
+    # npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_model_adj_processed.npz")
+    # nnz, density = compute_nnz_density(npz_path)
+    # print(f"{'Model':<40}{nnz:>12,}{density:>12.6f}")
+    # # extra dataset
+    # npz_path = os.path.join(gt_dir, f"scilake_gt_modellink_dataset_adj_processed.npz")
+    # nnz, density = compute_nnz_density(npz_path)
+    # print(f"{'Dataset':<40}{nnz:>12,}{density:>12.6f}")
     # extra union
-    npz_path = os.path.join(gt_dir, f"csv_pair_union_direct_label_processed.npz")
+    npz_path = os.path.join(gt_dir, f"csv_pair_union_direct_processed.npz")
     nnz, density = compute_nnz_density(npz_path)
     print(f"{'Union':<40}{nnz:>12,}{density:>12.6f}")
 
@@ -65,7 +65,7 @@ max_pr                                  3,721,596,269    0.430524
 max_pr_influential                       860,908,477    0.099592
 max_pr_methodology_or_result            2,234,737,339    0.258520
 max_pr_methodology_or_result_influential 696,729,269    0.080599
-Model                                     18,308,662    0.001759
-Dataset                                   36,894,918    0.003615
-Union                                    720,963,231    0.068290
+Model                                     17,138,364    0.001987
+Dataset                                   35,194,914    0.004082
+Union                                    718,163,240    0.083099
 """
