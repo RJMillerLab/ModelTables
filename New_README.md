@@ -102,6 +102,17 @@ mkdir data/processed
 pip install gdown
 gdown --folder 1xHbcv01VQ2RG8zmxo0w6y4kRtqxZoAO0 -O data/processed/
 ```
+The data format is like
+```bash
+data/
+└── processed/
+    ├── deduped_github_csvs/      # Tables extracted from GitHub READMEs.
+    ├── deduped_hugging_csvs/     # Tables extracted from Hugging Face model cards.
+    ├── tables_output/            # Tables parsed directly from ArXiv HTML sources.
+    └── llm_tables/               # Tables extracted from Semantic Scholar dataset and reformalized by GPT.
+```
+
+If you want to download the raw data and try intermediate checkpoints
 ```bash
 # Downloading Hugging Face model card datasets if you need to start from scratch
 mkdir data/raw
@@ -111,6 +122,8 @@ git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_meta
 
 # Downloading Semantic Scholar data if you need to setup local database
 # Alternatively, refer to Semantic Scholar API documentation for bulk data access.
+
+# Check https://drive.google.com/drive/folders/1YLfkknrFuE9pWFJuarb4kyX1o5NtN-Y8?usp=drive_link for intermediate data checkpoints
 ```
 
 -----
