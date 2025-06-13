@@ -6,7 +6,7 @@ Description: Generate a markdown report for table retrieval results, automatical
 Usage: 
  python -m src.data_analysis.report_generation
  python -m src.data_analysis.report_generation --start_idx 10 --end_idx 20
- python -m src.data_analysis.report_generation --query_table 1810.04805_table1.csv
+ python -m src.data_analysis.report_generation --query_table 1810.04805_table4.csv
 """
 
 import json

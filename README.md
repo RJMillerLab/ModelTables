@@ -199,7 +199,6 @@ bash scripts/step1_pretrain.sh # finetune contrastive learning
 bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake items
 bash scripts/step3_search_hnsw.sh # data lake search (retrieve)
 bash scripts/step3_processmetrics.sh # extract metrics based on gt & result diff | plot fig
-# (Optional) bash eval_per_resource.sh # run ablation study on different results after getting results
 bash eval_per_resource.sh # run ablation study on different results before getting results
 # bash scripts/step4_discovery.sh
 ```
@@ -214,6 +213,26 @@ python src/baseline/run_retrieval.py
 python src/baseline/simplify_retrieval.py
 # 4. under starmie
 bash scripts/step3_processmetrics_baseline.sh # run baseline metrics computation
+```
+
+8. Baseline2
+```bash
+# 1. generate mapping from csv_path:readme_path
+python src/baseline2/create_raw_csv_to_text_mapping.py
+python src/baseline2/view_mapping.py
+# 2. get incontext embedding for each csv_path, save to data/tmp/corpus/collection.jsonl
+python src/baseline2/create_dedup_table_to_text_mapping.py
+# 3. build index: sparse retrieval by pyserini
+python -m pyserini.index.lucene --collection JsonCollection --input data/tmp/corpus --index data/tmp/index --generator DefaultLuceneDocumentGenerator --threads 1 --storePositions --storeDocvectors --storeRaw
+# 4. build up tsv
+python src/baseline2/create_queries_from_corpus.py
+python src/baseline2/create_queries_from_table.py
+# 4. search pyserini
+python -m pyserini.search.lucene --index data/tmp/index --topics data/tmp/queries_table.tsv --output data/tmp/search_result.txt --bm25 --hits 11 --threads 8 --batch-size 64
+# or python batch_search.py
+# python pyserini_run.py
+python src/baseline2/search_with_pyserini.py
+python src/baseline2/postprocess_search_results.py
 ```
 
 Analysis on results
