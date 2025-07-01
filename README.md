@@ -208,14 +208,14 @@ bash eval_per_resource.sh # run ablation study on different results before getti
 # 1. Generate table embeddings using SentenceTransformer
 python src/baseline/table_embedding.py
 # 2. Run retrieval for all tables
-python src/baseline/run_retrieval.py
+python -m src.baseline.run_retrieval
 # 3. Simplify retrieval results format
-python src/baseline/simplify_retrieval.py
+python -m src.baseline.simplify_retrieval
 # 4. under starmie
 bash scripts/step3_processmetrics_baseline.sh # run baseline metrics computation
 ```
 
-8. Baseline2
+8. Baseline2: Sparse search
 ```bash
 # 1. generate mapping from csv_path:readme_path
 python src/baseline2/create_raw_csv_to_text_mapping.py
@@ -225,14 +225,22 @@ python src/baseline2/create_dedup_table_to_text_mapping.py
 # 3. build index: sparse retrieval by pyserini
 python -m pyserini.index.lucene --collection JsonCollection --input data/tmp/corpus --index data/tmp/index --generator DefaultLuceneDocumentGenerator --threads 1 --storePositions --storeDocvectors --storeRaw
 # 4. build up tsv
-python src/baseline2/create_queries_from_corpus.py
 python src/baseline2/create_queries_from_table.py
+# or python src/baseline2/create_queries_from_corpus.py
 # 4. search pyserini
-python -m pyserini.search.lucene --index data/tmp/index --topics data/tmp/queries_table.tsv --output data/tmp/search_result.txt --bm25 --hits 11 --threads 8 --batch-size 64
+#python -m pyserini.search.lucene --index data/tmp/index --topics data/tmp/queries_table.tsv --output data/tmp/search_result.txt --bm25 --hits 11 --threads 8 --batch-size 64
 # or python batch_search.py
 # python pyserini_run.py
 python src/baseline2/search_with_pyserini.py
 python src/baseline2/postprocess_search_results.py
+```
+
+9. Baseline3: Hybrid (Sparse + Dense search)
+```bash
+# hybrid search
+#python -m pyserini.search.lucene --index data/tmp/index --topics data/tmp/queries_table.tsv --output data/tmp/search_result_hybrid.txt --bm25 --hits 101 --threads 8 --batch-size 64
+python src/baseline2/search_with_pyserini_hybrid.py
+python src/baseline2/hybrid_search.py
 ```
 
 Analysis on results

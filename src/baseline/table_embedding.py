@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
-from sentence_transformers import SentenceTransformer # Changed import
+from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 import pickle
 from typing import List, Dict, Tuple, Any
@@ -10,7 +10,7 @@ import json
 # Removed PIL, io, matplotlib.pyplot, torch, nn, transformers as they are not needed for the new embedding
 
 class TableEncoder:
-    def __init__(self, model_name: str = "Mozilla/smart-tab-embedding"): # Default to your preferred model
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):  # Changed to Sentence-BERT model
         # Device handling is usually managed by SentenceTransformer automatically
         # or can be specified via model.to(device) if needed.
         # For 'Mozilla/smart-tab-embedding', it typically runs efficiently on CPU.
@@ -21,15 +21,14 @@ class TableEncoder:
     # _table_to_image method removed as it was TAPAS-specific
 
     def get_embedding(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Get table embedding using SentenceTransformer model"""
-        # Convert all data to strings, similar to your snippet
+        """Get table embedding using Sentence-BERT model"""
+        # Convert all data to strings
         df_str = df.astype(str)
 
         # Create a list of strings, where each string is a row's content joined together
         row_texts = df_str.apply(lambda row: ' '.join(row.values), axis=1).to_list()
 
         # Join all row texts into a single string representing the whole table for embedding
-        # This matches your provided snippet: model.encode(' '.join(texts), ...)
         full_table_text_for_embedding = ' '.join(row_texts)
 
         # Get model outputs (embedding for the entire table string)
@@ -191,7 +190,7 @@ def process_csv_folder(folder_path: str, encoder: TableEncoder, batch_size: int 
 
 def main():
     # Initialize encoder with the SentenceTransformer model
-    encoder = TableEncoder(model_name="Mozilla/smart-tab-embedding")
+    encoder = TableEncoder(model_name="all-MiniLM-L6-v2")
 
     base_path = "data/processed"
     # Ensure base_path exists or handle appropriately

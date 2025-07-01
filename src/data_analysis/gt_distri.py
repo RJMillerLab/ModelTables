@@ -38,7 +38,7 @@ PALETTE = {
     "SANTOS Small":       "#8b2e2e",
     "TUS Large":          "#d96e44",
     "TUS Small":          "#b74a3c",
-    "Union GT":           "#a5d2bc",
+    "All GT":           "#a5d2bc",
 }
 
 # -------- Loader --------
@@ -66,10 +66,11 @@ class GTLengthLoader:
     def lengths(self):
         if self.path.endswith(".npz"):
             M = load_npz(self.path).tocsr()
-            return M.getnnz(axis=1).tolist()
+            return [n for n in M.getnnz(axis=1).tolist() if n > 0]
         else:
             data = self._load_pkl()
-            return [len(v) for v in data.values() if isinstance(v, list)]
+            return [l for l in (len(v) for v in data.values() if isinstance(v, list)) if l > 0]
+            #return [len(v) for v in data.values() if isinstance(v, list)]
 
 # -------- Helper --------
 def load_lengths(path_map):
@@ -137,7 +138,7 @@ def plot_log_boxplot(length_data, palette, title, prefix):
     plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
 
     plt.yscale('log')
-    plt.ylabel('GT Length', fontsize=24)
+    plt.ylabel('# GT Links', fontsize=22)
     plt.title(title, fontsize=22)
 
     plt.tight_layout()
@@ -171,7 +172,7 @@ def plot_violin(length_data, palette, title, prefix):
     plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
 
     plt.yscale('log')
-    plt.ylabel('GT Length', fontsize=24)
+    plt.ylabel('# GT Links', fontsize=22)
     plt.title(title, fontsize=22)
 
     plt.tight_layout()
@@ -189,7 +190,7 @@ if __name__ == "__main__":
         "Paper GT":     os.path.join(GT_DIR, "csv_pair_matrix_direct_label.npz"),
         "Model GT":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.npz"),
         "Dataset GT":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.npz"),
-        "Union GT":     os.path.join(GT_DIR, "csv_pair_union_direct_processed.npz"),
+        "All GT":     os.path.join(GT_DIR, "csv_pair_union_direct_processed.npz"),
     }
 
     lengths = load_lengths(PATHS)
@@ -203,5 +204,5 @@ if __name__ == "__main__":
 
     # plot_histogram(lengths, "GT Length (All Sources)", "gt_all")
     #plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
-    plot_log_boxplot(lengths, PALETTE, "Log-scale GT length distribution across benchmarks", "gt_boxplot")
-    plot_violin(lengths, PALETTE, "Log-scale GT length distribution across benchmarks", "gt_violin")
+    #plot_log_boxplot(lengths, PALETTE, "Log-scale GT link count distribution across benchmarks", "gt_boxplot")
+    plot_violin(lengths, PALETTE, "Log-scale GT links count distribution across benchmarks", "gt_violin")
