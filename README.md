@@ -205,16 +205,14 @@ bash eval_per_resource.sh # run ablation study on different results before getti
 
 7. Baseline
 ```bash
-# 1. Generate table embeddings using SentenceTransformer
-python src/baseline/table_embedding.py
-# 2. Run retrieval for all tables
-python -m src.baseline.run_retrieval
-# 3. Simplify retrieval results format
-python -m src.baseline.simplify_retrieval
-# 4. under starmie
+# build corpus jsonl/encode(SBERT)/build faiss/search/postprocess
+bash src/baseline_1/table_retrieval_pipeline.sh
+# compute metrics under starmie
 bash scripts/step3_processmetrics_baseline.sh # run baseline metrics computation
 ```
+for faiss cpu/gpu installation, see [FAISS GitHub repository](https://github.com/facebookresearch/faiss).
 
+____
 8. Baseline2: Sparse search
 ```bash
 # 1. generate mapping from csv_path:readme_path
@@ -242,7 +240,7 @@ python src/baseline2/postprocess_search_results.py
 python src/baseline2/search_with_pyserini_hybrid.py
 python src/baseline2/hybrid_search.py
 ```
-
+_
 Analysis on results
 ```bash  
 # get top-10 results from step3_search_hnsw
