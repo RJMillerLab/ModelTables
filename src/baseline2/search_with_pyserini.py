@@ -1,5 +1,6 @@
 from pyserini.search.lucene import LuceneSearcher
 import json
+import argparse
 
 def load_id_mapping(mapping_file):
     """Load ID mapping from JSON file."""
@@ -29,7 +30,30 @@ def load_queries(tsv_file):
                 continue
     return queries
 
+# --------------------
+# Argument Parsing
+# --------------------
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Search with Pyserini")
+    parser.add_argument(
+        "--hits",
+        type=int,
+        default=11,
+        help="Number of hits (documents) to retrieve per query."
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="data/tmp/search_result.json",
+        help="Output JSON file to save search results."
+    )
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
+
     # Initialize searcher
     searcher = LuceneSearcher('data/tmp/index')
     searcher.set_bm25()  # Use BM25 scoring
@@ -49,7 +73,7 @@ def main():
     for i, (qid, text) in enumerate(queries.items(), 1):
         print(f"Searching for query {qid} ({i}/{total})...")
         try:
-            hits = searcher.search(text, k=11)  # Get top 11 results
+            hits = searcher.search(text, k=args.hits)  # Use user-specified hits
             
             # Store results with original IDs
             original_id = id_mapping[qid]
@@ -59,10 +83,9 @@ def main():
             continue
     
     # Save results
-    output_file = 'data/tmp/search_result.json'
-    with open(output_file, 'w', encoding='utf-8') as f:
+    with open(args.output, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
-    print(f"Search results saved to {output_file}")
+    print(f"Search results saved to {args.output}")
     print(f"Total queries processed: {len(results)}")
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ def truncate_text(text, max_tokens):
         return text
         
     # Split by comma and count tokens
-    tokens = text.split(',')
+    tokens = text.split()
     if len(tokens) <= max_tokens:
         return text
         
@@ -165,7 +165,7 @@ def create_queries_tsv(entries, output_file):
             # Clean up the text: remove tabs and extra whitespace
             query_text = entry['contents'].strip()
             # Replace tabs with spaces in the content only
-            query_text = query_text.replace('\t', ' ')
+            query_text = query_text.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
             # Clean up extra spaces around commas
             query_text = ','.join(part.strip() for part in query_text.split(','))
             
@@ -202,13 +202,14 @@ def main():
                         help='Base directory containing table files')
     parser.add_argument('--output-dir', default='data/tmp/',
                         help='Output directory for query files')
-    parser.add_argument('--max-tokens', type=int, default=512,
+    parser.add_argument('--max-tokens', type=int, default=None,
                         help='Maximum number of tokens per query')
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     print(f"🔄 Loading tables from {args.base_dir} based on corpus {args.corpus}...")
+    print(f"🔄 Maximum number of tokens per query: {args.max_tokens}")
     entries = load_table_data(args.corpus, args.base_dir, args.max_tokens)
 
     queries_file = os.path.join(args.output_dir, 'queries_table.tsv')

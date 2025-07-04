@@ -23,4 +23,4 @@ search --emb_npz data/baseline/valid_tables_embeddings.npz \
         --top_k 11 \
         --output_json data/baseline/table_neighbors.json
 
-python src/baseline_1/postprocess.py data/baseline/table_neighbors.json data/baseline/processed_neighbors.json
+python src/baseline_1/postprocess.py data/baseline/table_neighbors.json data/baseline/baseline1_dense.json

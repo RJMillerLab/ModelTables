@@ -226,19 +226,69 @@ python -m pyserini.index.lucene --collection JsonCollection --input data/tmp/cor
 python src/baseline2/create_queries_from_table.py
 # or python src/baseline2/create_queries_from_corpus.py
 # 4. search pyserini
-#python -m pyserini.search.lucene --index data/tmp/index --topics data/tmp/queries_table.tsv --output data/tmp/search_result.txt --bm25 --hits 11 --threads 8 --batch-size 64
+#python -m pyserini.search.lucene --index data/tmp/index --topics data/tmp/queries_table.tsv --output data/tmp/search_result.txt --bm25 --hits 11 --threads 8 --batch-size 64 # as this can not solve truncating clause automatically
 # or python batch_search.py
-# python pyserini_run.py
-python src/baseline2/search_with_pyserini.py
-python src/baseline2/postprocess_search_results.py
+python src/baseline2/search_with_pyserini.py --hits 11
+python src/baseline2/postprocess.py
 ```
 
 9. Baseline3: Hybrid (Sparse + Dense search)
 ```bash
 # hybrid search
-#python -m pyserini.search.lucene --index data/tmp/index --topics data/tmp/queries_table.tsv --output data/tmp/search_result_hybrid.txt --bm25 --hits 101 --threads 8 --batch-size 64
-python src/baseline2/search_with_pyserini_hybrid.py
-python src/baseline2/hybrid_search.py
+# python src/baseline_1/table_retrieval_pipeline.py \
+# encode --jsonl data/tmp/corpus/collection.jsonl \
+#         --model_name all-MiniLM-L6-v2 \
+#         --batch_size 256 \
+#         --output_npz data/tmp/index_dense/valid_tables_embeddings.npz \
+#         --device cpu
+
+# python -m pyserini.encode \
+#   input   --corpus   data/tmp/corpus/collection_text.jsonl \
+#           --fields   text \
+#   output  --embeddings data/tmp/index_dense \
+#           --to-faiss \
+#   encoder --encoder sentence-transformers/all-MiniLM-L6-v2 \
+#           --batch 64 --device cpu
+# python src/baseline_1/table_retrieval_pipeline.py \
+# build_faiss \
+#   --emb_npz     data/tmp/index_dense/valid_tables_embeddings.npz \
+#   --output_index data/tmp/index_dense/index.faiss
+# #python -m pyserini.search.lucene --index data/tmp/index --topics data/tmp/queries_table.tsv --output data/tmp/search_result_hybrid.txt --bm25 --hits 101 --threads 8 --batch-size 64
+# python src/baseline2/search_with_pyserini_hybrid.py \
+#   --sparse-index data/tmp/index \
+#   --dense-index  data/tmp/index_dense \
+#   --queries      data/tmp/queries_table.tsv \
+#   --mapping      data/tmp/queries_table_mapping.json \
+#   --k 11 --alpha 0.45 --device cpu
+
+# first sparse, then dense
+python src/baseline2/search_with_pyserini.py --hits 101 --output data/tmp/search_sparse_101.json
+python src/baseline2/filter_sparse_to_dense.py data/tmp/search_sparse_101.json data/tmp/sparse_top101.tsv
+# get subset jsonl
+python - <<'PY'
+import json, pathlib, sys
+subset = set(line.strip().split('\t')[1] for line in open(
+    'data/tmp/sparse_top101.tsv'))
+out   = pathlib.Path('data/tmp/corpus/subset.jsonl').open('w')
+for l in open('data/tmp/corpus/collection_text.jsonl'):
+    j = json.loads(l)
+    if j['id'] in subset:
+        out.write(l)
+PY
+# 2-a  Encode
+python src/baseline_1/table_retrieval_pipeline.py \
+  encode \
+    --jsonl data/tmp/corpus/collection.jsonl \
+    --model_name sentence-transformers/all-MiniLM-L6-v2 \
+    --batch_size 256 \
+    --output_npz data/tmp/index_dense_subset/embeddings.npy \
+    --device cuda 
+# 2-b  Build Faiss index
+python src/baseline_1/table_retrieval_pipeline.py build_faiss --emb_npz data/tmp/index_dense_subset/embeddings.npy.npz --output_index data/tmp/index_dense_subset/index.faiss
+# 2-c  Dense search (top-11 per query)
+python dense_rerank.py
+#python src/baseline_1/table_retrieval_pipeline.py search_faiss --faiss_index data/tmp/index_dense_subset/index.faiss --query_tsv   data/tmp/sparse_top101.tsv --topk 11 --output data/tmp/search_dense_11.json
+# python src/baseline2/hybrid_search.py
 ```
 _
 Analysis on results
