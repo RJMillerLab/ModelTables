@@ -3,6 +3,7 @@ import json
 import os
 import re
 from collections import defaultdict
+import argparse
 
 def load_search_results(result_file):
     """Load search results from JSON file."""
@@ -65,42 +66,48 @@ def analyze_results(results):
     return processed_results, stats
 
 def main():
-    result_file = 'data/tmp/search_result.json'
-    if not os.path.exists(result_file):
-        print(f"Error: Search results file not found at {result_file}")
-        return
-    print("Loading search results...")
-    results = load_search_results(result_file)
+    parser = argparse.ArgumentParser(description="Post-process search results: strip self-hit, add .csv suffix, output stats")
+    parser.add_argument("--input", required=True, help="Input JSON search result file")
+    parser.add_argument("--output", required=True, help="Output JSON file after processing")
+    parser.add_argument("--top1-list", default=None, help="Optional path to save list of queries whose top1 == query itself")
+    args = parser.parse_args()
+
+    if not os.path.exists(args.input):
+        parser.error(f"Input file not found: {args.input}")
+
+    print("Loading search results …")
+    results = load_search_results(args.input)
     print(f"Loaded {len(results)} query results")
-    print("\nProcessing results...")
+
+    print("Processing …")
     processed_results, stats = analyze_results(results)
-    print("\nAdding .csv suffix to all results...")
+
+    print("Adding .csv suffix …")
     processed_results = add_csv_suffix(processed_results)
-    # Print statistics
+
+    # stats summary
     print("\nResults Analysis:")
     print(f"Total queries: {stats['total_queries']}")
-    print("Query count by source:")
     for source, count in sorted(stats['total_by_source'].items(), key=lambda x: x[1], reverse=True):
         print(f"{source}: {count}")
-    print(f"\nQueries with top1 matches: {stats['top1_matches']} ({stats['top1_matches']/stats['total_queries']*100:.2f}%)")
-    print("Top1 matches by source:")
+    pct = stats['top1_matches'] * 100 / stats['total_queries']
+    print(f"\nQueries with top1 matches: {stats['top1_matches']} ({pct:.2f}%)")
     for source, count in sorted(stats['top1_by_source'].items(), key=lambda x: x[1], reverse=True):
         print(f"{source}: {count}")
-    # Save processed results
-    output_file = 'data/tmp/baseline2_sparse_results.json'
-    with open(output_file, 'w', encoding='utf-8') as f:
+
+    # Save processed JSON
+    with open(args.output, 'w', encoding='utf-8') as f:
         json.dump(processed_results, f, indent=2, ensure_ascii=False)
-    print(f"\nProcessed results saved to {output_file}")
-    # Print count of processed results
-    print(f"Number of processed results saved: {len(processed_results)}")
-    # Save list of queries with top1 matches
-    matches_file = 'data/tmp/queries_with_top1_matches.txt'
-    with open(matches_file, 'w', encoding='utf-8') as f:
-        for query_id in sorted(stats['queries_with_top1_matches']):
-            if not query_id.endswith('.csv'):
-                query_id = f"{query_id}.csv"
-            f.write(f"{query_id}\n")
-    print(f"List of queries with top1 matches saved to {matches_file}")
+    print(f"Processed results saved to {args.output}  (entries = {len(processed_results)})")
+
+    # optional top1 list
+    if args.top1_list:
+        with open(args.top1_list, 'w', encoding='utf-8') as f:
+            for qid in sorted(stats['queries_with_top1_matches']):
+                if not qid.endswith('.csv'):
+                    qid = f"{qid}.csv"
+                f.write(qid + "\n")
+        print(f"Queries with self-hit saved to {args.top1_list}")
 
 if __name__ == "__main__":
     main()
