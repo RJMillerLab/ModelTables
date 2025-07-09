@@ -18,6 +18,16 @@
 
 ModelLake is a benchmark framework that bridges traditional Data Lake table discovery techniques with Model Lake challenges by leveraging citation graphs and semantic table search to enable efficient discovery and comparison of pre-trained machine learning models based on their performance and configuration data.
 
+## Contents
+- [Motivation](#motivation)
+- [Example](#example)
+- [Overview](#overview)
+- [Installation](#installation)
+- [QuickInference](#quickinference)
+- [Scripts](#scripts)
+- [Acknowledgements](#acknowledgements)
+- [Citation](#citation)
+
 ## Example
 
 In our Model Lake benchmark, we apply a Semantic Unionable Search strategy to retrieve semantically compatible tables from a large table lake given a query table. The retrieved tables are unionable, meaning they share similar schema and semantics and can be meaningfully aligned for comparison.
@@ -59,25 +69,21 @@ Together, these examples demonstrate that our method retrieves semantically alig
 
 ModelLake provides a comprehensive framework for collecting, processing, and enabling semantic search over model-related tabular data. Our pipeline leverages diverse sources like Hugging Face Model Cards, GitHub repositories, and academic papers to construct a rich, interconnected benchmark.
 
-The project focuses on:
+### How to get Citation Graph
+We construct multi-level citation graphs (paper, model card, dataset) to infer relationships between models and their associated tables.
 
-  * **Robust Data Ingestion:** Extracting performance metrics and configuration settings from heterogeneous sources.
-  * **Citation Graph Construction:** Building multi-level citation graphs (paper, model card, dataset) to infer relationships between models and their associated tables.
-  * **Semantic Table Discovery:** This repository primarily handles the preparation of data for semantic table discovery and subsequent analysis; the training and inference for the table discovery technique itself are conducted in the offical starmie GitHub repository: [megagonlabs/starmie](https://github.com/megagonlabs/starmie) or a refined version [DoraDong-2023/starmie_internal](https://github.com/DoraDong-2023/starmie_internal)
+<img src="fig/gt_copy2_page1.png" alt="CitationGraphPipeline" width="700"/>
 
-<img src="fig/pipeline_page1.png" alt="CrawlingPipeline" width="1000"/>
+### How to get Tables
+We extract tabular data from diverse sources via a crawling pipeline that parses tables from Hugging Face model cards, GitHub READMEs, and academic paper HTML.
 
-In our crawling pipeline, we parse tables from different resources and hyperlinks in each model card. Each model card may contain structured data in various locations. We extract these tables and then label table pairs with ground-truth relationships.
+<img src="fig/pipeline_page1.png" alt="TableCrawlingPipeline" width="1000"/>
 
-## 📋 Table of Contents
-- [Motivation](#motivation)
-- [Example](#example)
-- [Overview](#overview)
-- [Installation](#installation)
-- [Data](#data)
-- [Scripts](#scripts)
-- [Acknowledgements](#acknowledgements)
-- [Citation](#citation)
+### How to do semantic table union-able search
+
+The training and inference for the table discovery technique itself are conducted in the offical starmie GitHub repository: [megagonlabs/starmie](https://github.com/megagonlabs/starmie) or a refined version [DoraDong-2023/starmie_internal](https://github.com/DoraDong-2023/starmie_internal)
+
+Following these workflows, ModelLake enables robust data ingestion, citation graph construction, and semantic table discovery.
 
 -----
 
@@ -100,7 +106,8 @@ echo "OPENAI_API_KEY='your_api_key'" > .env
 echo "SEMANTIC_SCHOLAR_API_KEY='your_api_key'" > .env # Optional, use this to download semantic scholar dataset, and faster querying 
 ```
 
-## Data
+## QuickInference
+### Downloading data 
 
 This project utilizes datasets hosted on Hugging Face and Semantic Scholar. Use the following commands to download the necessary data:
 ```bash
@@ -132,6 +139,12 @@ git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_meta
 
 # Check https://drive.google.com/drive/folders/1YLfkknrFuE9pWFJuarb4kyX1o5NtN-Y8?usp=drive_link for intermediate data checkpoints
 ```
+
+### Demo
+```bash
+
+```
+
 
 ---
 
