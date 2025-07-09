@@ -14,42 +14,50 @@
 
 ## Motivation
 
-<table style="width:100%;">
-  <tr>
-    <td style="width:40%; text-align:center; vertical-align:top;">
-      Insight Vision
-    </td>
-    <td style="width:60%; text-align:center; vertical-align:top;">
-      Insight Description
-    </td>
-  </tr>
-  <tr>
-    <td style="width:40%; text-align:center; vertical-align:middle;">
-      <img src="fig/idea_page1.png" alt="IdeaDiagram" width="450"/>
-    </td>
-    <td style="width:60%; text-align:center; vertical-align:middle;">
-      CitationLake is a benchmark framework that bridges traditional Data Lake table discovery techniques with Model Lake challenges by leveraging citation graphs and semantic table search to enable efficient discovery and comparison of pre-trained machine learning models based on their performance and configuration data.
-    </td>
-  </tr>
-</table>
+<img src="fig/idea_page1.png" alt="IdeaDiagram" width="450"/>
+
+ModelLake is a benchmark framework that bridges traditional Data Lake table discovery techniques with Model Lake challenges by leveraging citation graphs and semantic table search to enable efficient discovery and comparison of pre-trained machine learning models based on their performance and configuration data.
 
 ## Example
 
 In our Model Lake benchmark, we apply a Semantic Unionable Search strategy to retrieve semantically compatible tables from a large table lake given a query table. The retrieved tables are unionable, meaning they share similar schema and semantics and can be meaningfully aligned for comparison.
 
-<img src="fig/analy_0531_2027_page1.png" alt="CrawlingPipeline" width="500"/>
-
-Example 1 (Performance Tables): Starting from a query table that reports BERT’s performance on GLUE and SQuAD, the system retrieves other model performance tables such as RoBERTa, BART, ELECTRA, and Uni-Perceive. These retrieved tables enable direct semantic comparison of models across the same benchmark tasks, highlighting the unionable nature of their content structure.
-
-<img src="fig/analy_1_page1.png" alt="CrawlingPipeline" width="700"/>
-
-Example 2 (Configuration Tables): Given a configuration table for a specific model (e.g., MicroRWKV), the system retrieves model spec tables like TokenFormer, TiroBERTa, DAT variants, IndoBERT, and Flaubert. These retrieved tables capture model setup and training hyperparameters, enabling semantic comparison across model architectures.
+<table width="100%">
+  <colgroup>
+    <col width="40%" />
+    <col width="60%" />
+  </colgroup>
+  <tr>
+    <td>
+      <img
+        src="fig/analy_0531_2027_page1.png"
+        alt="Example 1"
+        width="100%"
+      />
+    </td>
+    <td>
+      <img
+        src="fig/analy_1_page1.png"
+        alt="Example 2"
+        width="100%"
+      />
+    </td>
+  </tr>
+  <tr>
+    <td>
+      **Example 1 (Performance Tables):** Starting from a query table that reports BERT’s performance on GLUE and SQuAD, the system retrieves other model performance tables such as RoBERTa, BART, ELECTRA, and Uni-Perceive…
+    </td>
+    <td>
+      **Example 2 (Configuration Tables):** Given a configuration table for a specific model (e.g., MicroRWKV), the system retrieves model spec tables like TokenFormer, TiroBERTa, DAT variants, IndoBERT, and Flaubert…
+    </td>
+  </tr>
+</table>
 
 Together, these examples demonstrate that our method retrieves semantically aligned, task-relevant, and unionable tables that support both performance benchmarking and model configuration analysis under shared topics and structures.
 
 ## Overview
 
-CitationLake provides a comprehensive framework for collecting, processing, and enabling semantic search over model-related tabular data. Our pipeline leverages diverse sources like Hugging Face Model Cards, GitHub repositories, and academic papers to construct a rich, interconnected benchmark.
+ModelLake provides a comprehensive framework for collecting, processing, and enabling semantic search over model-related tabular data. Our pipeline leverages diverse sources like Hugging Face Model Cards, GitHub repositories, and academic papers to construct a rich, interconnected benchmark.
 
 The project focuses on:
 
@@ -66,7 +74,7 @@ In our crawling pipeline, we parse tables from different resources and hyperlink
 - [Example](#example)
 - [Overview](#overview)
 - [Installation](#installation)
-- [GetData](#getdata)
+- [Data](#data)
 - [Scripts](#scripts)
 - [Acknowledgements](#acknowledgements)
 - [Citation](#citation)
@@ -78,8 +86,8 @@ In our crawling pipeline, we parse tables from different resources and hyperlink
 Install and setup the environment:
 
 ```bash
-git clone https://github.com/DoraDong-2023/CitationLake.git
-cd CitationLake/
+git clone https://github.com/DoraDong-2023/ModelLake.git
+cd ModelLake/
 pip install -r requirements.txt
 ```
 
@@ -92,7 +100,7 @@ echo "OPENAI_API_KEY='your_api_key'" > .env
 echo "SEMANTIC_SCHOLAR_API_KEY='your_api_key'" > .env # Optional, use this to download semantic scholar dataset, and faster querying 
 ```
 
-## GetData
+## Data
 
 This project utilizes datasets hosted on Hugging Face and Semantic Scholar. Use the following commands to download the necessary data:
 ```bash
@@ -550,7 +558,7 @@ python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_interna
 python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1.csv --csv2 096d51652d_table1.csv
 
 # Count unique CSVs in retrieval results.
-python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json --gt /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
+python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json --gt /u1/z6dong/Repo/ModelLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
 
 # Check related models for a given CSV.
 python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log
