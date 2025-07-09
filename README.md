@@ -1,11 +1,81 @@
-# CitationLake
-## Features
-- Extract text, figures, and tables from PDFs and links.
-- Build and manage citation graphs.
-- Define and execute tasks such as model retrieving, table integration, and data lake operations.
-- User-friendly UI with pipeline visualization and task management.# CitationLake
 
-## Requirements
+# 📚 Semantic Table Discovery in Model Lakes:  a Benchmark
+
+<p align="center">
+  <a href="YOUR_ARXIV_LINK" target="_blank"><img src="https://img.shields.io/badge/arXiv-Paper-red"></a>
+  <a href="YOUR_GITHUB_REPO_LINK" target="_blank"><img src="https://img.shields.io/badge/GitHub-Repo-blue"></a>
+  <a href="YOUR_PROJECT_PAGE_LINK" target="_blank"><img src="https://img.shields.io/badge/Project-Page-brightgreen"></a>
+  <a href="YOUR_HF_DATASET_LINK" target="_blank"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Dataset-orange"></a>
+  <a href="YOUR_HF_DAILY_PAPERS_LINK" target="_blank"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Daily%20Papers-red"></a>
+  <a href="YOUR_HF_CHROME_PLUGIN_LINK" target="_blank"><img src="https://img.shields.io/badge/Chrome%20Plugin-Hugging%20Face-yellow"></a>
+  <a href="YOUR_ARXIV_CHROME_PLUGIN_LINK" target="_blank"><img src="https://img.shields.io/badge/Chrome%20Plugin-arXiv-yellowgreen"></a>
+  <a href="YOUR_GITHUB_CHROME_PLUGIN_LINK" target="_blank"><img src="https://img.shields.io/badge/Chrome%20Plugin-GitHub-lightgrey"></a>
+</p>
+
+## Motivation
+
+<table style="width:100%;">
+  <tr>
+    <td style="width:40%; text-align:center; vertical-align:top;">
+      Insight Vision
+    </td>
+    <td style="width:60%; text-align:center; vertical-align:top;">
+      Insight Description
+    </td>
+  </tr>
+  <tr>
+    <td style="width:40%; text-align:center; vertical-align:middle;">
+      <img src="fig/idea_page1.png" alt="IdeaDiagram" width="450"/>
+    </td>
+    <td style="width:60%; text-align:center; vertical-align:middle;">
+      CitationLake is a benchmark framework that bridges traditional Data Lake table discovery techniques with Model Lake challenges by leveraging citation graphs and semantic table search to enable efficient discovery and comparison of pre-trained machine learning models based on their performance and configuration data.
+    </td>
+  </tr>
+</table>
+
+## Example
+
+In our Model Lake benchmark, we apply a Semantic Unionable Search strategy to retrieve semantically compatible tables from a large table lake given a query table. The retrieved tables are unionable, meaning they share similar schema and semantics and can be meaningfully aligned for comparison.
+
+<img src="fig/analy_0531_2027_page1.png" alt="CrawlingPipeline" width="500"/>
+
+Example 1 (Performance Tables): Starting from a query table that reports BERT’s performance on GLUE and SQuAD, the system retrieves other model performance tables such as RoBERTa, BART, ELECTRA, and Uni-Perceive. These retrieved tables enable direct semantic comparison of models across the same benchmark tasks, highlighting the unionable nature of their content structure.
+
+<img src="fig/analy_1_page1.png" alt="CrawlingPipeline" width="700"/>
+
+Example 2 (Configuration Tables): Given a configuration table for a specific model (e.g., MicroRWKV), the system retrieves model spec tables like TokenFormer, TiroBERTa, DAT variants, IndoBERT, and Flaubert. These retrieved tables capture model setup and training hyperparameters, enabling semantic comparison across model architectures.
+
+Together, these examples demonstrate that our method retrieves semantically aligned, task-relevant, and unionable tables that support both performance benchmarking and model configuration analysis under shared topics and structures.
+
+## Overview
+
+CitationLake provides a comprehensive framework for collecting, processing, and enabling semantic search over model-related tabular data. Our pipeline leverages diverse sources like Hugging Face Model Cards, GitHub repositories, and academic papers to construct a rich, interconnected benchmark.
+
+The project focuses on:
+
+  * **Robust Data Ingestion:** Extracting performance metrics and configuration settings from heterogeneous sources.
+  * **Citation Graph Construction:** Building multi-level citation graphs (paper, model card, dataset) to infer relationships between models and their associated tables.
+  * **Semantic Table Discovery:** This repository primarily handles the preparation of data for semantic table discovery and subsequent analysis; the training and inference for the table discovery technique itself are conducted in the offical starmie GitHub repository: [megagonlabs/starmie](https://github.com/megagonlabs/starmie) or a refined version [DoraDong-2023/starmie_internal](https://github.com/DoraDong-2023/starmie_internal)
+
+<img src="fig/pipeline_page1.png" alt="CrawlingPipeline" width="1000"/>
+
+In our crawling pipeline, we parse tables from different resources and hyperlinks in each model card. Each model card may contain structured data in various locations. We extract these tables and then label table pairs with ground-truth relationships.
+
+## 📋 Table of Contents
+- [Motivation](#motivation)
+- [Example](#example)
+- [Overview](#overview)
+- [Installation](#installation)
+- [GetData](#getdata)
+- [Scripts](#scripts)
+- [Acknowledgements](#acknowledgements)
+- [Citation](#citation)
+
+-----
+
+## Installation
+
+Install and setup the environment:
 
 ```bash
 git clone https://github.com/DoraDong-2023/CitationLake.git
@@ -13,43 +83,79 @@ cd CitationLake/
 pip install -r requirements.txt
 ```
 
+Set environment variables:
+
+This project uses the `python-dotenv` library to manage environment variables. Please create a `.env` file in the root directory to store sensitive information such as your OpenAI API key and Semantic Scholar API key. These variables will be automatically loaded using `load_dotenv()`.
+
 ```bash
 echo "OPENAI_API_KEY='your_api_key'" > .env
-# echo "SEMANTIC_SCHOLAR_API_KEY='your_api_key'" > .env # Optional, use this to download semantic scholar dataset, and faster querying 
+echo "SEMANTIC_SCHOLAR_API_KEY='your_api_key'" > .env # Optional, use this to download semantic scholar dataset, and faster querying 
 ```
 
+## GetData
 
-## Download Data
-
-This project uses datasets hosted on Hugging Face. Use the following commands to download the necessary data:
+This project utilizes datasets hosted on Hugging Face and Semantic Scholar. Use the following commands to download the necessary data:
 ```bash
 mkdir data
 mkdir data/processed
+# Downloading processed data
+pip install gdown
+gdown --folder 1xHbcv01VQ2RG8zmxo0w6y4kRtqxZoAO0 -O data/processed/
+```
+The data format is like
+```bash
+data/
+└── processed/
+    ├── deduped_github_csvs/      # Tables extracted from GitHub READMEs.
+    ├── deduped_hugging_csvs/     # Tables extracted from Hugging Face model cards.
+    ├── tables_output/            # Tables parsed directly from ArXiv HTML sources.
+    └── llm_tables/               # Tables extracted from Semantic Scholar dataset and reformalized by GPT.
+```
+
+Or process raw data from scratch
+```bash
 mkdir data/raw
 # Downloading huggingface model card dataset
 git lfs install
-git clone https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata data/raw
-git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata data/raw
-# Downloading semantic scholar data
-# TODO: add command from privatecommonscript to here, for downloading the semantic scholar here
+git clone https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata data/raw/model_cards_with_metadata
+git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata data/raw/dataset_cards_with_metadata
+# Downloading Semantic Scholar data if you need to setup local database
+# Alternatively, refer to Semantic Scholar API documentation for bulk data access.
+
+# Check https://drive.google.com/drive/folders/1YLfkknrFuE9pWFJuarb4kyX1o5NtN-Y8?usp=drive_link for intermediate data checkpoints
 ```
 
 ---
 
 ## Scripts
 
-1. Parse every elements required:
+This section outlines the workflow for processing data, building the ground truth, and running evaluations.
+
+### 1\. Parse Initial Elements
+
+This step extracts key metadata from model cards and associated links.
 ```bash
-# Here I -> Input, O -> Output | skip writting data/processed
-python -m src.data_preprocess.step1 # Split readme and tags, parse urls, parse bibtex, 
-# get:  ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
-python -m src.data_preprocess.step1_down_giturl # Download github URL README & HTMLs. I: modelcard_step1.parquet, O: giturl_info.parquet
+# Split readme and tags, parse URLs, parse BibTeX entries.
+# Output: ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
+python -m src.data_preprocess.step1
+
+# Download GitHub READMEs and HTMLs from extracted URLs.
+# Input: modelcard_step1.parquet
+# Output: giturl_info.parquet, downloaded_github_readmes/
+python -m src.data_preprocess.step1_down_giturl
 #python -m src.data_preprocess.step1_down_giturl_fake # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
 find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' # some readme files are too large, we fix this issue
-python -m src.data_preprocess.step1_query_giturl load --query data/downloaded_github_readmes/7166b2cb378b3740c3b212bc0657dd11.md # Input: local path, Output: URL
+
+# Query specific GitHub URL content (example)
+# Input: local path to a downloaded README
+# Output: URL content
+python -m src.data_preprocess.step1_query_giturl load --query data/downloaded_github_readmes/7166b2cb378b3740c3b212bc0657dd11.md
 ```
 
-2. Download and build database for faster querying:
+### 2\. Download and Build Database for Faster Querying
+
+This step sets up local databases for efficient querying of Semantic Scholar data.
+
 ```bash
 # TODO: add command from privatecommonscript to here, for downloading the semantic scholar here
 # Requirement: cd to the path of downloaded dataset, e.g.: cd ~/shared_data/se_s2orc_250218
@@ -83,94 +189,188 @@ python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_d
 # getting full tables
 ```
 
-3. Extract tables to local folder:
+### 3\. Extract Tables to Local Folder
+
+This step extracts tabular data from various sources and processes it.
 ```bash
-python -m src.data_preprocess.step2_gitcard_tab # extract table from git + modelcards | save csvs to folder
-# I: data/processed + modelcard_step1.parquet, github_readmes_info.parquet, downloaded_github_readmes/, config.yaml | O: modelcard_step2.parquet, deduped_hugging_csvs/, hugging_deduped_mapping.json, deduped_github_csvs/, md_to_csv_mapping.json
-python -m src.data_preprocess.step2_md2text # process downloaded github html (if any) to markdown
-# I: data/downloaded_github_readmes/ → O: data/downloaded_github_readmes_processed/
-python -m src.data_preprocess.step2_se_url_title # fetching title from bibtex, PDF url.
-# I: modelcard_step1.parquet, github_readme_cache.parquet, github_readmes_processed/, pdf_link + github_link URLs → O: modelcard_all_title_list.parquet, github_readme_cache_update.parquet, github_extraction_cache.json, all_links_with_category.csv
-python -m src.data_preprocess.step2_se_url_save # save the deduplicate titles
-# I: modelcard_all_title_list.parquet → O: modelcard_dedup_titles.json, modelcard_title_query_results.json, modelcard_all_title_list_mapped.parquet
- - python -m src.data_preprocess.s2orc_API_query > logs/s2orc_API_query_v3_429.log # choose API to query |
- # I: modelcard_dedup_titles.json O: s2orc_query_results.parquet, s2orc_citations_cache.parquet, s2orc_references_cache.parquet, s2orc_titles2ids.parquet
+# Extract tables from GitHub READMEs and Model Cards. Saves CSVs to local folder.
+# Input: data/processed/modelcard_step1.parquet, github_readmes_info.parquet, downloaded_github_readmes/
+# Output: modelcard_step2.parquet, deduped_hugging_csvs/, hugging_deduped_mapping.json, deduped_github_csvs/, md_to_csv_mapping.json
+python -m src.data_preprocess.step2_gitcard_tab
+
+# Process downloaded GitHub HTML files to Markdown.
+# Input: data/downloaded_github_readmes/
+# Output: data/downloaded_github_readmes_processed/
+python -m src.data_preprocess.step2_md2text
+
+# Fetch titles from BibTeX entries and PDF URLs using Semantic Scholar.
+# Input: modelcard_step1.parquet, github_readme_cache.parquet, github_readmes_processed/, PDF/GitHub URLs
+# Output: modelcard_all_title_list.parquet, github_readme_cache_update.parquet, github_extraction_cache.json, all_links_with_category.csv
+python -m src.data_preprocess.step2_se_url_title
+
+# Save deduplicated titles for querying Semantic Scholar.
+# Input: modelcard_all_title_list.parquet
+# Output: modelcard_dedup_titles.json, modelcard_title_query_results.json, modelcard_all_title_list_mapped.parquet
+python -m src.data_preprocess.step2_se_url_save
+
+#### Option1:
+# Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits).
+# Input: modelcard_dedup_titles.json
+# Output: s2orc_query_results.parquet, s2orc_citations_cache.parquet, s2orc_references_cache.parquet, s2orc_titles2ids.parquet
+python -m src.data_preprocess.s2orc_API_query > logs/s2orc_API_query_v3_429.log
  - python -m src.data_preprocess.s2orc_log_429 # incase some title meet 429 error (API rate error)
  - python -m src.data_preprocess.s2orc_retry_missing # make up for the missing items
  - python -m src.data_preprocess.s2orc_merge # parse the references and citations from retrieved results | I: s2orc*.parquet, O: s2orc_rerun.parquet
 
  - bash src/data_localindexing/build_mini_citation_es.sh # I: xx | O: batch_results
- - python -m src.data_localindexing.extract_full_records # I: batch_results + hit_ids.txt, O: full_hits.jsonl
- - python -m src.data_localindexing.extract_full_records_to_merge # I: full_hits.jsonl,O: s2orc_citations_cache, s2orc_references_cache, s2orc_query_results
+
+# (Deprecate: Old method) bash src/data_localindexing/build_mini_citation_es.sh
+# Extract full records from batch query results.
+# Input: batch_results + hit_ids.txt
+# Output: full_hits.jsonl
+python -m src.data_localindexing.extract_full_records
+
+# Merge extracted full records.
+# Input: full_hits.jsonl
+# Output: s2orc_citations_cache, s2orc_references_cache, s2orc_query_results
+python -m src.data_localindexing.extract_full_records_to_merge
+
  - python -m src.data_preprocess.s2orc_merge # I: s2orc*.parquet, O: s2orc_rerun.parquet
 
  # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query |
   # I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
  - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext -> ref/cit info
 # I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, merged_df.parquet
-python -m src.data_preprocess.step2_get_html # download html
-# I: extracted_annotations.parquet, arxiv_titles_cache.json → O: title2arxiv_new_cache.json, arxiv_html_cache.json, missing_titles_tmp.txt, arxiv_fulltext_html/*.html
-python -m src.data_preprocess.step2_html_parsing # extract tables from html
-# I: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional) → O: html_table.parquet, tables_output/*.csv
+
+
+# Download HTML content for table extraction.
+# Input: extracted_annotations.parquet, arxiv_titles_cache.json
+# Output: title2arxiv_new_cache.json, arxiv_html_cache.json, missing_titles_tmp.txt, arxiv_fulltext_html/*.html
+python -m src.data_preprocess.step2_get_html
+
+# Extract tables from HTML files.
+# Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional)
+# Output: html_table.parquet, tables_output/*.csv
+python -m src.data_preprocess.step2_html_parsing
+
 mkdir logs
-python -m src.data_preprocess.step2_integration_order > logs/step2_integration_order_0508.log # first html | then PDF? (no) | finally llm polished table text
-# I: title2arxiv_new_cache.json, html_table.parquet, extracted_annotations.parquet, pdf_download_cache.json → O: before_llm_output.parquet, batch_input.jsonl, batch_output.jsonl, llm_markdown_table_results.parquet
-bash src/data_preprocess/openai_batchjob_status.sh # query batch job status
+# Integrate all processed table data (HTML, potentially LLM-polished text).
+# Input: title2arxiv_new_cache.json, html_table.parquet, extracted_annotations.parquet, pdf_download_cache.json
+# Output: before_llm_output.parquet, batch_input.jsonl, batch_output.jsonl, llm_markdown_table_results.parquet
+python -m src.data_preprocess.step2_integration_order > logs/step2_integration_order_0508.log
+# Check OpenAI batch job status (if using LLM for table processing)
+bash src/data_preprocess/openai_batchjob_status.sh
+
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
 #cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results.parquet
-python -m src.data_preprocess.step2_llm_save > logs/step2_llm_save_0508.log # save table into local# csv
-# I: llm_markdown_table_results.parquet → O: llm_tables/*.csv, final_integration_with_paths.parquet
+
+# Save LLM-processed tables into local CSVs.
+# Input: llm_markdown_table_results.parquet
+# Output: llm_tables/*.csv, final_integration_with_paths.parquet
+python -m src.data_preprocess.step2_llm_save > logs/step2_llm_save_0508.log
 ```
 
-4. Label groundtruth for unionable search baselines:
+### 4\. Label Ground Truth for Unionable Search Baselines
 
+
+This section details the process of generating ground truth labels for table unionability.
 ```bash
-python -m src.data_gt.step3_pre_merge # merge all the table list into modelid file
-# I: final_integration_with_paths.parquet, modelcard_all_title_list.parquet → O: modelcard_step3_merged.parquet
+# Merge all table lists into a unified model ID file.
+# Input: final_integration_with_paths.parquet, modelcard_all_title_list.parquet
+# Output: modelcard_step3_merged.parquet
+python -m src.data_gt.step3_pre_merge
+
 # (Only need if we not run s2orc_API_query) python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
 # I: final_integration_with_paths.parquet. O: modelcard_citation_enriched.parquet
-python -m src.data_gt.overlap_rate # compute paper-pair overlap score | # I: extracted_annotations/modelcard_citation_enriched O: modelcard_rate/label.pickle
-python -m src.data_gt.overlap_fig # plot violin fig of overlap rate
-python -m src.data_gt.overlap # determining threshold
+
+# Compute paper-pair overlap scores for citation analysis.
+# Input: extracted_annotations/modelcard_citation_enriched
+# Output: modelcard_rate/label.pickle
+python -m src.data_gt.overlap_rate
+
+# Plot violin figures of overlap rates.
+python -m src.data_gt.overlap_fig
+
+# Determine overlap thresholds.
+python -m src.data_gt.overlap
 ```
-Quality Control !!! | Run some analysis
+
+### Quality Control \!\!\! | Run some analysis
+
+Ensure data quality and consistency before generating final ground truth.
+
 ```bash
-# this must be run before gt
-python -m src.data_analysis.qc_dedup > logs/qc_dedup_0516.log # dedup raw tables, keep dedup in order hugging>github>html>llm | I: modelcard_step3_merged, O: modelcard_step3_dedup
+# This must be run before ground truth generation.
+# Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM.
+# Input: modelcard_step3_merged
+# Output: modelcard_step3_dedup
+python -m src.data_analysis.qc_dedup > logs/qc_dedup_0516.log
+
+# Generate figures for deduplication analysis.
 python -m src.data_analysis.qc_dedup_fig
-python -m src.data_analysis.qc_stats > logs/qc_stats_0516.log # stats | I: modelcard_step4_dedup, O: benchmark_results
+
+# Generate statistics on the processed dataset.
+# Input: modelcard_step4_dedup (ensure this is updated after deduplication)
+# Output: benchmark_results
+python -m src.data_analysis.qc_stats > logs/qc_stats_0516.log
+
+# Generate figures for dataset statistics.
 python -m src.data_analysis.qc_stats_fig
-# (Optional) python -m src.data_analysis.qc_dc # double check whether the dedup and mapped logic is correct
-bash src/data_analysis/count_files.sh # obtain files count directly from folder | The count above should be smaller than files here.
+
+# (Optional) Double-check deduplication and mapping logic.
+# python -m src.data_analysis.qc_dc
+
+# Obtain file counts directly from folders to verify against statistics.
+bash src/data_analysis/count_files.sh
 ```
-Final gt!
+
+### Final Ground Truth Generation
+
+Generate the definitive ground truth files for evaluation.
+
 ```bash
-python -m src.data_gt.step3_create_symlinks # create the symbolic link on different device
-# I: modelcard_step3_dedup → O: modelcard_step4 + sym_*_csvs_*
-#python -m src.data_gt.step3_gt # build up groundtruth
+# Create symbolic links for organizing processed tables on different devices.
+# Input: modelcard_step3_dedup
+# Output: modelcard_step4 + sym_*_csvs_* (symbolic links to processed CSVs)
+python -m src.data_gt.step3_create_symlinks
+
+# Build ground truth (paper-level, model-level, dataset-level).
 bash src/data_gt/step3_gt.sh
 
-# (deprecate) python -m src.data_gt.compare_gt_stats --gt_dir data/gt # compare pkl hash
-python -m src.data_gt.debug_npz --gt-dir data/gt/ # check whether gt satisfy some validcondition
+# Debug NPZ ground truth files to ensure valid conditions.
+python -m src.data_gt.debug_npz --gt-dir data/gt/
 
-python -m src.data_localindexing.turn_tus_into_pickle # process sqlite gt into pickle file
+# Process SQLite ground truth into pickle files (if applicable from other benchmarks).
+python -m src.data_localindexing.turn_tus_into_pickle
 # (deprecate) python -m src.data_gt.gt_combine
-python -m src.data_gt.modelcard_matrix # (add other two level citation graph)
-python -m src.data_analysis.gt_distri # GT length distribution boxplot/violin
-python -m src.data_gt.nonzeroedge # non-zero edge stats
+
+# Add other two levels of citation graphs (modelcard and dataset).
+python -m src.data_gt.modelcard_matrix
+
+# Plot GT length distribution (boxplot/violin).
+python -m src.data_analysis.gt_distri
+
+# Compute non-zero edge statistics for citation graphs.
+python -m src.data_gt.nonzeroedge
+
 # (test)python -m src.data_gt.test_modelcard_update --mode dataset # check whether matrix multiplication and for loop obtain the same results
 #(test)python -m src.data_gt.convert_adj_to_npz --input data/gt/scilake_gt_modellink_dataset_adj_processed.pkl --output-prefix data/gt/scilake_gt_modellink_dataset # pkl2npz
 
+# Merge union ground truth.
 python -m src.data_gt.merge_union --level direct
-# produce union gt (TODO: accelerate it, add npz to modelcard_matrix)
-python -m src.data_gt.create_csvlist_variants --level direct # update _s for *csv_list.pkl
+
+# Update CSV lists for various ground truth variants.
+python -m src.data_gt.create_csvlist_variants --level direct
 # (depreate) python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t for pkl files
 # (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 # (deprecate) python -m src.data_analysis.gt_fig # plot stats
 ```
 
-5. Create symlink for combining them into starmie/data/scilake_large/datalake/*
+### 5\. Create Symlinks for Starmie Integration
+
+Prepare data and augmentations for integration with the Starmie benchmark framework.
+
 ```bash
 # go to starmie folder, and copy this sh file to run 
 python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str # trick: header-str(value)
@@ -184,26 +384,52 @@ python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base # 
 # bash src/data_analysis/count_files.sh check whether the symlink path include some files
 ```
 
-6. Run updated [starmie](https://github.com/DoraDong-2023/starmie_internal) scripts for finetuning and check performance
+### 6\. Run Updated Starmie Scripts
+
+Execute Starmie's pipeline for contrastive learning, embedding extraction, and search
+
 ```bash
-bash prepare_sample.sh # sample 1000 samples from each resources folder
-# or python -m src.data_symlink.prepare_sample_server --root_dir /u4/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42
-# another substitution
+# Sample 1000 tables from each resource folder for evaluation.
+# bash prepare_sample.sh
+# Alternative for server:
+# python -m src.data_symlink.prepare_sample_server --root_dir /u4/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42
+# Another substitution:
 python -m src.data_symlink.prepare_sample --root_dir /u1/z6dong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42
-# create for tricks augmented files
-#python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt
-# Input: scilake_final_filelist.txt ; Output: scilake_final_filelist_{tricks}_filelist.txt, 
-python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt # create other 3 files
+
+
+# Create file lists for trick-augmented files.
+# Input: scilake_final_filelist.txt
+# Output: scilake_final_filelist_{tricks}_filelist.txt
+# python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt
+
+# Create validation file lists.
+python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt
+
 # (deprecate) (already processed in QC step) bash check_empty.sh # filter out empty files (or low quality files later)
-bash scripts/step1_pretrain.sh # finetune contrastive learning
-bash scripts/step2_extractvectors.sh # encode embeddings for query and datalake items
-bash scripts/step3_search_hnsw.sh # data lake search (retrieve)
-bash scripts/step3_processmetrics.sh # extract metrics based on gt & result diff | plot fig
-bash eval_per_resource.sh # run ablation study on different results before getting results
-# bash scripts/step4_discovery.sh
+# Fine-tune contrastive learning model.
+bash scripts/step1_pretrain.sh
+
+# Encode embeddings for query and datalake items.
+bash scripts/step2_extractvectors.sh
+
+# Perform data lake search (retrieval).
+bash scripts/step3_search_hnsw.sh
+
+# Extract metrics based on ground truth and retrieval results; plot figures.
+bash scripts/step3_processmetrics.sh
+
+# Run ablation study on different resources (after getting results).
+bash eval_per_resource.sh
+# (Alternatively, run before getting results) bash eval_per_resource.sh
+
+# (Optional) bash scripts/step4_discovery.sh
 ```
 
-7. Baseline
+
+### 7\. Baseline Evaluation
+
+Run baseline table embedding and retrieval methods for comparison.
+
 ```bash
 # build corpus jsonl/encode(SBERT)/build faiss/search/postprocess
 bash src/baseline_1/table_retrieval_pipeline.sh
@@ -312,18 +538,28 @@ python src/baseline2/check_hybrid_vs_sparse.py \
 #python src/baseline_1/table_retrieval_pipeline.py search_faiss --faiss_index data/tmp/index_dense_subset/index.faiss --query_tsv   data/tmp/sparse_top101.tsv --topk 11 --output data/tmp/search_dense_11.json
 ```
 
-Analysis on results
-```bash  
-# get top-10 results from step3_search_hnsw
+### Analysis on Results
+
+Tools for analyzing the retrieval results and ground truth.
+
+```bash
+# Get top-10 results from step3_search_hnsw.
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
-python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1.csv 
---csv2 096d51652d_table1.csv # check csv-pair in gt is related or not 
-# check the count of unique csvs
-python count_unique_csvs.py   --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json   --gt      /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
-python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log # check the related model of csv
+
+# Check if a specific CSV pair is related in the ground truth.
+python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1.csv --csv2 096d51652d_table1.csv
+
+# Count unique CSVs in retrieval results.
+python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json --gt /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
+
+# Check related models for a given CSV.
+python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log
 ```
 
-7. Analyze some statistics
+### Additional Statistics Analysis
+
+Scripts for generating further insights into the dataset.
+
 ```bash
 python -m src.data_preprocess.step1_analysis # get analysis on proportion of different links
 python -m src.data_analysis.query_compare_API_local # compare the query results among local and API from s2orc
@@ -353,45 +589,25 @@ bash src/data_symlink/ln_scilake_final.sh
 ```
 
 
----
-What dataset_processed should addressed
----
+## Acknowledgements
 
-### Objective:
-The goal is to create a reliable and minimal dataset by filtering and validating model cards from multiple sources. We aim to ensure that every card retained in the dataset:
-1. Contains valid and verified metadata (BibTeX entries, paper links, GitHub repositories).
-2. Has no duplicate entries—retain only the card with the highest `downloads` count if duplicates exist.
-3. Downloads the associated data locally and reads it for further processing.
-4. Annotates the dataset with citation information to build a **citation graph** that reflects inter-card relationships (i.e., a card's associated paper cites another card's associated paper).  
+We would like to thank the following repositories and projects for their invaluable contributions and inspiration:
 
-We will leverage a **Citation Graph API** to annotate and establish these relationships.
+* **[megagonlabs/starmie](https://github.com/megagonlabs/starmie)**: For the original Semantic Table Discovery framework and evaluation setup that formed a basis for our work.
 
-### Step-by-Step Plan:
+* **[Table Union Search Benchmark](https://github.com/RJMillerLab/table-union-search-benchmark/tree/master)**: For providing benchmark datasets and tasks related to table union search.
 
-#### 1. **Data Filtering Phase**
-   - **Input Sources:** 
-     - card_readme content
-     - BibTeX entries
-     - GitHub repo READMEs
-   - **Filtering Criteria:**
-     - Remove any card that lacks all of the following:
-       - Paper link (arXiv, DOI, or PDF)
-       - BibTeX entry
-       - GitHub link
-     - Eliminate duplicate cards; keep the one with the highest `downloads` count.
-     - Validate remaining links to ensure they are functional and non-placeholder.
+* **[SANTOS Dataset](https://github.com/northeastern-datalab/santos/tree/main/groundtruth)**: For the ground truth data used in table discovery evaluations.
 
-#### 2. **Data Downloading Phase**
-   - Download the related resources (PDFs, code repos, etc.).
-   - Organize and read the downloaded content from the local directory for further processing.
+* The **Hugging Face** team and community for providing open-source access to crucial datasets, including:
+    * [librarian-bots/model_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata)
+    * [librarian-bots/dataset_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata)
 
-#### 3. **Citation Annotation Phase**
-   - Use the **Citation Graph API** to analyze and annotate each card by identifying citations between associated papers.
-   - Establish inter-card relationships (i.e., identify which card's paper cites another).
+* The **Semantic Scholar** API for their comprehensive [academic graph and datasets](https://www.semanticscholar.org/product/api/tutorial), which were essential for building our citation network.
 
-#### 4. **Final Dataset Construction**
-   - Create a structured and annotated dataset that includes:
-     - Valid and non-duplsicate card data.
-     - Citation relationships between cards.
-     - Metadata for each card (downloads, likes, BibTeX, and link status).
----
+## Citations
+
+If you find this repository useful in your research or work, please consider star this repository and citing it:
+```bibtex
+{}
+```
