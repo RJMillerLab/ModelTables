@@ -1,6 +1,17 @@
 
 # 📚 Semantic Table Discovery in Model Lakes:  a Benchmark
 
+<p align="center">
+  <a href="YOUR_ARXIV_LINK" target="_blank"><img src="https://img.shields.io/badge/arXiv-Paper-red"></a>
+  <a href="YOUR_GITHUB_REPO_LINK" target="_blank"><img src="https://img.shields.io/badge/GitHub-Repo-blue"></a>
+  <a href="YOUR_PROJECT_PAGE_LINK" target="_blank"><img src="https://img.shields.io/badge/Project-Page-brightgreen"></a>
+  <a href="YOUR_HF_DATASET_LINK" target="_blank"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Dataset-orange"></a>
+  <a href="YOUR_HF_DAILY_PAPERS_LINK" target="_blank"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Daily%20Papers-red"></a>
+  <a href="YOUR_HF_CHROME_PLUGIN_LINK" target="_blank"><img src="https://img.shields.io/badge/Chrome%20Plugin-Hugging%20Face-yellow"></a>
+  <a href="YOUR_ARXIV_CHROME_PLUGIN_LINK" target="_blank"><img src="https://img.shields.io/badge/Chrome%20Plugin-arXiv-yellowgreen"></a>
+  <a href="YOUR_GITHUB_CHROME_PLUGIN_LINK" target="_blank"><img src="https://img.shields.io/badge/Chrome%20Plugin-GitHub-lightgrey"></a>
+</p>
+
 ## Motivation
 
 <img src="fig/idea_page1.png" alt="IdeaDiagram" width="450"/>
@@ -14,6 +25,8 @@ ModelLake is a benchmark framework that bridges traditional Data Lake table disc
 - [Installation](#installation)
 - [QuickInference](#quickinference)
 - [Scripts](#scripts)
+- [Acknowledgements](#acknowledgements)
+- [Citation](#citation)
 
 ## Example
 
@@ -171,3 +184,26 @@ The Model/Vectors/Metrics/Results will located at
 
 Refer to scripts [section](docs/scripts.md) for crawling/training from scratch
 
+
+## Acknowledgements
+
+We would like to thank the following repositories and projects for their invaluable contributions and inspiration:
+
+* **[megagonlabs/starmie](https://github.com/megagonlabs/starmie)**: For the original Semantic Table Discovery framework and evaluation setup that formed a basis for our work.
+
+* **[Table Union Search Benchmark](https://github.com/RJMillerLab/table-union-search-benchmark/tree/master)**: For providing benchmark datasets and tasks related to table union search.
+
+* **[SANTOS Dataset](https://github.com/northeastern-datalab/santos/tree/main/groundtruth)**: For the ground truth data used in table discovery evaluations.
+
+* The **Hugging Face** team and community for providing open-source access to crucial datasets, including:
+    * [librarian-bots/model_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata)
+    * [librarian-bots/dataset_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata)
+
+* The **Semantic Scholar** API for their comprehensive [academic graph and datasets](https://www.semanticscholar.org/product/api/tutorial), which were essential for building our citation network.
+
+## Citations
+
+If you find this repository useful in your research or work, please consider star this repository and citing it:
+```bibtex
+{}
+```
