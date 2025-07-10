@@ -14,6 +14,7 @@ ModelLake is a benchmark framework that bridges traditional Data Lake table disc
 - [Installation](#installation)
 - [QuickInference](#quickinference)
 - [Scripts](#scripts)
+- [Acknowledgements](#acknowledgements)
 
 ## Example
 
@@ -68,7 +69,7 @@ We extract tabular data from diverse sources via a crawling pipeline that parses
 
 ### How to do semantic table union-able search
 
-The training and inference for the table discovery technique itself are conducted in the offical starmie GitHub repository: [megagonlabs/starmie](https://github.com/megagonlabs/starmie) or a refined version [DoraDong-2023/starmie_internal](https://github.com/DoraDong-2023/starmie_internal)
+We select [starmie](https://github.com/megagonlabs/starmie) as our semantic table union-able search technique. We put the refined code we used under `./starmie/` folder.
 
 Following these workflows, ModelLake enables robust data ingestion, citation graph construction, and semantic table discovery.
 
