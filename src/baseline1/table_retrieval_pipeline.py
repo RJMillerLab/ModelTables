@@ -123,9 +123,9 @@ def apply_mode_transformation(csv_path: str, mode: str) -> str:
     if mode == 'str':
         new_basename = f"{name}_s{ext}"
     elif mode == 'tr':
-        new_basename = f"{name}_tr{ext}"
+        new_basename = f"{name}_t{ext}"
     elif mode == 'tr_str':
-        new_basename = f"{name}_tr_s{ext}"
+        new_basename = f"{name}_s_t{ext}"
     else:
         return csv_path
     
