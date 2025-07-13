@@ -172,3 +172,21 @@ The Model/Vectors/Metrics/Results will located at
 
 Refer to scripts [section](docs/scripts.md) for crawling/training from scratch
 
+
+## Acknowledgements
+
+We would like to thank the following repositories and projects for their invaluable contributions and inspiration:
+
+* **[megagonlabs/starmie](https://github.com/megagonlabs/starmie)**: For the original Semantic Table Discovery framework and evaluation setup that formed a basis for our work.
+
+* **[Table Union Search Benchmark](https://github.com/RJMillerLab/table-union-search-benchmark/tree/master)**: For providing benchmark datasets and tasks related to table union search.
+
+* **[SANTOS Dataset](https://github.com/northeastern-datalab/santos/tree/main/groundtruth)**: For the ground truth data used in table discovery evaluations.
+
+* **[LUH-DBS/Blend](https://github.com/LUH-DBS/Blend)**: Unified table discovery system.
+
+* The **Hugging Face** team and community for providing open-source access to crucial datasets, including:
+    * [librarian-bots/model_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata)
+    * [librarian-bots/dataset_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata)
+
+* The **Semantic Scholar** API for their comprehensive [academic graph and datasets](https://www.semanticscholar.org/product/api/tutorial), which were essential for building our citation network.

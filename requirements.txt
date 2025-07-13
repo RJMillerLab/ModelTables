@@ -3,14 +3,9 @@ aiohttp
 bibtexparser
 ruamel.yaml
 tqdm_joblib
-PyMuPDF
-fitz
 dask
-pdf2image
-pytesseract
 arxiv
 feedparser
-pdfplumber
 html2text
 tiktoken
-suitesparse-graphblas
+suitesparse-graphblass

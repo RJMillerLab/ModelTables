@@ -62,9 +62,10 @@ def safe_load_csv(file_path: str) -> Tuple[str, pd.DataFrame]:
 
 
 def filter_to_jsonl(base_path: str, mask_file: str, output_jsonl: str,
-                    model_name: str, device: str):
+                    model_name: str, device: str, mode: str = None):
     """
     each line: {"id": basename, "contents": processed text}
+    mode: str, tr, tr_str, or None for base version
     """
     os.makedirs(os.path.dirname(output_jsonl), exist_ok=True)
     model = SentenceTransformer(model_name, device=device)
@@ -82,6 +83,11 @@ def filter_to_jsonl(base_path: str, mask_file: str, output_jsonl: str,
                 csv_path = rel_path
             else:
                 csv_path = os.path.join(base_path, rel_path)
+            
+            # Apply mode transformation if specified
+            if mode and mode in ['str', 'tr', 'tr_str']:
+                csv_path = apply_mode_transformation(csv_path, mode)
+            
             if not os.path.exists(csv_path):
                 print(f"Warning: file not found {csv_path}, skipping")
                 continue
@@ -100,6 +106,47 @@ def filter_to_jsonl(base_path: str, mask_file: str, output_jsonl: str,
             fout.write(json.dumps(doc, ensure_ascii=False) + '\n')
             written += 1
     print(f'Generated JSONL: {output_jsonl}, entries written: {written}/{len(entries)}')
+
+
+def apply_mode_transformation(csv_path: str, mode: str) -> str:
+    """
+    Transform CSV path based on mode:
+    - str: add _str suffix to basename and look in *_str folders
+    - tr: add _tr suffix to basename and look in *_tr folders  
+    - tr_str: add _tr_str suffix to basename and look in *_tr_str folders
+    """
+    dir_path = os.path.dirname(csv_path)
+    basename = os.path.basename(csv_path)
+    name, ext = os.path.splitext(basename)
+    
+    # Add mode suffix to basename
+    if mode == 'str':
+        new_basename = f"{name}_s{ext}"
+    elif mode == 'tr':
+        new_basename = f"{name}_tr{ext}"
+    elif mode == 'tr_str':
+        new_basename = f"{name}_tr_s{ext}"
+    else:
+        return csv_path
+    
+    # Transform directory path to look in augmented folders
+    if mode == 'str':
+        dir_path = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_str')
+        dir_path = dir_path.replace('deduped_github_csvs', 'deduped_github_csvs_str')
+        dir_path = dir_path.replace('llm_tables', 'llm_tables_str')
+        dir_path = dir_path.replace('tables_output', 'tables_output_str')
+    elif mode == 'tr':
+        dir_path = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_tr')
+        dir_path = dir_path.replace('deduped_github_csvs', 'deduped_github_csvs_tr')
+        dir_path = dir_path.replace('llm_tables', 'llm_tables_tr')
+        dir_path = dir_path.replace('tables_output', 'tables_output_tr')
+    elif mode == 'tr_str':
+        dir_path = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_tr_str')
+        dir_path = dir_path.replace('deduped_github_csvs', 'deduped_github_csvs_tr_str')
+        dir_path = dir_path.replace('llm_tables', 'llm_tables_tr_str')
+        dir_path = dir_path.replace('tables_output', 'tables_output_tr_str')
+    
+    return os.path.join(dir_path, new_basename)
 
 def encode_corpus(jsonl: str, model_name: str, batch_size: int,
                   output_npz: str, device: str):
@@ -201,6 +248,8 @@ def main():
     p.add_argument('--output_jsonl', required=True)
     p.add_argument('--model_name', default='all-MiniLM-L6-v2')
     p.add_argument('--device', default='cuda')
+    p.add_argument('--mode', choices=['str', 'tr', 'tr_str'], default=None,
+                   help='augmentation mode: str, tr, tr_str, or None for base version')
 
     e = sub.add_parser('encode')
     e.add_argument('--jsonl', required=True)
@@ -223,7 +272,7 @@ def main():
     if args.cmd == 'filter':
         filter_to_jsonl(args.base_path, args.mask_file,
                         args.output_jsonl,
-                        args.model_name, args.device)
+                        args.model_name, args.device, args.mode)
     elif args.cmd == 'encode':
         encode_corpus(args.jsonl, args.model_name,
                       args.batch_size, args.output_npz,

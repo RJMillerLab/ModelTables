@@ -304,8 +304,11 @@ Run baseline table embedding and retrieval methods for comparison.
 ```bash
 # build corpus jsonl/encode(SBERT)/build faiss/search/postprocess
 bash src/baseline1/table_retrieval_pipeline.sh
+# for augmented tables
+bash src/baseline1/table_retrieval_pipeline_str.sh
+bash src/baseline1/table_retrieval_pipeline_tr.sh
 # compute metrics under starmie
-bash scripts/step3_processmetrics_baseline.sh # run baseline metrics computation
+bash scripts/step3_processmetrics_all.sh 1 # run baseline metrics computation
 ```
 for faiss cpu/gpu installation, see [FAISS GitHub repository](https://github.com/facebookresearch/faiss).
 
