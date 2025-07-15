@@ -305,8 +305,106 @@ Run baseline table embedding and retrieval methods for comparison.
 # build corpus jsonl/encode(SBERT)/build faiss/search/postprocess
 bash src/baseline1/table_retrieval_pipeline.sh
 # for augmented tables
+# step1: get embedding
 bash src/baseline1/table_retrieval_pipeline_str.sh
 bash src/baseline1/table_retrieval_pipeline_tr.sh
+
+# step2: combine embedding and jsonl for ori+tr, ori+str, ori+tr+str
+# ori+tr
+python src/baseline1/merge_embeddings_and_jsonl.py \
+  data/baseline/valid_tables_embeddings.npz data/baseline/valid_tables_tr_embeddings.npz \
+  --out_npz data/baseline/valid_tables_ori_tr_embeddings.npz \
+  data/baseline/valid_tables.jsonl data/baseline/valid_tables_tr.jsonl \
+  --out_jsonl data/baseline/valid_tables_ori_tr.jsonl
+# ori+str
+python src/baseline1/merge_embeddings_and_jsonl.py \
+  data/baseline/valid_tables_embeddings.npz data/baseline/valid_tables_str_embeddings.npz \
+  --out_npz data/baseline/valid_tables_ori_str_embeddings.npz \
+  data/baseline/valid_tables.jsonl data/baseline/valid_tables_str.jsonl \
+  --out_jsonl data/baseline/valid_tables_ori_str.jsonl
+# ori+tr+str
+python src/baseline1/merge_embeddings_and_jsonl.py \
+  data/baseline/valid_tables_embeddings.npz data/baseline/valid_tables_tr_embeddings.npz data/baseline/valid_tables_str_embeddings.npz \
+  --out_npz data/baseline/valid_tables_mixed_embeddings.npz \
+  data/baseline/valid_tables.jsonl data/baseline/valid_tables_tr.jsonl data/baseline/valid_tables_str.jsonl \
+  --out_jsonl data/baseline/valid_tables_mixed.jsonl
+
+# step3: build faiss
+# or + tr
+python src/baseline1/table_retrieval_pipeline.py \
+  build_faiss --emb_npz data/baseline/valid_tables_ori_tr_embeddings.npz \
+  --output_index data/baseline/valid_tables_ori_tr.faiss
+# or + str
+python src/baseline1/table_retrieval_pipeline.py \
+  build_faiss --emb_npz data/baseline/valid_tables_ori_str_embeddings.npz \
+  --output_index data/baseline/valid_tables_ori_str.faiss
+# or + tr + str
+python src/baseline1/table_retrieval_pipeline.py \
+  build_faiss --emb_npz data/baseline/valid_tables_mixed_embeddings.npz \
+  --output_index data/baseline/valid_tables_mixed.faiss
+
+# step4: search
+# ori+tr
+python src/baseline1/table_retrieval_pipeline.py \
+  search --emb_npz data/baseline/valid_tables_ori_tr_embeddings.npz \
+  --faiss_index data/baseline/valid_tables_ori_tr.faiss \
+  --top_k 11 \
+  --output_json data/baseline/table_neighbors_ori_tr.json
+
+# ori+str
+python src/baseline1/table_retrieval_pipeline.py \
+  search --emb_npz data/baseline/valid_tables_ori_str_embeddings.npz \
+  --faiss_index data/baseline/valid_tables_ori_str.faiss \
+  --top_k 11 \
+  --output_json data/baseline/table_neighbors_ori_str.json
+
+# ori+tr+str
+python src/baseline1/table_retrieval_pipeline.py \
+  search --emb_npz data/baseline/valid_tables_mixed_embeddings.npz \
+  --faiss_index data/baseline/valid_tables_mixed.faiss \
+  --top_k 11 \
+  --output_json data/baseline/table_neighbors_mixed.json
+
+# step5: postprocess
+# ori+tr
+python src/baseline1/postprocess_general.py \
+  --input data/baseline/table_neighbors_ori_tr.json \
+  --key_types "" \
+  --value_types "" _t \
+  --output data/baseline/table_neighbors_ori_tr_key_ori.json
+
+python src/baseline1/postprocess_general.py \
+  --input data/baseline/table_neighbors_ori_tr.json \
+  --key_types _t \
+  --value_types "" _t \
+  --output data/baseline/table_neighbors_ori_tr_key_tr.json
+
+# ori+str
+python src/baseline1/postprocess_general.py \
+  --input data/baseline/table_neighbors_ori_str.json \
+  --key_types "" \
+  --value_types "" _s \
+  --output data/baseline/table_neighbors_ori_str_key_ori.json
+
+python src/baseline1/postprocess_general.py \
+  --input data/baseline/table_neighbors_ori_str.json \
+  --key_types _s \
+  --value_types "" _s \
+  --output data/baseline/table_neighbors_ori_str_key_str.json
+
+# ori+tr+str
+python src/baseline1/postprocess_general.py \
+  --input data/baseline/table_neighbors_mixed.json \
+  --key_types "" \
+  --value_types "" _s _t \
+  --output data/baseline/table_neighbors_mixed_key_ori.json
+
+python src/baseline1/postprocess_general.py \
+  --input data/baseline/table_neighbors_mixed.json \
+  --key_types _s \
+  --value_types "" _s _t \
+  --output data/baseline/table_neighbors_mixed_key_str.json
+
 # compute metrics under starmie
 bash scripts/step3_processmetrics_all.sh 1 # run baseline metrics computation
 ```

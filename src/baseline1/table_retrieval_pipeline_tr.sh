@@ -14,14 +14,14 @@ encode --jsonl data/baseline/valid_tables_tr.jsonl \
         --output_npz data/baseline/valid_tables_tr_embeddings.npz \
         --device cuda
 
-python src/baseline1/table_retrieval_pipeline.py \
-build_faiss --emb_npz data/baseline/valid_tables_tr_embeddings.npz \
-            --output_index data/baseline/valid_tables_tr.faiss
+# python src/baseline1/table_retrieval_pipeline.py \
+# build_faiss --emb_npz data/baseline/valid_tables_tr_embeddings.npz \
+#             --output_index data/baseline/valid_tables_tr.faiss
 
-python src/baseline1/table_retrieval_pipeline.py \
-search --emb_npz data/baseline/valid_tables_tr_embeddings.npz \
-        --faiss_index data/baseline/valid_tables_tr.faiss \
-        --top_k 11 \
-        --output_json data/baseline/table_neighbors_tr.json
+# python src/baseline1/table_retrieval_pipeline.py \
+# search --emb_npz data/baseline/valid_tables_tr_embeddings.npz \
+#         --faiss_index data/baseline/valid_tables_tr.faiss \
+#         --top_k 11 \
+#         --output_json data/baseline/table_neighbors_tr.json
 
-python src/baseline1/postprocess.py data/baseline/table_neighbors_tr.json data/baseline/baseline1_dense_tr.json 
+# python src/baseline1/postprocess.py data/baseline/table_neighbors_tr.json data/baseline/baseline1_dense_tr.json 
