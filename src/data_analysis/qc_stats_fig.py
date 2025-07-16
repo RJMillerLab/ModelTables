@@ -21,10 +21,10 @@ RESOURCES = {
 }
 
 RESOURCE_LABELS = {
-    'hugging': 'Hugging Face',
+    'hugging': 'ModelCard',
     'github': 'GitHub',
-    'html': 'HTML',
-    'llm': 'S2ORC+LLM'
+    'html': 'arXiv',
+    'llm': 'S2ORC'
 }
 
 # Benchmark data (WDC removed)
