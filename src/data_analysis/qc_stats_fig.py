@@ -68,7 +68,7 @@ def plot_metrics_grid(df):
     bar_width = 0.15
     gap = 0.4
     group_width = len(RESOURCES) * bar_width + gap
-    clusters = ['Benchmarks', 'Dedup', 'Title', 'Valid-title']
+    clusters = ['Benchmarks', 'All', 'Dedup', 'Title', 'Valid-title']
     resources = list(RESOURCES.keys())
 
     cluster_key_map = {
