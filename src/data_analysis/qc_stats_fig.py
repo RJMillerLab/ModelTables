@@ -68,14 +68,14 @@ def plot_metrics_grid(df):
     bar_width = 0.15
     gap = 0.4
     group_width = len(RESOURCES) * bar_width + gap
-    clusters = ['Benchmarks', 'Ours-dup', 'Ours-dedup', 'Ours-w/ \n title', 'Ours-w/ \n valid title']
+    clusters = ['Benchmarks', 'All', 'All-dedup', 'All-title', 'All-valid-title']
     resources = list(RESOURCES.keys())
 
     cluster_key_map = {
-        'Ours-dup': " (duplicated)",
-        'Ours-dedup': "",
-        'Ours-w/ \n title': "-title-dedup",
-        'Ours-w/ \n valid title': "-valid-dedup"
+        'All': " (duplicated)",
+        'All-dedup': "",
+        'All-title': "-title-dedup",
+        'All-valid-title': "-valid-dedup"
     }
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True, sharey=False, constrained_layout=True)
@@ -126,7 +126,7 @@ def plot_metrics_grid(df):
     legend1 = fig.legend(
         handles_baseline,
         [h.get_label() for h in handles_baseline],
-        loc="lower left", bbox_to_anchor=(0.05, -0.05),
+        loc="lower center", bbox_to_anchor=(0.5, -0.06),
         ncol=5,
         fontsize=13,
     )
@@ -134,7 +134,7 @@ def plot_metrics_grid(df):
     fig.legend(
         handles_resource,
         [h.get_label() for h in handles_resource],
-        loc="lower left", bbox_to_anchor=(0.05, -0.1),
+        loc="lower center", bbox_to_anchor=(0.5, -0.11),
         ncol=4,
         fontsize=13,
     )
