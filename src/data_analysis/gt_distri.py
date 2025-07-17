@@ -31,14 +31,16 @@ OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PALETTE = {
-    "Paper GT":           "#486f90",
-    "Model GT":           "#4e8094",
-    "Dataset GT":         "#50a89d",
+    "Paper Links":           "#486f90",
+    "Model Links":           "#4e8094",
+    "Dataset Links":         "#50a89d",
     "SANTOS Large":       "#f29e4c",
     "SANTOS Small":       "#8b2e2e",
     "TUS Large":          "#d96e44",
     "TUS Small":          "#b74a3c",
-    "All GT":           "#a5d2bc",
+    "All Links":           "#a5d2bc",
+    # "TUS Others":          "#8b2e2e",
+    # "TUS Santos":          "#8b2e2e",
 }
 
 # -------- Loader --------
@@ -138,7 +140,7 @@ def plot_log_boxplot(length_data, palette, title, prefix):
     plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
 
     plt.yscale('log')
-    plt.ylabel('# GT Links', fontsize=22)
+    plt.ylabel('# Links', fontsize=22)
     plt.title(title, fontsize=22)
 
     plt.tight_layout()
@@ -172,7 +174,7 @@ def plot_violin(length_data, palette, title, prefix):
     plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
 
     plt.yscale('log')
-    plt.ylabel('# GT Links', fontsize=22)
+    plt.ylabel('# Links', fontsize=22)
     plt.title(title, fontsize=22)
 
     plt.tight_layout()
@@ -187,10 +189,12 @@ if __name__ == "__main__":
         "TUS Small":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_small_query_candidate.pkl"),
         "TUS Large":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_large_query_candidate.pkl"),
         "SANTOS Large": os.path.join(ROOT_DIR, "santos/groundtruth/real_tablesUnionBenchmark.pickle"),
-        "Paper GT":     os.path.join(GT_DIR, "csv_pair_matrix_direct_label.npz"),
-        "Model GT":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.npz"),
-        "Dataset GT":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.npz"),
-        "All GT":     os.path.join(GT_DIR, "csv_pair_union_direct_processed.npz"),
+        "Paper Links":     os.path.join(GT_DIR, "csv_pair_matrix_direct_label.npz"),
+        "Model Links":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.npz"),
+        "Dataset Links":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.npz"),
+        "All Links":     os.path.join(GT_DIR, "csv_pair_union_direct_processed.npz"),
+        # "TUS Others":    os.path.join(ROOT_DIR, "santos/groundtruth/tusUnionBenchmark.pickle"),
+        # "TUS Santos":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_query_candidate.pkl"),
     }
 
     lengths = load_lengths(PATHS)
@@ -205,4 +209,4 @@ if __name__ == "__main__":
     # plot_histogram(lengths, "GT Length (All Sources)", "gt_all")
     #plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
     #plot_log_boxplot(lengths, PALETTE, "Log-scale GT link count distribution across benchmarks", "gt_boxplot")
-    plot_violin(lengths, PALETTE, "Log-scale GT links count distribution across benchmarks", "gt_violin")
+    plot_violin(lengths, PALETTE, "Log-scale links count distribution across benchmarks", "gt_violin")
