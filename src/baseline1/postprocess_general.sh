@@ -41,3 +41,9 @@ python src/baseline1/postprocess_general.py \
   --key_types _s \
   --value_types "" _s _t \
   --output data/baseline/table_neighbors_mixed_key_str.json
+
+python src/baseline1/postprocess_general.py \
+  --input data/baseline/table_neighbors_mixed.json \
+  --key_types _t \
+  --value_types "" _s _t \
+  --output data/baseline/table_neighbors_mixed_key_tr.json

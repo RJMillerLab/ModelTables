@@ -8,6 +8,7 @@ json_files=(
   data/baseline/table_neighbors_ori_str_key_str.json
   data/baseline/table_neighbors_mixed_key_ori.json
   data/baseline/table_neighbors_mixed_key_str.json
+  data/baseline/table_neighbors_mixed_key_tr.json
 )
 
 for json in "${json_files[@]}"; do
