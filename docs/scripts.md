@@ -317,6 +317,8 @@ bash src/baseline1/build_aug_faiss.sh
 bash src/baseline1/augment_search.sh
 # step5: postprocess: split into ori / tr / str json
 bash src/baseline1/postprocess_general.sh
+# step6: postprocess: all files back to ori csv name
+bash src/baseline1/standardize_filenames.sh
 # compute metrics under starmie
 bash scripts/step3_processmetrics_all.sh <index> # run baseline metrics computation
 ```
