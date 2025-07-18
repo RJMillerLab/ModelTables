@@ -87,7 +87,7 @@ def build_table_model_title_maps():
                     table_to_models[os.path.basename(tbl)].add(mid)
     return table_to_models, model_to_titles
 
-def generate_md_report(json_path, include_raw, include_valid, output_file=None, query_table=None, start_idx=0, end_idx=10):
+def generate_md_report(json_path, include_raw, include_valid, output_file=None, query_table=None, start_idx=0, end_idx=10, show_model_titles=True):
     if not output_file:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         output_file = f"table_report_{timestamp}.md"
@@ -117,19 +117,20 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None, 
             report.append(f"**Loading failure: {str(e)}**")
         
         # Query Table Titles
-        query_key = os.path.basename(query_file)
-        models = table_to_models.get(query_key, [])
-        if models:
-            report.append("\n**Query Table Model → Titles**")
-            for m in sorted(models):
-                titles = model_to_titles.get(m, {"raw": [], "valid": []})
-                report.append(f"- **{m}**:")
-                if include_raw:
-                    raw_titles = titles.get("raw", [])
-                    report.append(f"    - Raw Titles: {raw_titles}")
-                if include_valid:
-                    valid_titles = titles.get("valid", [])
-                    report.append(f"    - Valid Titles: {valid_titles}")
+        if show_model_titles:
+            query_key = os.path.basename(query_file)
+            models = table_to_models.get(query_key, [])
+            if models:
+                report.append("\n**Query Table Model → Titles**")
+                for m in sorted(models):
+                    titles = model_to_titles.get(m, {"raw": [], "valid": []})
+                    report.append(f"- **{m}**:")
+                    if include_raw:
+                        raw_titles = titles.get("raw", [])
+                        report.append(f"    - Raw Titles: {raw_titles}")
+                    if include_valid:
+                        valid_titles = titles.get("valid", [])
+                        report.append(f"    - Valid Titles: {valid_titles}")
         
         report.append("\n## Retrieved Tables\n")
         for idx, file in enumerate(retrieved_files, 1):
@@ -172,7 +173,8 @@ if __name__ == "__main__":
     parser.add_argument("--query_table", type=str, default=None, help="Specify a single query table to output.")
     parser.add_argument("--start_idx", type=int, default=0, help="Start index for query tables (inclusive).")
     parser.add_argument("--end_idx", type=int, default=10, help="End index for query tables (exclusive).")
+    parser.add_argument("--show_model_titles", action="store_true", help="Show model titles in the report.")
     include_valid = True
     include_raw = False
     args = parser.parse_args()
-    generate_md_report(args.json_path, include_raw, include_valid, query_table=args.query_table, start_idx=args.start_idx, end_idx=args.end_idx)
+    generate_md_report(args.json_path, include_raw, include_valid, query_table=args.query_table, start_idx=args.start_idx, end_idx=args.end_idx, show_model_titles=args.show_model_titles)

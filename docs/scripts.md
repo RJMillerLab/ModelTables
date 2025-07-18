@@ -345,6 +345,14 @@ Tools for analyzing the retrieval results and ground truth.
 # Get top-10 results from step3_search_hnsw.
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
 
+# first get csvs by modelId
+python -m src.data_analysis.get_csvs_by_model --model google-bert/bert-base-uncased
+# then gen markdown
+python -m src.data_analysis.report_generation \
+       --json_path data/baseline/baseline1_dense.json \
+       --query_table 1810.04805_table4.csv
+# --show_model_titles
+
 # Check if a specific CSV pair is related in the ground truth.
 python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1.csv --csv2 096d51652d_table1.csv
 
