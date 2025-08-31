@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-07
-Last Modified: 2025-04-22
+Last Modified: 2025-08-30
 Description: Plot benchmark results for number of tables, columns, and average rows per table.
 """
 
@@ -27,24 +27,9 @@ RESOURCE_LABELS = {
     'llm': 'S2ORC'
 }
 
-# Benchmark data (WDC removed)
-benchmark_data = [
-    ["SANTOS Small", 550, 6322, 6921, 0.45],
-    ["TUS Small", 1530, 14810, 4466, 1.00],
-    ["TUS Large", 5043, 54923, 1915, 1.50],
-    ["SANTOS Large", 11090, 123477, 7675, 11.00],
-    ["WDC", 50000000, 250000000, 14, 500.00]
-]
+# Define benchmark names that should be treated as baseline (not scilake)
+BASELINE_BENCHMARKS = ["SANTOS Small", "TUS Small", "TUS Large", "SANTOS Large"]
 
-BENCHMARK_NAMES = [x[0] for x in benchmark_data]
-
-'''def annotate_bars(ax, fontsize=16):
-    for p in ax.patches:
-        height = p.get_height()
-        if height > 0:
-            ax.annotate(f'{int(height)}',
-                        (p.get_x() + p.get_width() / 2, height*0.9),
-                        ha='center', va='bottom', fontsize=fontsize, rotation=0)'''
 def annotate_bars(ax, fontsize=16):
     for p in ax.patches:
         height = p.get_height()
@@ -57,11 +42,12 @@ def annotate_bars(ax, fontsize=16):
                 xytext=(0, 1), textcoords='offset points'
             )
 
-def plot_metrics_grid(df): 
+def plot_metrics_grid(df, include_wdc=True): 
     from matplotlib.patches import Patch
     import matplotlib.pyplot as plt
 
     metrics = ["# Tables", "Avg # Cols", "Avg # Rows"]
+    # Extended palette to support up to 5 baseline benchmarks (including WDC)
     palette_baseline = ["#8b2e2e", "#b74a3c", "#d96e44", "#f29e4c", "#FFBE5F"]
     palette_resource = ["#486f90", "#4e8094", "#50a89d", "#a5d2bc"]
 
@@ -78,29 +64,76 @@ def plot_metrics_grid(df):
         'Valid-title': "-valid-dedup"
     }
 
+    # Define baseline benchmarks locally to ensure WDC is included
+    local_baseline_benchmarks = ["SANTOS Small", "TUS Small", "TUS Large", "SANTOS Large", "WDC"]
+    
+    # Filter WDC if not included
+    if not include_wdc:
+        local_baseline_benchmarks = [b for b in local_baseline_benchmarks if b != "WDC"]
+        print(f"⚠️ WDC excluded from plotting (include_wdc={include_wdc})")
+    
+    # Dynamically identify baseline benchmarks from the data
+    baseline_mask = df['Benchmark'].isin(local_baseline_benchmarks)
+    baseline_df = df[baseline_mask]
+    scilake_df = df[~baseline_mask]
+    
+    print(f"Found {len(baseline_df)} baseline benchmarks: {baseline_df['Benchmark'].tolist()}")
+    print(f"Found {len(scilake_df)} scilake entries")
+    
+    # Check if WDC is present
+    wdc_present = 'WDC' in baseline_df['Benchmark'].values
+    if wdc_present:
+        print("✅ WDC data found and included in baseline benchmarks")
+    else:
+        if include_wdc:
+            print("⚠️ WDC data not found in the dataset (will be skipped)")
+        else:
+            print("✅ WDC data excluded as requested")
+        
+    # Debug: Show the classification process
+    print(f"\nDebug - Classification process:")
+    print(f"Local baseline benchmarks: {local_baseline_benchmarks}")
+    print(f"DataFrame Benchmark values: {df['Benchmark'].tolist()}")
+    print(f"Baseline mask result:")
+    for i, (idx, row) in enumerate(df.iterrows()):
+        is_baseline = row['Benchmark'] in local_baseline_benchmarks
+        print(f"  Row {i}: {row['Benchmark']} -> {'Baseline' if is_baseline else 'Scilake'}")
+        
+    # Verify the classification is correct
+    print(f"\nBaseline benchmarks verification:")
+    for name in local_baseline_benchmarks:
+        if name in df['Benchmark'].values:
+            print(f"  ✅ {name}: Found in baseline")
+        else:
+            print(f"  ❌ {name}: Not found")
+
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True, sharey=False, constrained_layout=True)
     fig.align_ylabels(axes)
-    fig.suptitle("Log-scale statistic across different benchmarks", fontsize=22)  ########
+    fig.suptitle("Log-scale statistic across different benchmarks", fontsize=22)
 
     for ax, metric in zip(axes, metrics):
         heights = []
         colors = []
         positions = []
-        for i, val in enumerate(df.iloc[:5][metric]):
+        
+        # Plot baseline benchmarks
+        for i, (_, row) in enumerate(baseline_df.iterrows()):
             positions.append(i * bar_width)
-            heights.append(val)
-            colors.append(palette_baseline[i])
+            heights.append(row[metric])
+            colors.append(palette_baseline[i % len(palette_baseline)])
+        
+        # Plot scilake data
         for ci, cluster in enumerate(clusters[1:], start=1):
             for ri, resource in enumerate(resources):
                 suffix = cluster_key_map[cluster]
                 idx = f"scilake-{resource}{suffix}"
-                val = df[df['Benchmark'] == idx][metric].values
+                val = scilake_df[scilake_df['Benchmark'] == idx][metric].values
                 if len(val):
                     positions.append(ci * group_width + ri * bar_width)
                     heights.append(val[0])
                     colors.append(palette_resource[ri])
 
-        xtick_positions = [0 + (4 - 1) * bar_width / 2] + [
+        xtick_positions = [len(baseline_df) * bar_width / 2 - bar_width/2] + [
             i * group_width + (len(resources) - 1) * bar_width / 2 for i in range(1, len(clusters))
         ]
         xtick_labels = clusters
@@ -113,9 +146,10 @@ def plot_metrics_grid(df):
     axes[-1].set_xticks(xtick_positions)
     axes[-1].set_xticklabels(xtick_labels, rotation=0, fontsize=17)
 
+    # Create legends based on actual data
     handles_baseline = [
-        Patch(facecolor=palette_baseline[i], label=BENCHMARK_NAMES[i])
-        for i in range(len(BENCHMARK_NAMES))
+        Patch(facecolor=palette_baseline[i % len(palette_baseline)], label=name)
+        for i, name in enumerate(baseline_df['Benchmark'])
     ]
     handles_resource = [
         Patch(facecolor=palette_resource[i], label=RESOURCE_LABELS[res])
@@ -127,7 +161,7 @@ def plot_metrics_grid(df):
         handles_baseline,
         [h.get_label() for h in handles_baseline],
         loc="lower center", bbox_to_anchor=(0.5, -0.06),
-        ncol=5,
+        ncol=len(baseline_df),
         fontsize=13,
     )
     fig.add_artist(legend1)
@@ -140,17 +174,60 @@ def plot_metrics_grid(df):
     )
 
     plt.savefig(os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.pdf"), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.png"), dpi=300, bbox_inches='tight')
     plt.close()
 
 
 if __name__ == "__main__":
     results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
     results_df = pd.read_parquet(results_path)
+    
     # Calculate average columns
     results_df["Avg # Cols"] = results_df["# Cols"] / results_df["# Tables"]
-    # remove rows with WDC
-    #results_df = results_df[~results_df["Benchmark"].str.contains("WDC")]
-    #results_df.to_parquet(results_path, index=False)
-    print(results_df)
-    plot_metrics_grid(results_df)
-    print(f"Saved figure to {OUTPUT_DIR}/benchmark_metrics_vertical.pdf")
+    
+    print("DataFrame info:")
+    print(f"Shape: {results_df.shape}")
+    print(f"Columns: {list(results_df.columns)}")
+    
+    # Use the same classification logic as plot_metrics_grid
+    baseline_mask = results_df['Benchmark'].isin(BASELINE_BENCHMARKS)
+    baseline_df = results_df[baseline_mask]
+    scilake_df = results_df[~baseline_mask]
+    
+    print("\nBaseline benchmarks found:")
+    print(baseline_df[['Benchmark', '# Tables', '# Cols', 'Avg # Rows']])
+    
+    print("\nScilake entries found:")
+    print(scilake_df[['Benchmark', '# Tables', '# Cols', 'Avg # Rows']])
+    
+    # Check for WDC specifically
+    wdc_mask = results_df['Benchmark'] == 'WDC'
+    if wdc_mask.any():
+        print("\n✅ WDC data found:")
+        print(results_df[wdc_mask][['Benchmark', '# Tables', '# Cols', 'Avg # Rows']])
+    else:
+        print("\n⚠️ WDC data not found in the dataset")
+        print("If you want to include WDC, you may need to:")
+        print("1. Run src.data_analysis.qc_stats to regenerate the data with WDC")
+        print("2. Or manually add WDC data to the parquet file")
+    
+    # Control whether to include WDC in the plot
+    include_wdc_in_plot = False  # 你可以在这里控制：True=包含WDC, False=不包含WDC
+    
+    print(f"\n🎨 Plotting configuration:")
+    print(f"Include WDC in plot: {include_wdc_in_plot}")
+    
+    if include_wdc_in_plot:
+        print("📊 Generating plot WITH WDC data")
+    else:
+        print("📊 Generating plot WITHOUT WDC data (WDC will be excluded)")
+    
+    plot_metrics_grid(results_df, include_wdc=include_wdc_in_plot)
+    
+    # Generate filename based on WDC inclusion
+    if include_wdc_in_plot:
+        output_filename = "benchmark_metrics_vertical_with_wdc.pdf"
+    else:
+        output_filename = "benchmark_metrics_vertical_no_wdc.pdf"
+    
+    print(f"Saved figure to {OUTPUT_DIR}/{output_filename}")
