@@ -8,6 +8,7 @@ This step extracts key metadata from model cards and associated links.
 ```bash
 # Split readme and tags, parse URLs, parse BibTeX entries.
 # Output: ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
+python -m src.data_preprocess.load_raw_to_db sqlite/duckdb # save raw to DuckDB
 python -m src.data_preprocess.step1
 
 # Download GitHub READMEs and HTMLs from extracted URLs.
@@ -401,4 +402,12 @@ bash src/data_symlink/ln_scilake_final.sh
 # in starmie, get tmp/top_tables.csv
 # in CitationLake, query the modelIds for each table
 python batch_find_modelids.py
+
+# test sql query
+# foundamental query
+duckdb -c ".read check_related_simple.sql" -c "SELECT * FROM csv_models WHERE csv_name = 'your_file.csv'"
+# complete query (with titles)
+duckdb -c ".read check_related_complete.sql" -c "SELECT * FROM csv_models_with_titles WHERE csv_name = 'your_file.csv'"
+# statistic query
+duckdb -c ".read check_related_complete.sql" -c "SELECT csv_name, COUNT(*) as model_count FROM csv_models_with_titles GROUP BY csv_name ORDER BY model_count DESC LIMIT 10"
 ```
