@@ -362,7 +362,9 @@ python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1
 python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json --gt /u1/z6dong/Repo/ModelLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
 
 # Check related models for a given CSV.
-python -m src.data_analysis.check_related --csv 201646309_table4.csv > logs/check_related_csv.log
+# in starmie, get tmp/top_tables.csv
+# in CitationLake, query the modelIds for each table
+python src/data_analysis/batch_find_modelids.py -i tmp/top_tables.txt -o tmp/top_tables_with_modelids.txt
 ```
 
 ### Additional Statistics Analysis
@@ -399,10 +401,6 @@ bash src/data_symlink/ln_scilake_final.sh
 
 
 ```bash
-# in starmie, get tmp/top_tables.csv
-# in CitationLake, query the modelIds for each table
-python batch_find_modelids.py
-
 # test sql query
 # foundamental query
 duckdb -c ".read check_related_simple.sql" -c "SELECT * FROM csv_models WHERE csv_name = 'your_file.csv'"
