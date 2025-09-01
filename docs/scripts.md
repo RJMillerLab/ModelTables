@@ -396,3 +396,9 @@ bash src/data_symlink/ln_scilake_large.sh # too slow
 bash src/data_symlink/ln_scilake_final.sh
 ```
 
+
+```bash
+# in starmie, get tmp/top_tables.csv
+# in CitationLake, query the modelIds for each table
+python batch_find_modelids.py
+```
