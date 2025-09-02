@@ -346,9 +346,6 @@ Tools for analyzing the retrieval results and ground truth.
 ```bash
 # Get top-10 results from step3_search_hnsw.
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
-
-# first get csvs by modelId
-python -m src.data_analysis.get_csvs_by_model --model google-bert/bert-base-uncased
 # then gen markdown
 python -m src.data_analysis.report_generation \
        --json_path data/baseline/baseline1_dense.json \
@@ -361,10 +358,12 @@ python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1
 # Count unique CSVs in retrieval results.
 python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json --gt /u1/z6dong/Repo/ModelLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
 
-# Check related models for a given CSV.
+# input csv, get modelIds
 # in starmie, get tmp/top_tables.csv
 # in CitationLake, query the modelIds for each table
 python src/data_analysis/batch_find_modelids.py -i tmp/top_tables.txt -o tmp/top_tables_with_modelids.txt
+# input modelId, get csvs
+python -m src.data_analysis.get_csvs_by_model --model "google-bert/bert-base-uncased"
 ```
 
 ### Additional Statistics Analysis
@@ -372,8 +371,8 @@ python src/data_analysis/batch_find_modelids.py -i tmp/top_tables.txt -o tmp/top
 Scripts for generating further insights into the dataset.
 
 ```bash
-python -m src.data_preprocess.step1_analysis # get analysis on proportion of different links
-python -m src.data_analysis.query_compare_API_local # compare the query results among local and API from s2orc
+python -m src.data_preprocess.step1_analysis # get analysis on proportion of different links (sql)
+python -m src.data_preprocess.query_compare_API_local # compare the query results among local and API from s2orc
 TODO: add statistics analysis from dataset_processed.ipynb
 ```
 
@@ -401,11 +400,6 @@ bash src/data_symlink/ln_scilake_final.sh
 
 
 ```bash
-# test sql query
-# foundamental query
-duckdb -c ".read check_related_simple.sql" -c "SELECT * FROM csv_models WHERE csv_name = 'your_file.csv'"
-# complete query (with titles)
-duckdb -c ".read check_related_complete.sql" -c "SELECT * FROM csv_models_with_titles WHERE csv_name = 'your_file.csv'"
-# statistic query
-duckdb -c ".read check_related_complete.sql" -c "SELECT csv_name, COUNT(*) as model_count FROM csv_models_with_titles GROUP BY csv_name ORDER BY model_count DESC LIMIT 10"
+python card_statistics.py # get statistics of model cards
+python hf_models_analysis.py # get statistics of models in Hugging Face
 ```
