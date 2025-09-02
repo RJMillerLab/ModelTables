@@ -21,7 +21,7 @@ find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -n
 # Query specific GitHub URL content (example)
 # Input: local path to a downloaded README
 # Output: URL content
-python -m src.data_preprocess.step1_query_giturl load --query data/downloaded_github_readmes/7166b2cb378b3740c3b212bc0657dd11.md
+python -m src.data_preprocess.step1_query_giturl load --query "data/downloaded_github_readmes/0a0c3d247213c087eb2472c3fe387292.md" # sql
 ```
 
 ### 2\. Download and Build Database for Faster Querying
