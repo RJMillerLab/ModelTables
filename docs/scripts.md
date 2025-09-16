@@ -74,7 +74,7 @@ python -m src.data_preprocess.step2_gitcard_tab
 # Input: data/downloaded_github_readmes/
 # Output: data/downloaded_github_readmes_processed/
 python -m src.data_preprocess.step2_md2text
-
+py
 # Fetch titles from BibTeX entries and PDF URLs using Semantic Scholar.
 # Input: modelcard_step1.parquet, github_readme_cache.parquet, github_readmes_processed/, PDF/GitHub URLs
 # Output: modelcard_all_title_list.parquet, github_readme_cache_update.parquet, github_extraction_cache.json, all_links_with_category.csv
@@ -361,7 +361,7 @@ python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/s
 # input csv, get modelIds
 # in starmie, get tmp/top_tables.csv
 # in CitationLake, query the modelIds for each table
-python src/data_analysis/batch_find_modelids.py -i tmp/top_tables.txt -o tmp/top_tables_with_modelids.txt
+python batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keywords.csv
 # input modelId, get csvs
 python -m src.data_analysis.get_csvs_by_model --model "google-bert/bert-base-uncased"
 ```
@@ -402,4 +402,50 @@ bash src/data_symlink/ln_scilake_final.sh
 ```bash
 python card_statistics.py # get statistics of model cards
 python hf_models_analysis.py # get statistics of models in Hugging Face
+```
+
+
+Add some experiments after rebuttal:
+```bash
+# pipeline-A
+python src/modelsearch/pipeline_mc/build_corpus.py \
+       --field card \
+       --output output/baseline_mc/corpus.jsonl
+# --field choices: card / card_readme
+python -m src.modelsearch.pipeline_mc.encode_dense \
+       --jsonl output/baseline_mc/corpus.jsonl \
+       --output output/baseline_mc/embeddings.npy \
+       --model sentence-transformers/all-mpnet-base-v2 \
+       --batch-size 64 --device cuda
+python src/modelsearch/pipeline_mc/build_faiss.py \
+       --emb output/baseline_mc/embeddings.npy \
+       --output output/baseline_mc/faiss.index \
+       --nlist 100
+python src/modelsearch/pipeline_mc/sparse_search.py \
+       --index output/baseline_mc/bm25_index \
+       --topics data/queries_mc.jsonl \
+       --output output/baseline_mc/run.bm25.txt
+python src/modelsearch/pipeline_mc/dense_search.py \
+       --faiss output/baseline_mc/faiss.index \
+       --query-jsonl data/queries_mc.jsonl \
+       --query-emb output/baseline_mc/query_emb.npy \
+       --output output/baseline_mc/run.dense.txt
+python src/modelsearch/pipeline_mc/hybrid_search.py \
+       --sparse output/baseline_mc/run.bm25.txt \
+       --dense  output/baseline_mc/run.dense.txt \
+       --alpha 0.5 \
+       --output output/baseline_mc/run.hybrid.txt
+```
+
+```bash
+# 1. 生成 table 语料
+python src/modelsearch/pipeline_table2mc/build_table_corpus.py
+
+# 2. 编码
+python src/modelsearch/pipeline_table2mc/encode_dense.py ...
+
+# 3. 构建 FAISS
+python src/modelsearch/pipeline_table2mc/build_faiss.py ...
+
+# 4-6 同理：sparse_search.py / dense_search.py / hybrid_search.py
 ```
