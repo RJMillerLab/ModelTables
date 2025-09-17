@@ -746,7 +746,7 @@ def main():
         'downloaded_path': list(GITHUB_PATH_CACHE.values())
     })
     new_mapping_path = os.path.join(config.get('base_path'), "processed", "github_readme_cache_update.parquet")
-    new_mapping_df.to_parquet(new_mapping_path, index=False)
+    new_mapping_df.to_parquet(new_mapping_path, compression="zstd", engine="pyarrow", index=False)
     print(f"Saved updated GitHub cache to {new_mapping_path}")
 
     print("Step 4D: other => HTML or PDF partial fetch (Parallel)")

@@ -105,7 +105,7 @@ def main():
     print("Saving markdown extraction results to CSV files...")
     save_markdown_to_csv(df_readme, key="github_extracted_markdown_table", output_folder="github_markdown_csvs", new_key="github_csv_path")
     output_parquet = os.path.join(base_path, "step_add_github.parquet")
-    df_readme.to_parquet(output_parquet, index=False)
+    df_readme.to_parquet(output_parquet, compression="zstd", engine="pyarrow", index=False)
     print("Final data saved as Parquet file:", output_parquet)
 
 if __name__ == "__main__":

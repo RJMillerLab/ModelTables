@@ -58,7 +58,7 @@ def main():
     df_updated = update_llm_responses_in_df(df, llm_responses)
     print("Updated the 'llm_response_raw' column based on log file.")  ########
 
-    df_updated.to_parquet(updated_csv_path, index=False)
+    df_updated.to_parquet(updated_csv_path, compression="zstd", engine="pyarrow", index=False)
     print(f"Saved updated CSV to {updated_csv_path}.")  ########
 
 if __name__ == "__main__":

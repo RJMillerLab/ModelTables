@@ -546,7 +546,7 @@ def main():
         df[col] = new_cols[col]
     print('add new cols:', new_cols.keys())
     
-    df.to_parquet(OUTPUT_PARQUET, index=False)
+    df.to_parquet(OUTPUT_PARQUET, compression='zstd', engine='pyarrow', index=False)
     print(f"Updated parquet saved as {OUTPUT_PARQUET}")
     print(f"Time taken: {time.time() - time_start} seconds")
 

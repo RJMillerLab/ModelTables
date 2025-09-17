@@ -274,7 +274,7 @@ if __name__ == "__main__":
         )
     )
     final_merged_df = pd.concat([final_merged_df, cit_new_cols, ref_new_cols], axis=1)
-    final_merged_df.to_parquet(OUTPUT_FILE)
+    final_merged_df.to_parquet(OUTPUT_FILE, compression='zstd', engine='pyarrow', index=False)
     
     # Compute and print the intents counter statistics
     intents_counter = count_intents(final_merged_df, col_name="original_response_references")

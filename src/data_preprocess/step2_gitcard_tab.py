@@ -199,7 +199,7 @@ def main():
     df_unique = df_unique[df_unique['readme_hash'].notnull()]
     print(f"...Found {len(df_unique)} unique readme content out of {len(df_merged)} rows.")
     output_file = os.path.join(processed_base_path, f"{data_type}_step2.parquet")
-    df_merged.to_parquet(output_file, index=False)
+    df_merged.to_parquet(output_file, compression='zstd', engine='pyarrow', index=False)
     print(f"✅ Results saved to: {output_file}")
 
     # 3) Extract markdown tables for each *unique* readme

@@ -97,7 +97,7 @@ def main():
     df_tex = df_tex[df_tex['local_path'].notnull()].copy()
     print("Extracting tables from .tex files in parallel...")
     df_tex = parallel_process_tex_entries(df_tex)
-    df_tex.to_parquet(os.path.join(base_path, "step_tex_table.parquet"), index=False)
+    df_tex.to_parquet(os.path.join(base_path, "step_tex_table.parquet"), compression="zstd", engine="pyarrow", index=False)
     print("Final data saved as Parquet:", output_parquet)
 
 if __name__ == "__main__":

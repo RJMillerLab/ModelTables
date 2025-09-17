@@ -100,7 +100,7 @@ def update_titles_to_paper_ids(new_titles, sleep_time=1, cache_file=TITLES_CACHE
                         print(f"✅ For '{query_title}': paperId={paperId}, corpusId={corpusId}, retrieved_title='{retrieved_title}'")
                         # Incremental checkpoint after each successful query
                         df_cache = pd.concat([df_cache, pd.DataFrame([new_row])], ignore_index=True)
-                        df_cache.to_parquet(cache_file, index=False)
+                        df_cache.to_parquet(cache_file, compression="zstd", engine="pyarrow", index=False)
                     else:
                         print(f"⚠️ No paperId found for title: {query_title}")
                         failure_count += 1  ######## Increment failure count if no paperId
@@ -114,7 +114,7 @@ def update_titles_to_paper_ids(new_titles, sleep_time=1, cache_file=TITLES_CACHE
         """if new_rows:
             df_new = pd.DataFrame(new_rows)
             df_cache = pd.concat([df_cache, df_new], ignore_index=True)
-            df_cache.to_parquet(cache_file, index=False)
+            df_cache.to_parquet(cache_file, compression="zstd", engine="pyarrow", index=False)
             print(f"💾 Updated title mapping saved to {cache_file} (total {len(df_cache)} records)")"""
     else:
         print("🔄 All titles are already in cache.")
@@ -177,7 +177,7 @@ def batch_get_details_for_ids(mapping_df, batch_size=500, sleep_time=1, timeout=
     # Keep the following columns:
     cols = ["query_title", "retrieved_title", "paperId", "corpusId", "year", "venue", "original_response", "parsed_response"]
     merge_df = merge_df[cols]
-    merge_df.to_parquet(cache_file, index=False)
+    merge_df.to_parquet(cache_file, compression="zstd", engine="pyarrow", index=False)
     print(f"💾 Batch results saved to {cache_file}")
     return merge_df
 
@@ -314,7 +314,7 @@ def update_all_single_citations(paper_ids, sleep_time=1, timeout=60, force_refre
         rec = get_single_citations_row(pid, sleep_time=sleep_time, timeout=timeout)
         if rec:
             df_cache = pd.concat([df_cache, pd.DataFrame([rec])], ignore_index=True)
-            df_cache.to_parquet(cache_file, index=False)
+            df_cache.to_parquet(cache_file, compression="zstd", engine="pyarrow", index=False)
             results[pid] = rec
     return results
 
@@ -342,7 +342,7 @@ def update_all_single_references(paper_ids, sleep_time=1, timeout=60, force_refr
         rec = get_single_references_row(pid, sleep_time=sleep_time, timeout=timeout)
         if rec:
             df_cache = pd.concat([df_cache, pd.DataFrame([rec])], ignore_index=True)
-            df_cache.to_parquet(cache_file, index=False)
+            df_cache.to_parquet(cache_file, compression="zstd", engine="pyarrow", index=False)
             results[pid] = rec
     return results
 
@@ -351,7 +351,7 @@ def merge_cit_ref(df_titles, df_citations, df_references, output_file, MERGE_KEY
     # Merge titles with citations and references using left join on paperId
     df_merged = pd.merge(df_titles, df_citations, on=MERGE_KEY, how="left")
     df_merged = pd.merge(df_merged, df_references, on=MERGE_KEY, how="left")
-    df_merged.to_parquet(output_file, index=False)
+    df_merged.to_parquet(output_file, compression="zstd", engine="pyarrow", index=False)
     print(f"💾 Merged results saved to {output_file}")
     return df_merged
 

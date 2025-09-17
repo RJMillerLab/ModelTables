@@ -135,5 +135,5 @@ if __name__ == "__main__":
         # If there is nothing new, just keep the old
         df_final = df_existing
     ######## # 4) Save final results back to the parquet file
-    df_final.to_parquet(parquet_file, index=False)
+    df_final.to_parquet(parquet_file, compression="zstd", engine="pyarrow", index=False)
     print(f"Done! Updated {parquet_file} with {len(df_final)} total records.")

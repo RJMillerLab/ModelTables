@@ -449,3 +449,7 @@ python src/modelsearch/pipeline_table2mc/build_faiss.py ...
 
 # 4-6 同理：sparse_search.py / dense_search.py / hybrid_search.py
 ```
+
+```bash
+python tmp_list_parquet_schemas.py > logs/parquet_schema.log    
+```

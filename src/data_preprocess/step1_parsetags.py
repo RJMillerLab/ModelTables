@@ -123,7 +123,7 @@ def main():
     print("⚠️Step 3: Saving results to Parquet file...")
     start_time = time.time()
     output_file = os.path.join(processed_base_path, f"{data_type}_step1_tags.parquet")
-    df.to_parquet(output_file)
+    df.to_parquet(output_file, compression="zstd", engine="pyarrow", index=False)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Results saved to:", output_file)
 

@@ -431,11 +431,11 @@ def main():
         
         # 6) Merge results back into df_final
         df_final["llm_response_raw"] = df_extracted["llm_response_raw"]
-        #df_final.to_parquet(FINAL_OUTPUT_CSV, index=False)
+        #df_final.to_parquet(FINAL_OUTPUT_CSV, compression="zstd", engine="pyarrow", index=False)
         df_final = df_final.sort_values('orig_index')
         df_final.reset_index(drop=True, inplace=True) 
         df_final.drop(columns=['orig_index'], inplace=True)
-        df_final.to_parquet(FINAL_OUTPUT_CSV, index=False)
+        df_final.to_parquet(FINAL_OUTPUT_CSV, compression="zstd", engine="pyarrow", index=False)
         print(f"✅ LLM results saved to {FINAL_OUTPUT_CSV}")
     else:
         print("No items require LLM batch processing. Skipping batch step.")

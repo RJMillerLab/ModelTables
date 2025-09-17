@@ -178,7 +178,7 @@ def merge_table_list_to_df2():
     side_df = populate_hugging_table_list(side_df, os.path.dirname(SIDE_PATH))
     side_df = populate_github_table_list(side_df, os.path.dirname(SIDE_PATH))
     df_final = pd.merge(df2_merged, side_df[['modelId', 'github_table_list', 'hugging_table_list']], on='modelId', how='left')
-    df_final.to_parquet(MERGE_PATH, index=False)
+    df_final.to_parquet(MERGE_PATH, compression='zstd', engine='pyarrow', index=False)
     return df_final
 
 if __name__ == "__main__":
