@@ -284,7 +284,7 @@ def main():
     )
     df['has_title'] = df['all_title_list'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
     df['has_valid_title'] = df['all_title_list_valid'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
-    df.to_parquet(VALID_TITLE_PARQUET, index=False)
+    df.to_parquet(VALID_TITLE_PARQUET, compression='zstd', engine='pyarrow', index=False)
     print(f"Saved valid‑title list to {VALID_TITLE_PARQUET}")
 
     resource_stats = {}
@@ -295,7 +295,7 @@ def main():
 
     results_df = create_combined_results(benchmark_data, resource_stats)
     results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
-    results_df.to_parquet(results_path, index=False)
+    results_df.to_parquet(results_path, compression='zstd', engine='pyarrow', index=False)
     print(f"\nSaved results to {results_path}")
 
 if __name__ == "__main__":

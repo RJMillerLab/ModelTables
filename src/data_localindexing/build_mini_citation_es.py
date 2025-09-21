@@ -431,7 +431,7 @@ def batch_query(es, citations_index, input_file, output_file):
     elapsed = time.time() - start_time
     if results:
         df = pd.DataFrame(results)
-        df.to_parquet(output_file, index=False)
+        df.to_parquet(output_file, compression='zstd', engine='pyarrow', index=False)
         # —— add visualization for the count histogram —— #
         ref_counts = df["cited_papers"].apply(len)
         cit_counts = df["citing_papers"].apply(len)

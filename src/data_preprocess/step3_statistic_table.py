@@ -60,7 +60,7 @@ def main():
     start_time = time.time()
     benchmark_df = get_statistics_table(unique_by_markdown)
     os.makedirs(os.path.join(config.get('base_path'), "statistics"), exist_ok=True)
-    benchmark_df.to_parquet(os.path.join(config.get('base_path'), "statistics", "benchmark_results.parquet"), index=False)
+    benchmark_df.to_parquet(os.path.join(config.get('base_path'), "statistics", "benchmark_results.parquet"), compression='zstd', engine='pyarrow', index=False)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Final time cost: {:.2f} seconds.".format(time.time() - t1))
 

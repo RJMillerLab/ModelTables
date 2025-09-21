@@ -84,7 +84,7 @@ def main():
 
     # Save results to Parquet
     df_results = pd.DataFrame(results)
-    df_results.to_parquet(OUTPUT_PARQUET, index=False)
+    df_results.to_parquet(OUTPUT_PARQUET, compression='zstd', engine='pyarrow', index=False)
     print(f"✅ Data saved to {OUTPUT_PARQUET}")
 
 

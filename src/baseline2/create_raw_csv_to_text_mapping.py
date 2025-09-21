@@ -153,7 +153,7 @@ def main():
     print("\nRecords by source:")
     print(df['source'].value_counts())
     output_path = os.path.join('data', 'processed', 'raw_csv_to_text_mapping.parquet')
-    df.to_parquet(output_path, index=False)
+    df.to_parquet(output_path, compression='zstd', engine='pyarrow', index=False)
     
     df = pd.read_parquet(output_path)
 

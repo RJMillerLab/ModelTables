@@ -400,7 +400,7 @@ df4 = pd.read_parquet("data/processed/modelcard_step2.parquet")
 
 df4.drop(columns=['hugging_table_list', 'hugging_table_list_sym', 'github_table_list', 'github_table_list_sym'], inplace=True)
 
-df4.to_parquet("data/processed/modelcard_step2_modified.parquet")
+df4.to_parquet("data/processed/modelcard_step2_modified.parquet", compression='zstd', engine='pyarrow')
 
 
 

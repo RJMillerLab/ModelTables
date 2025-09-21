@@ -231,7 +231,7 @@ df2_merged['html_table_list_mapped']  = df2_merged['html_table_list_mapped'].app
 df2_merged['llm_table_list_mapped']  = df2_merged['llm_table_list_mapped'].apply(lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else [])
 
 # save df2_merged
-df2_merged.to_parquet(MERGE_PATH, index=False)
+df2_merged.to_parquet(MERGE_PATH, compression='zstd', engine='pyarrow', index=False)
 
 
 # In[ ]:

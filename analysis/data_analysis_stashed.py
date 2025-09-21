@@ -236,7 +236,7 @@ def validate_parsing(df):
 df_split = extract_tags_and_readme_parallel(df, 4)
 inconsistencies_df = validate_parsing(df_split)
 print(len(inconsistencies_df))
-df_split.to_parquet(f"data/{data_type}_step1_data_split_tags_readme.parquet", index=False)
+df_split.to_parquet(f"data/{data_type}_step1_data_split_tags_readme.parquet", compression='zstd', engine='pyarrow', index=False)
 
 
 # In[2]:

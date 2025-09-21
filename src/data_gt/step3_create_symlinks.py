@@ -111,7 +111,7 @@ if __name__ == "__main__":
     df_merged = create_symlink_llm(df_merged, processed_base_path)
 
     # Save the final DataFrame
-    df_merged.to_parquet(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), index=False)
+    df_merged.to_parquet(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), compression='zstd', engine='pyarrow', index=False)
     print(f"Symlinks recreated and saved to data/processed/{data_type}_step4.parquet.")
 
     mapping_path = os.path.join(processed_base_path, "symlink_mapping.pickle")

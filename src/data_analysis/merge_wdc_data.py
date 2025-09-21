@@ -42,7 +42,7 @@ def merge_wdc_data():
     
     # Create backup
     print("💾 Creating backup...")
-    df.to_parquet(backup_path, index=False)
+    df.to_parquet(backup_path, compression='zstd', engine='pyarrow', index=False)
     print(f"✅ Backup saved to: {backup_path}")
     
     # Add WDC data
@@ -66,7 +66,7 @@ def merge_wdc_data():
     
     # Save updated data
     print("💾 Saving updated data...")
-    df_with_wdc.to_parquet(results_path, index=False)
+    df_with_wdc.to_parquet(results_path, compression='zstd', engine='pyarrow', index=False)
     print(f"✅ Updated data saved to: {results_path}")
     
     # Show the merged data

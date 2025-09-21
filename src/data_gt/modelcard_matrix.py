@@ -311,7 +311,7 @@ if __name__ == "__main__":
                     related_model[m].add(target)
                     related_model[target].add(m)
     df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_model.get(m, [])))
-    df.to_parquet("data/processed/modelcard_gt_related_model.parquet")
+    df.to_parquet("data/processed/modelcard_gt_related_model.parquet", compression='zstd', engine='pyarrow')
 
     ########################################################################
     # 5 )  BUILD CSV-LEVEL GT via related_model_list （no self-pair） ########

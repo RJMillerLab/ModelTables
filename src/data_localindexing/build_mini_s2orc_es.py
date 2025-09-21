@@ -306,7 +306,7 @@ def load_parquet_cache(parquet_file):
 def save_parquet_cache(df, parquet_file): 
     """Save the DataFrame to a Parquet file."""
     try:
-        df.to_parquet(parquet_file, index=False)
+        df.to_parquet(parquet_file, compression='zstd', engine='pyarrow', index=False)
     except Exception as e:
         print(f"Error saving Parquet cache: {e}")
 

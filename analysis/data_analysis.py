@@ -309,7 +309,7 @@ def clean_and_save_parquet(df, file_path):
     
     # Save the cleaned DataFrame as a Parquet file
     try:
-        df.to_parquet(file_path, index=False)
+        df.to_parquet(file_path, compression='zstd', engine='pyarrow', index=False)
         print(f"File saved successfully to {file_path}")
     except Exception as e:
         print(f"Error saving Parquet file: {e}")
@@ -632,7 +632,7 @@ for col in df_split_temp.columns:
     if df_split_temp[col].apply(lambda x: isinstance(x, list)).any():
         df_split_temp[col] = df_split_temp[col].apply(lambda x: ", ".join(map(str, x)) if isinstance(x, list) else x)
 
-df_split_temp.to_parquet("data/{data_type}_step2_data_split_tags.parquet", index=False)
+df_split_temp.to_parquet("data/{data_type}_step2_data_split_tags.parquet", compression='zstd', engine='pyarrow', index=False)
 
 
 # In[2]:
@@ -1026,7 +1026,7 @@ print(detected_results)
 # In[49]:
 
 
-df_split_temp.to_parquet("data/{data_type}_step3_markdown_gated.parquet", index=False)
+df_split_temp.to_parquet("data/{data_type}_step3_markdown_gated.parquet", compression='zstd', engine='pyarrow', index=False)
 
 
 # In[1]:

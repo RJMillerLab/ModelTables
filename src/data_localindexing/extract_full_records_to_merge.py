@@ -56,8 +56,8 @@ if __name__ == "__main__":
         return pd.DataFrame(rows)
     df_cit = build_cache(cit_bucket, "citing_papers")
     df_ref = build_cache(ref_bucket, "cited_papers")
-    df_cit.to_parquet(CITATIONS_PQ , index=False)
-    df_ref.to_parquet(REFERENCES_PQ, index=False)
+    df_cit.to_parquet(CITATIONS_PQ , compression='zstd', engine='pyarrow', index=False)
+    df_ref.to_parquet(REFERENCES_PQ, compression='zstd', engine='pyarrow', index=False)
     print("✅  citations rows =", len(df_cit),  "→", CITATIONS_PQ)
     print("✅  references rows =", len(df_ref),  "→", REFERENCES_PQ)
     # ---------- ❺ stub: keep one empty row per whitelist id ----------
