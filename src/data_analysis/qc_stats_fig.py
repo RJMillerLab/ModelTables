@@ -212,7 +212,7 @@ if __name__ == "__main__":
         print("2. Or manually add WDC data to the parquet file")
     
     # Control whether to include WDC in the plot
-    include_wdc_in_plot = False  # 你可以在这里控制：True=包含WDC, False=不包含WDC
+    include_wdc_in_plot = True  # control whether to include WDC in the plot: True=include WDC, False=exclude WDC
     
     print(f"\n🎨 Plotting configuration:")
     print(f"Include WDC in plot: {include_wdc_in_plot}")
@@ -223,11 +223,3 @@ if __name__ == "__main__":
         print("📊 Generating plot WITHOUT WDC data (WDC will be excluded)")
     
     plot_metrics_grid(results_df, include_wdc=include_wdc_in_plot)
-    
-    # Generate filename based on WDC inclusion
-    if include_wdc_in_plot:
-        output_filename = "benchmark_metrics_vertical_with_wdc.pdf"
-    else:
-        output_filename = "benchmark_metrics_vertical_no_wdc.pdf"
-    
-    print(f"Saved figure to {OUTPUT_DIR}/{output_filename}")

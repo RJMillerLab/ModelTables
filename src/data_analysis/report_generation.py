@@ -26,9 +26,6 @@ FILES = {
     "valid_title"  : f"{DATA_DIR}/all_title_list_valid.parquet"
 }
 
-TABLE_SOURCE_PARQUET = os.path.join(BASE_PATH, "data/processed/modelcard_step3_dedup.parquet")
-VALID_TITLE_PARQUET = os.path.join(BASE_PATH, "data/processed/all_title_list_valid.parquet")
-
 def get_file_path(filename):
     hugging_pattern = r'^[0-9a-f]{10}_table\d+\.csv$'
     tables_output_pattern = r'^\d{4}\.\d{5}.*\.csv$'

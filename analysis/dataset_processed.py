@@ -7,8 +7,6 @@
 import pandas as pd
 import os, time
 
-#df1 = pd.read_parquet(os.path.join('./data/processed', "modelcard_ext_title.parquet"))
-#df2 = pd.read_parquet(os.path.join('./data/processed',  "modelcard_step3_arxiv.parquet"))
 df1 = pd.read_parquet("merged_df.parquet")
 df2 = pd.read_parquet("extracted_annotations.parquet")
 df2

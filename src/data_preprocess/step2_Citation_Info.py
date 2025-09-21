@@ -200,6 +200,7 @@ def main():
         df["cited_paper_list"] = df["references_within_dataset"].progress_apply(extract_json_titles)
         df["citing_paper_list"] = df["citations_within_dataset"].progress_apply(extract_json_titles)
     out_path = os.path.join(processed_base_path, f"{data_type}_citation_API.parquet")
+    df.drop(columns=['card_tags', 'downloads'], inplace=True)
     df.to_parquet(out_path, compression="zstd", engine="pyarrow", index=False)
     print(f"✨ Final output saved to: {out_path}")
     print("Total time cost: {:.2f} seconds.".format(time.time() - t1))

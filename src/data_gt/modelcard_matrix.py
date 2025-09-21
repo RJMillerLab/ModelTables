@@ -311,6 +311,7 @@ if __name__ == "__main__":
                     related_model[m].add(target)
                     related_model[target].add(m)
     df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_model.get(m, [])))
+    df.drop(columns=['card_tags', 'card_readme', 'downloads'], inplace=True)
     df.to_parquet("data/processed/modelcard_gt_related_model.parquet", compression='zstd', engine='pyarrow')
 
     ########################################################################

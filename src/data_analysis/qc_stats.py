@@ -284,8 +284,12 @@ def main():
     )
     df['has_title'] = df['all_title_list'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
     df['has_valid_title'] = df['all_title_list_valid'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
-    df.to_parquet(VALID_TITLE_PARQUET, compression='zstd', engine='pyarrow', index=False)
+    
+    # Only save modelId and the 3 new attributes to reduce file size
+    df_optimized = df[['modelId', 'all_title_list', 'all_title_list_valid', 'has_title', 'has_valid_title']].copy()
+    df_optimized.to_parquet(VALID_TITLE_PARQUET, compression='zstd', engine='pyarrow', index=False)
     print(f"Saved valid‑title list to {VALID_TITLE_PARQUET}")
+    del df_optimized
 
     resource_stats = {}
     for resource in RESOURCES:

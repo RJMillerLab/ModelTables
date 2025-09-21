@@ -629,7 +629,7 @@ def main():
     print(f"Loaded {len(GITHUB_PATH_CACHE)} GitHub cache entries.")
 
     print("Step 1: Loading data from parquet (modelcard_step1)...")
-    df = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'card_tags', 'github_link', 'pdf_link'])
+    df = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'github_link', 'pdf_link'])
 
     print("Step 2: Extracting links from columns (pdf_link, github_link)")
     all_links = extract_links_from_columns(df, ["pdf_link", "github_link"])
@@ -877,13 +877,12 @@ def main():
     #df["github_bibtex_tuple"] = df["github_titles"].apply(extract_bibtex_from_github_titles)
     parse_bibtex_entries(df, key="title_github_bibtex", output_key="parsed_bibtex_tuple_list_github", count_key = "successful_parse_count_github")
     print("\n-- Final df --")
-    #pq.write_table(pa.Table.from_pandas(df), os.path.join(processed_base_path, f"{data_type}_ext_title.parquet"))
-    #print(f"Done. Updated DataFrame with pdf_titles/github_titles and bibtex info saved to {out_path}")  
-    df_step1 = load_data(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'parsed_bibtex_tuple_list'])
+    df_step1 = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'parsed_bibtex_tuple_list'])
     df_final = pd.merge(df_step1, df, on="modelId", how="left")
     df_final["all_bibtex_titles"] = df_final.apply(merge_bibtex_titles, axis=1)
     df_final["all_title_list"] = df_final.apply(merge_all_titles, axis=1)
     #df_final.to_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"), compression='zstd', engine='pyarrow')
+    df_final.drop(columns=['card_tags', 'downloads'], inplace=True)
     pq.write_table(pa.Table.from_pandas(df_final), os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
     print("✅ Merged BibTeX columns into 'all_bibtex_titles'")
 

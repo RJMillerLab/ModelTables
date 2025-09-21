@@ -105,7 +105,9 @@ def load_mappings():
     step2_path = os.path.join('data', 'processed', 'modelcard_step2.parquet')
     hugging_map_path = os.path.join('data', 'processed', 'hugging_deduped_mapping.json')
     if os.path.exists(step2_path) and os.path.exists(hugging_map_path):
-        step2 = pd.read_parquet(step2_path, columns=['modelId', 'readme_hash', 'card_readme'])
+        tmp_step1 = pd.read_parquet(os.path.join('data', 'processed', 'modelcard_step1.parquet'), columns=['modelId', 'card_readme'])
+        step2 = pd.read_parquet(step2_path, columns=['modelId', 'readme_hash'])
+        step2 = pd.merge(step2, tmp_step1, on='modelId', how='left')
         with open(hugging_map_path, 'r') as f:
             hugging = json.load(f)
         
