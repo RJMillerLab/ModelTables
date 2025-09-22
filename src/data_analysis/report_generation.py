@@ -22,7 +22,7 @@ BASE_PATH = "/Users/doradong/Repo/CitationLake"
 
 DATA_DIR  = os.path.join(BASE_PATH, "data/processed")
 FILES = {
-    "step3": f"{DATA_DIR}/modelcard_step3_dedup.parquet",    
+    "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup.parquet",    
     "valid_title"  : f"{DATA_DIR}/all_title_list_valid.parquet"
 }
 
@@ -53,7 +53,7 @@ def build_table_model_title_maps():
        - table_to_models: csv filename → set of modelIds
        - model_to_titles: modelId → list of valid titles
     """
-    df_tables = pd.read_parquet(FILES["step3"])
+    df_tables = pd.read_parquet(FILES["step3_dedup"])
     print('df_tables keys: ', df_tables.keys())
     df_titles = pd.read_parquet(FILES["valid_title"], columns=["modelId", "all_title_list", "all_title_list_valid"])
     df_tables = df_tables.merge(df_titles, on="modelId", how="left")

@@ -57,13 +57,13 @@ def load_relationships(rel_key: str):
     print(f"[DEBUG] Loaded score_matrix with shape: {score_matrix.shape}")
     return paper_index, score_matrix
 
-def load_table_source(file_key: str="step3_dedup"):
+def load_table_source():
     """Factory loader for table‑list metadata."""
-    print(f"Loading table source from: {file_key}")
+    print(f"Loading table source from: step3_dedup")
     # load valid_title, and merge by modelId
     df_valid_title = pd.read_parquet(FILES["valid_title"], columns=["modelId", "all_title_list_valid"])
     print(f"[DEBUG] Loaded df_valid_title with shape: {df_valid_title.shape}")
-    df = pd.read_parquet(FILES[file_key], columns=["modelId", "hugging_table_list_dedup", "github_table_list_dedup", "html_table_list_mapped_dedup", "llm_table_list_mapped_dedup"])
+    df = pd.read_parquet(FILES["step3_dedup"], columns=["modelId", "hugging_table_list_dedup", "github_table_list_dedup", "html_table_list_mapped_dedup", "llm_table_list_mapped_dedup"])
     print(f"[DEBUG] Loaded df with shape: {df.shape}")
     df['all_table_list_dedup'] = df[[
         'hugging_table_list_dedup',

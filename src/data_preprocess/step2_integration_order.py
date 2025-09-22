@@ -216,7 +216,9 @@ prompt_template = (
 
 def main():
     # --- Step 1: Load extracted annotations ---
-    df_anno = pd.read_parquet(ANNOTATIONS_PARQUET)
+    df_anno = pd.read_parquet(ANNOTATIONS_PARQUET, columns=['query', 'retrieved_title', 'paperId', 'corpusid', 'paper_identifier', 'rank', 'score', 'filename', 'line_index', 'title', 'raw_json', 'extracted_openaccessurl', 'extracted_tables', 'extracted_tablerefs', 'extracted_figures', 'extracted_figure_captions', 'extracted_figurerefs'])
+    # 'raw_json'
+
     df_anno["norm_title"] = df_anno["retrieved_title"].apply(normalize_title) ########
     df_anno["preproc_title"] = df_anno["retrieved_title"].apply(preprocess_title) ########
     # Expected columns include: retrieved_title, extracted_openaccessurl, extracted_tables, extracted_figures, etc.
@@ -431,7 +433,6 @@ def main():
         
         # 6) Merge results back into df_final
         df_final["llm_response_raw"] = df_extracted["llm_response_raw"]
-        #df_final.to_parquet(FINAL_OUTPUT_CSV, compression="zstd", engine="pyarrow", index=False)
         df_final = df_final.sort_values('orig_index')
         df_final.reset_index(drop=True, inplace=True) 
         df_final.drop(columns=['orig_index'], inplace=True)

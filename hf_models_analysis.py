@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""hf_models_analysis.py – fast statistics using DuckDB from modellake_pro.db and modelcard_step4.parquet.
+"""hf_models_analysis.py – fast statistics using DuckDB from modellake_pro.db and modelcard_step3_dedup.parquet.
 Outputs hf_models_analysis.png plus JSON counts to stdout.
 COMPLETE VALIDATION: No sampling, checks all ~380k models to ensure models with tables have valid modelcards.
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 # -------- paths / config --------
 DB_PATH = "modellake_pro.duckdb"  # DuckDB database with raw_modelcard
-STEP4_PATH = "data/processed/modelcard_step4.parquet"  # Final deduped table data
+STEP3_DEDUP_PATH = "data/processed/modelcard_step3_dedup.parquet"  # Final deduped table data
 
 # -------- duckdb connections --------
 # Connect to the main database for raw_modelcard
@@ -42,10 +42,10 @@ counts["Models w/ Cards"] = q_main("""
     WHERE card IS NOT NULL AND card <> '' AND card <> 'Entry not found'
 """)
 
-# 3) Models with tables (from step4 parquet) - ANY source
+# 3) Models with tables (from step3_dedup parquet) - ANY source
 print("Counting models with tables from any source...")
 counts["Models w/ Any Table"] = q_parquet(f"""
-    SELECT COUNT(*) FROM read_parquet('{STEP4_PATH}')
+    SELECT COUNT(*) FROM read_parquet('{STEP3_DEDUP_PATH}')
     WHERE (hugging_table_list_dedup IS NOT NULL AND array_length(hugging_table_list_dedup) > 0)
        OR (html_table_list_mapped_dedup IS NOT NULL AND array_length(html_table_list_mapped_dedup) > 0)
        OR (llm_table_list_mapped_dedup IS NOT NULL AND array_length(llm_table_list_mapped_dedup) > 0)
@@ -55,7 +55,7 @@ counts["Models w/ Any Table"] = q_parquet(f"""
 # 4) Models with HuggingFace tables specifically
 print("Counting models with HuggingFace tables...")
 counts["Models w/ Hugging Tables"] = q_parquet(f"""
-    SELECT COUNT(*) FROM read_parquet('{STEP4_PATH}')
+    SELECT COUNT(*) FROM read_parquet('{STEP3_DEDUP_PATH}')
     WHERE hugging_table_list_dedup IS NOT NULL AND array_length(hugging_table_list_dedup) > 0
 """)
 
@@ -67,7 +67,7 @@ print("Validating that ALL models with tables have valid modelcards...")
 validation_query = f"""
     WITH models_with_tables AS (
         SELECT DISTINCT modelId
-        FROM read_parquet('{STEP4_PATH}')
+        FROM read_parquet('{STEP3_DEDUP_PATH}')
         WHERE (hugging_table_list_dedup IS NOT NULL AND array_length(hugging_table_list_dedup) > 0)
            OR (html_table_list_mapped_dedup IS NOT NULL AND array_length(html_table_list_mapped_dedup) > 0)
            OR (llm_table_list_mapped_dedup IS NOT NULL AND array_length(llm_table_list_mapped_dedup) > 0)
@@ -171,7 +171,7 @@ table_sources = con_parquet.execute(f"""
         COUNT(CASE WHEN html_table_list_mapped_dedup IS NOT NULL AND array_length(html_table_list_mapped_dedup) > 0 THEN 1 END) as html_source,
         COUNT(CASE WHEN llm_table_list_mapped_dedup IS NOT NULL AND array_length(llm_table_list_mapped_dedup) > 0 THEN 1 END) as llm_source,
         COUNT(CASE WHEN github_table_list_dedup IS NOT NULL AND array_length(github_table_list_dedup) > 0 THEN 1 END) as github_source
-    FROM read_parquet('{STEP4_PATH}')
+    FROM read_parquet('{STEP3_DEDUP_PATH}')
     WHERE (hugging_table_list_dedup IS NOT NULL AND array_length(hugging_table_list_dedup) > 0)
        OR (html_table_list_mapped_dedup IS NOT NULL AND array_length(html_table_list_mapped_dedup) > 0)
        OR (llm_table_list_mapped_dedup IS NOT NULL AND array_length(llm_table_list_mapped_dedup) > 0)

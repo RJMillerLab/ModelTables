@@ -349,7 +349,7 @@ def save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=False):
     # Step 1: prepare plotting matrix
     if is_percentage:
         # Calculate total files per resource from parquet
-        df = pd.read_parquet(INPUT_PARQUET)
+        df = pd.read_parquet(INPUT_PARQUET, columns=['modelId', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped'])
         total_files = {}
         for res, col in {
             "Hugging": "hugging_table_list",
@@ -443,7 +443,7 @@ def save_heatmap_percentage(dup_matrix, unique_counts, output_dir):
 def main():
     time_start = time.time()
     # --- Step 1: get the linked set (some files exist in local but not linked to model) ---
-    df = pd.read_parquet(INPUT_PARQUET)
+    df = pd.read_parquet(INPUT_PARQUET, columns=['modelId', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped'])
     cols = ["hugging_table_list", "github_table_list", "html_table_list_mapped", "llm_table_list_mapped"]
     file_paths = [item['path'] for item in DIRS]
 
@@ -546,7 +546,7 @@ def main():
         df[col] = new_cols[col]
     print('add new cols:', new_cols.keys())
     
-    df.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
+    df.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped'], inplace=True, errors='ignore')
     df.to_parquet(OUTPUT_PARQUET, compression='zstd', engine='pyarrow', index=False)
     print(f"Updated parquet saved as {OUTPUT_PARQUET}")
     print(f"Time taken: {time.time() - time_start} seconds")

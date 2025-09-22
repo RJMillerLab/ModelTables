@@ -223,7 +223,7 @@ def main():
         raise ValueError("Cannot use both --use_gt and --use_inferred")
     
     # Load model card data
-    df = pd.read_parquet("data/processed/modelcard_step3_dedup.parquet")
+    df = pd.read_parquet("data/processed/modelcard_step3_dedup.parquet") #? don't have all_table_list_dedup
     
     # Parse link to get CSV basenames
     csv_basenames = parse_link(args.link, df)

@@ -29,7 +29,7 @@ from joblib import Parallel, delayed
 from matplotlib.patches import Patch
 
 # Configuration
-INPUT_FILE = "data/processed/modelcard_step3_dedup.parquet"
+INPUT_FILE = "data/processed/modelcard_step3_merged.parquet"
 INTEGRATION_FILE = "data/processed/final_integration_with_paths.parquet"
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -275,8 +275,8 @@ def plot_metric(df, metric, filename):
 
 
 def main():
-    df = pd.read_parquet(INPUT_FILE)
-    df_integration = pd.read_parquet(INTEGRATION_FILE)
+    df = pd.read_parquet(INPUT_FILE, columns=['modelId', 'all_title_list'])
+    df_integration = pd.read_parquet(INTEGRATION_FILE, columns=['query'])
 
     valid_titles = set(df_integration['query'].dropna().str.strip())
     df['all_title_list_valid'] = df['all_title_list'].apply(

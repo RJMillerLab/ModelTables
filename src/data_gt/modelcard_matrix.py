@@ -26,6 +26,7 @@ from scipy.sparse import save_npz, coo_matrix
 
 DATA_PATH           = "data/processed/modelcard_step1.parquet" 
 DATA_2_PATH         = "data/processed/modelcard_step3_dedup.parquet"
+DATA_3_PATH         = "data/processed/modelcard_step3_merged.parquet"
 CARD_TAGS_KEY       = "card_tags"
 CARD_README_KEY     = 'card_readme'
 
@@ -81,7 +82,10 @@ def normalize_extracted(link: str):
 
 def load_model_with_valid_table():
     df_full = pd.read_parquet(DATA_PATH, columns=['modelId', CARD_TAGS_KEY, CARD_README_KEY, 'downloads'])
-    df_full_2 = pd.read_parquet(DATA_2_PATH, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup', 'all_title_list'])
+    df_full_2 = pd.read_parquet(DATA_2_PATH, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup']) #, 'all_title_list'
+    # this data 2 path don't have all title list, please load all title list from data/processed/modelcard_step3_merged.parquet, and get modelId and all_title_list, then merge this to df_full_2 please! 
+    df_full_3 = pd.read_parquet(DATA_3_PATH, columns=['modelId', 'all_title_list'])
+    df_full_2 = pd.merge(df_full_2, df_full_3, on='modelId', how='left')
     df_full_2['all_table_list_dedup'] = df_full_2['hugging_table_list_dedup'].apply(list) + df_full_2['github_table_list_dedup'].apply(list) + df_full_2['html_table_list_mapped_dedup'].apply(list) + df_full_2['llm_table_list_mapped_dedup'].apply(list)
     df = pd.merge(df_full, df_full_2[['modelId', 'all_table_list_dedup', 'all_title_list']], on='modelId', how='left')
     mask = (df['all_table_list_dedup'].apply(lambda x: isinstance(x, (list, np.ndarray)) and len(x) > 0) & df['all_title_list'].apply(lambda x: isinstance(x, (list, np.ndarray)) and len(x) > 0))
