@@ -7,7 +7,7 @@ import os, re, time, json, asyncio
 from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
 from src.data_ingestion.bibtex_parser import BibTeXFactory
 from src.data_ingestion.citation_fetcher import search_and_fetch_info
-from src.utils import load_config, load_data, get_statistics_table, clean_title
+from src.utils import load_config, get_statistics_table, clean_title
 from src.data_preprocess.step2_se_url_title import load_cache, save_cache
 
 tqdm.pandas()
@@ -200,7 +200,7 @@ def main():
         df["cited_paper_list"] = df["references_within_dataset"].progress_apply(extract_json_titles)
         df["citing_paper_list"] = df["citations_within_dataset"].progress_apply(extract_json_titles)
     out_path = os.path.join(processed_base_path, f"{data_type}_citation_API.parquet")
-    df.drop(columns=['card_tags', 'downloads'], inplace=True)
+    df.drop(columns=['card_tags', 'downloads'], inplace=True, errors='ignore')
     df.to_parquet(out_path, compression="zstd", engine="pyarrow", index=False)
     print(f"✨ Final output saved to: {out_path}")
     print("Total time cost: {:.2f} seconds.".format(time.time() - t1))

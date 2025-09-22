@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 from joblib import Parallel, delayed, parallel_backend
-from src.utils import load_data, load_config, load_combined_data, safe_json_dumps
+from src.utils import load_config, load_combined_data, safe_json_dumps
 
 # Initialize the YAML parser
 from ruamel.yaml import YAML
@@ -111,7 +111,7 @@ def main():
 
     start_time = time.time()
     print("⚠️Step 1: Loading data...")
-    df = load_data(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'downloads', 'card_readme', 'contains_markdown_table', 'extracted_markdown_table'])
+    df = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'downloads', 'card_readme', 'contains_markdown_table', 'extracted_markdown_table'])
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
     print("⚠️ Step 2: Processing card_tags...")

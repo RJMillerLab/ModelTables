@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-03-11
-Last Modified: 2025-04-02
+Last Modified: 2025-09-21
 Description: Merge tables from df2 and df based on query and title.
 Usage:
     python -m src.data_gt.step3_pre_merge
@@ -137,7 +137,7 @@ def merge_table_list_to_df2():
     df['html_table_list'] = df['html_table_list'].apply(_safe_parse_list)  ########
     df['llm_table_list'] = df['llm_table_list'].apply(_safe_parse_list)  ########
 
-    df2 = pd.read_parquet(ALL_TITLE_PATH)
+    df2 = pd.read_parquet(ALL_TITLE_PATH, columns=['modelId', 'all_title_list'])
     print(f"  df2 loaded with shape: {df2.shape}")
     print("\nStep 1: Expanding df2 to match df (on df2.all_title_list vs df.query)...")
 
@@ -178,7 +178,7 @@ def merge_table_list_to_df2():
     side_df = populate_hugging_table_list(side_df, os.path.dirname(SIDE_PATH))
     side_df = populate_github_table_list(side_df, os.path.dirname(SIDE_PATH))
     df_final = pd.merge(df2_merged, side_df[['modelId', 'github_table_list', 'hugging_table_list']], on='modelId', how='left')
-    df_final.drop(columns=['card_tags', 'downloads'], inplace=True)
+    df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
     df_final.to_parquet(MERGE_PATH, compression='zstd', engine='pyarrow', index=False)
     return df_final
 

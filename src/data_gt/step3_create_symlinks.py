@@ -15,7 +15,7 @@ import numpy as np
 from shutil import copytree
 import shutil
 from src.data_ingestion.readme_parser import MarkdownHandler
-from src.utils import load_data, load_config
+from src.utils import load_config
 import pickle
 
 global_symlink_mapping = {}

@@ -882,7 +882,7 @@ def main():
     df_final["all_bibtex_titles"] = df_final.apply(merge_bibtex_titles, axis=1)
     df_final["all_title_list"] = df_final.apply(merge_all_titles, axis=1)
     #df_final.to_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"), compression='zstd', engine='pyarrow')
-    df_final.drop(columns=['card_tags', 'downloads'], inplace=True)
+    df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
     pq.write_table(pa.Table.from_pandas(df_final), os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
     print("✅ Merged BibTeX columns into 'all_bibtex_titles'")
 

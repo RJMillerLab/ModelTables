@@ -102,7 +102,7 @@ def main():
     config = load_config('config.yaml')
     processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
-    df_all = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
+    df_all = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"), columns=['modelId', 'all_bibtex_titles'])
     print(f"Loaded ground truth all title list: shape = {df_all.shape}")
 
     # Extract and deduplicate all bibtex titles (assumed stored in the "all_bibtex_titles" column)

@@ -9,7 +9,7 @@ from src.data_ingestion.bibtex_parser import BibTeXFactory
 from src.utils import load_config
 
 import os, re, time, json
-from src.utils import load_data, get_statistics_table, clean_title
+from src.utils import load_config, get_statistics_table, clean_title
 tqdm.pandas()
 
 def remove_duplicates(df):
@@ -43,8 +43,9 @@ def main():
     start_time = time.time()
     t1 = start_time
     print("⚠️Step 1: Loading data...")
-    df_new = load_data(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path'])
-    df_makeup = load_data(os.path.join(processed_base_path, f"{data_type}_step3.parquet"), columns=['modelId', 'downloads'])
+    
+    df_new = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), columns=['modelId', 'extracted_markdown_table_tuple', 'extracted_bibtex_tuple', 'extracted_bibtex', 'csv_path'])
+    df_makeup = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step3.parquet"), columns=['modelId', 'downloads'])
     df = df_new.merge(df_makeup, on='modelId')
     del df_new, df_makeup
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))

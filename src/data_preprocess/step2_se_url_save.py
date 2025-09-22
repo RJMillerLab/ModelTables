@@ -30,7 +30,7 @@ data_type = 'modelcard'
 # print(f"Loaded {len(GITHUB_PATH_CACHE)} GitHub cache entries.")
 
 print("Step 1: Loading data from parquet (modelcard_step1)...")
-df_final = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
+df_final = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"), columns=['modelId', 'all_title_list', 'all_bibtex_titles'])
 print(f"Loaded {len(df_final)} rows from {data_type}_all_title_list.parquet")
 
 # Step 3: Extract and deduplicate all titles from "all_title_list" column
