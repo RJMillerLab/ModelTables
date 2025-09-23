@@ -10,7 +10,6 @@ from src.utils import load_config, load_combined_data, safe_json_dumps
 from ruamel.yaml import YAML
 yaml_parser = YAML(typ="safe")
 
-
 def clean_yaml_content(content):
     if content is None:
         return None
@@ -112,6 +111,11 @@ def main():
     start_time = time.time()
     print("⚠️Step 1: Loading data...")
     df = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'downloads', 'card_readme', 'contains_markdown_table', 'extracted_markdown_table'])
+    # get card from readparquet load_combined_data(data_type, file_path=raw_base_path)
+    raw_base_path = os.path.join(config.get('base_path'), 'raw')
+    df_tmp = load_combined_data(data_type, file_path=raw_base_path)
+    df_tmp = df_tmp[['modelId', 'card']]
+    df = pd.merge(df, df_tmp, on='modelId', how='left')
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
     print("⚠️ Step 2: Processing card_tags...")

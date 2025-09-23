@@ -13,13 +13,10 @@ import pandas as pd
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--parquet", default="data/processed/modelcard_step1.parquet")
-    parser.add_argument("--field", default="card", help="Which column to use as contents text")
     parser.add_argument("--output", default="output/baseline_mc/corpus.jsonl")
     args = parser.parse_args()
 
-    parquet_path = Path(args.parquet)
-    df = pd.read_parquet(parquet_path, columns=["modelId", args.field])
+    df = load_combined_data("modelcard", file_path="~/Repo/CitationLake/data/raw", columns=['modelId', 'card'])
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -273,7 +273,7 @@ def main():
     parser.add_argument("--db_path", required=True, help="SQLite database path")
     parser.add_argument("--parquet_cache", required=True, help="Input Parquet cache")
     parser.add_argument("--temp_parquet", default="data/processed/tmp_extracted_lines.parquet", help="Temporary Parquet path")
-    parser.add_argument("--merged_df", default="data/processed/merged_df.parquet", help="Merged DataFrame path")
+    parser.add_argument("--tmp_merged_df", default="data/processed/tmp_merged_df.parquet", help="Merged DataFrame path")
     parser.add_argument("--output_parquet", default="data/processed/extracted_annotations.parquet", help="Output Parquet path")
     parser.add_argument("--mode", choices=["scratch", "resume_from_merged", "resume_from_temp"], 
                        default="scratch", help="Processing mode: scratch, resume_from_merged, or resume_from_temp")
@@ -288,22 +288,22 @@ def main():
         filtered_df = preprocess_custom_parquet(args.parquet_cache)
     # Step 2: Query the SQLite database using corpusid from the filtered data. 
     if args.mode == "scratch":
-        merged_df = query_db_by_corpusid(filtered_df, args.db_path, batch_size=1000)
-        merged_df.to_parquet(args.merged_df, compression="zstd", engine="pyarrow", index=False)
+        tmp_merged_df = query_db_by_corpusid(filtered_df, args.db_path, batch_size=1000)
+        tmp_merged_df.to_parquet(args.tmp_merged_df, compression="zstd", engine="pyarrow", index=False)
         # Step 3: Extract specific lines from NDJSON files and write to a temporary Parquet file.
-        temp_parquet = extract_lines_to_parquet(merged_df, args.directory, args.temp_parquet, args.n_jobs)
+        temp_parquet = extract_lines_to_parquet(tmp_merged_df, args.directory, args.temp_parquet, args.n_jobs)
         temp_parquet.to_parquet(args.temp_parquet, compression="zstd", engine="pyarrow", index=False)
         print('tmp file temp_parquet saved to', args.temp_parquet)
         # Step 4: Parse annotations from the extracted lines and write final annotated data to output Parquet.
-        merge_full_df(merged_df, temp_parquet, output_parquet)
+        merge_full_df(tmp_merged_df, temp_parquet, output_parquet)
         print('output_parquet saved to', args.output_parquet)
     elif args.mode == "resume_from_merged":
-        temp_parquet = extract_lines_to_parquet(args.merged_df, args.directory, args.temp_parquet, args.n_jobs)
+        temp_parquet = extract_lines_to_parquet(args.tmp_merged_df, args.directory, args.temp_parquet, args.n_jobs)
         print('tmp file temp_parquet saved to', args.temp_parquet)
-        merge_full_df(args.merged_df, temp_parquet, args.output_parquet)
+        merge_full_df(args.tmp_merged_df, temp_parquet, args.output_parquet)
         print('output_parquet saved to', args.output_parquet)
     elif args.mode == "resume_from_temp":
-        merge_full_df(args.merged_df, args.temp_parquet, args.output_parquet)
+        merge_full_df(args.tmp_merged_df, args.temp_parquet, args.output_parquet)
         print('output_parquet saved to', args.output_parquet)
 
 if __name__ == "__main__":

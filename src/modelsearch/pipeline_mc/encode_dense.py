@@ -37,7 +37,7 @@ def main():
         with Path(args.jsonl).open() as f:
             texts = [json.loads(line)["contents"] for line in f]
     else:
-        df = pd.read_parquet(Path(args.parquet), columns=[args.field])
+        df = load_combined_data("modelcard", file_path="~/Repo/CitationLake/data/raw", columns=['modelId', args.field])
         texts = df[args.field].astype(str).tolist()
 
     embeddings = encode_texts(

@@ -4,6 +4,10 @@ import os, re, json
 from tqdm import tqdm
 import numpy as np
 import yaml
+import duckdb
+import sqlite3
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 def load_config(file_path):
     with open(file_path, 'r') as file:
@@ -30,6 +34,7 @@ def get_statistics_card(df):
     stats = get_statistics_card(df)
     print(json.dumps(stats, indent=4))
     """
+    assert "card" in df.columns, "card column is required"
     total_models = len(df)
     non_empty_model_cards = df['card'].notna().sum()
     created_at_dates = pd.to_datetime(df['createdAt'], errors='coerce')
@@ -47,14 +52,6 @@ def get_statistics_card(df):
         "Last Modified Last Date": str(modified_end_date.isoformat()),
     }
     return stats
-
-def load_data(file_path, columns=None):
-    """Load data from a Parquet file."""
-    # I tried using Dask for parallel loading, but it was slower than Pandas for this dataset
-    #df = dd.read_parquet(file_path) # load in parallel
-    df = pd.read_parquet(file_path, columns=columns)
-    print(f"Loaded {len(df)} rows.")
-    return df
 
 def clean_title(title):
     """Removes unnecessary BibTeX characters like {} and trims spaces."""
@@ -133,4 +130,102 @@ def safe_json_dumps(x):
         return json.dumps(x)
     else:
         return x
+
+def load_table_from_duckdb(table_name, db_path="modellake_all.db"):
+    """
+    Load a table from DuckDB database as a pandas DataFrame.
+    
+    Args:
+        table_name (str): Name of the table to load
+        db_path (str): Path to the DuckDB database file
+    
+    Returns:
+        pd.DataFrame: Loaded data from the table
+    """
+    print(f"📊 Loading table '{table_name}' from DuckDB: {db_path}")
+    
+    # Connect to DuckDB
+    conn = duckdb.connect(db_path)
+    
+    try:
+        # Check if table exists
+        table_exists = conn.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_name}'").fetchone()[0]
+        
+        if table_exists == 0:
+            raise ValueError(f"Table '{table_name}' not found in database {db_path}")
+        
+        # Get row count
+        row_count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+        print(f"   Found {row_count:,} rows in table '{table_name}'")
+        
+        # Load data using DuckDB's pandas integration
+        df = conn.execute(f"SELECT * FROM {table_name}").df()
+        
+        print(f"✅ Successfully loaded {len(df):,} rows from DuckDB")
+        return df
+        
+    finally:
+        # Close connection
+        conn.close()
+
+
+def load_table_from_sqlite(table_name, db_path="modellake_all.db", parquet_path=None):
+    """
+    Load a table from SQLite database as a pandas DataFrame.
+    If the table doesn't exist, it will import from parquet file to SQLite first.
+    
+    Args:
+        table_name (str): Name of the table to load
+        db_path (str): Path to the SQLite database file
+        parquet_path (str, optional): Path to parquet file to import if table doesn't exist
+    
+    Returns:
+        pd.DataFrame: Loaded data from the table
+    """
+    print(f"📊 Loading table '{table_name}' from SQLite: {db_path}")
+    
+    # Connect to SQLite
+    conn = sqlite3.connect(db_path)
+    
+    try:
+        # Check if table exists
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+        table_exists = cursor.fetchone() is not None
+        
+        if not table_exists:
+            if parquet_path is None:
+                raise ValueError(f"Table '{table_name}' not found in database {db_path} and no parquet_path provided")
+            
+            print(f"   Table '{table_name}' not found. Importing from parquet: {parquet_path}")
+            
+            # Read parquet file
+            if not os.path.exists(parquet_path):
+                raise FileNotFoundError(f"Parquet file not found: {parquet_path}")
+            
+            # Load parquet file
+            df = pd.read_parquet(parquet_path)
+            print(f"   Loaded {len(df):,} rows from parquet file")
+            
+            # Save to SQLite
+            df.to_sql(table_name, conn, if_exists='replace', index=False)
+            print(f"   Imported {len(df):,} rows to SQLite table '{table_name}'")
+            
+        else:
+            # Get row count
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            row_count = cursor.fetchone()[0]
+            print(f"   Found {row_count:,} rows in table '{table_name}'")
+            
+            # Load data
+            df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        
+        print(f"✅ Successfully loaded {len(df):,} rows from SQLite")
+        return df
+        
+    finally:
+        # Close connection
+        conn.close()
+
+
 

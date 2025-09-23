@@ -13,10 +13,11 @@ from tqdm_joblib import tqdm_joblib
 from joblib import Parallel, delayed, parallel_backend
 import re, os, json, time
 from concurrent.futures import ThreadPoolExecutor
-from src.utils import load_data, load_config, load_combined_data, safe_json_dumps
+from src.utils import load_config, load_combined_data, safe_json_dumps, load_table_from_duckdb, load_table_from_sqlite
 from urllib.parse import urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
+import duckdb
 from src.data_ingestion.readme_parser import BibTeXExtractor
 from src.data_ingestion.bibtex_parser import BibTeXFactory
 
@@ -208,9 +209,10 @@ def main():
     config = load_config('config.yaml')
     raw_base_path = os.path.join(config.get('base_path'), 'raw')
     
-    print("⚠️ Step 1: Loading data...")
+    print("⚠️ Step 1: Loading data from DuckDB...")
     start_time = time.time()
     df = load_combined_data(data_type, file_path=raw_base_path)
+    #df = load_table_from_duckdb(f"raw_{data_type}", db_path="modellake_all.db")
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
     print("⚠️ Step 2: Splitting readme and tags...")
@@ -245,9 +247,10 @@ def main():
     #print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
     print("⚠️ Step 5: Saving results to Parquet file...")
+    df.drop(columns=['card'], inplace=True, errors='ignore') # get card from raw instead of this saved file
     start_time = time.time()
     pq.write_table(pa.Table.from_pandas(df), os.path.join(config.get('base_path'), 'processed', f"{data_type}_step1.parquet"))
-    #df.to_parquet(os.path.join(config.get('base_path'), 'processed', f"{data_type}_step1.parquet"))
+    #df.to_parquet(os.path.join(config.get('base_path'), 'processed', f"{data_type}_step1.parquet"), compression='zstd', engine='pyarrow')
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Sampled data: ", df.head(5))
 
