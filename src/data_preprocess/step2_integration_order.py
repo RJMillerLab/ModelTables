@@ -16,6 +16,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 from typing import Tuple, List
 from src.llm.model import LLM_response
+from src.utils import to_parquet
 
 
 # --------------- Fixed Path Constants --------------- #
@@ -436,7 +437,7 @@ def main():
         df_final = df_final.sort_values('orig_index')
         df_final.reset_index(drop=True, inplace=True) 
         df_final.drop(columns=['orig_index'], inplace=True)
-        df_final.to_parquet(FINAL_OUTPUT_CSV, compression="zstd", engine="pyarrow", index=False)
+        to_parquet(df_final, FINAL_OUTPUT_CSV)
         print(f"✅ LLM results saved to {FINAL_OUTPUT_CSV}")
     else:
         print("No items require LLM batch processing. Skipping batch step.")

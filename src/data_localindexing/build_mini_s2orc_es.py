@@ -28,6 +28,7 @@ import argparse
 import sqlite3
 import os
 import warnings
+from src.utils import to_parquet
 import re
 import json
 from elasticsearch import Elasticsearch, helpers
@@ -306,7 +307,7 @@ def load_parquet_cache(parquet_file):
 def save_parquet_cache(df, parquet_file): 
     """Save the DataFrame to a Parquet file."""
     try:
-        df.to_parquet(parquet_file, compression='zstd', engine='pyarrow', index=False)
+        to_parquet(df, parquet_file)
     except Exception as e:
         print(f"Error saving Parquet cache: {e}")
 

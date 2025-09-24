@@ -26,6 +26,7 @@ import pandas as pd
 from tqdm import tqdm
 from joblib import Parallel, delayed
 import subprocess
+from src.utils import to_parquet
 
 
 def extract_annotations(data, key):
@@ -265,7 +266,7 @@ def merge_full_df(merged_df_input, temp_parquet_input, output_parquet):
         on=['filename', 'line_index'],
         how='left'
     )
-    merged_full.to_parquet(output_parquet, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(merged_full, output_parquet)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -289,10 +290,10 @@ def main():
     # Step 2: Query the SQLite database using corpusid from the filtered data. 
     if args.mode == "scratch":
         tmp_merged_df = query_db_by_corpusid(filtered_df, args.db_path, batch_size=1000)
-        tmp_merged_df.to_parquet(args.tmp_merged_df, compression="zstd", engine="pyarrow", index=False)
+        to_parquet(tmp_merged_df, args.tmp_merged_df)
         # Step 3: Extract specific lines from NDJSON files and write to a temporary Parquet file.
         temp_parquet = extract_lines_to_parquet(tmp_merged_df, args.directory, args.temp_parquet, args.n_jobs)
-        temp_parquet.to_parquet(args.temp_parquet, compression="zstd", engine="pyarrow", index=False)
+        to_parquet(temp_parquet, args.temp_parquet)
         print('tmp file temp_parquet saved to', args.temp_parquet)
         # Step 4: Parse annotations from the extracted lines and write final annotated data to output Parquet.
         merge_full_df(tmp_merged_df, temp_parquet, output_parquet)

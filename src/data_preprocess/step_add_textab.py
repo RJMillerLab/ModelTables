@@ -12,7 +12,7 @@ import os, re, tarfile
 import pandas as pd
 from tqdm import tqdm
 from joblib import Parallel, delayed
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 
 def process_tex_content(tex_content):
     paragraphs = re.split(r'\n\s*\n', tex_content)
@@ -97,7 +97,7 @@ def main():
     df_tex = df_tex[df_tex['local_path'].notnull()].copy()
     print("Extracting tables from .tex files in parallel...")
     df_tex = parallel_process_tex_entries(df_tex)
-    df_tex.to_parquet(os.path.join(base_path, "step_tex_table.parquet"), compression="zstd", engine="pyarrow", index=False)
+    to_parquet(df_tex, os.path.join(base_path, "step_tex_table.parquet"))
     print("Final data saved as Parquet:", output_parquet)
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import os
 import shutil
 import pandas as pd
+from src.utils import to_parquet
 
 def migrate_files_and_update_paths():
     parquet_path = "data/processed/html_table.parquet"
@@ -51,7 +52,7 @@ def migrate_files_and_update_paths():
     
     backup_path = "data/processed/html_table_backup.parquet"
     shutil.copy(parquet_path, backup_path)
-    df.to_parquet(parquet_path, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df, parquet_path)
     
     print(f"Migration complete. {migrated_count} files moved.")
     print(f"Original data backed up at: {backup_path}")

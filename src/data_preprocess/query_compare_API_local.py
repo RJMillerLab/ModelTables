@@ -15,7 +15,7 @@ import os
 import json
 import numpy as np
 import pandas as pd
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 
 def main():
     # --------------------------
@@ -89,7 +89,7 @@ def main():
 
     # Save rows corresponding to missing queries to a Parquet file for later inspection
     missing_rows = df_query[df_query['query_processed'].isin(missing_queries)]
-    missing_rows.to_parquet("missing_queries_rows.parquet", compression="zstd", engine="pyarrow", index=False)
+    to_parquet(missing_rows, "missing_queries_rows.parquet")
     print(f"Missing query rows saved to missing_queries_rows.parquet, shape: {missing_rows.shape}")
 
     # Filter final results: rows with score > 100 and where the retrieved title exactly matches the original query

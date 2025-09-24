@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 import hashlib
 from tqdm import tqdm
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 import urllib.parse
 
 cache = {}
@@ -74,10 +74,10 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
             "readme_path": readme_paths
         })
     download_info_df = pd.DataFrame(download_info)
-    download_info_df.to_parquet(to_path, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(download_info_df, to_path)
     # save the cache as parquet
     cache_df = pd.DataFrame(list(cache.items()), columns=['raw_url', 'downloaded_path'])
-    cache_df.to_parquet(os.path.join(config.get('base_path'), "processed", "github_readme_cache.parquet"), compression="zstd", engine="pyarrow", index=False)
+    to_parquet(cache_df, os.path.join(config.get('base_path'), "processed", "github_readme_cache.parquet"))
     print(f"Downloaded {len([d for d in download_info if d['readme_path']])} READMEs.")
     print(f"Skipped {len([d for d in download_info if not d['readme_path']])} READMEs.")
     print(f"Step3 time cost: {time.time() - start_time:.2f} seconds.")

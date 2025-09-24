@@ -6,6 +6,7 @@ Description: Merge WDC data into existing benchmark_results.parquet file
 
 import pandas as pd
 import os
+from src.utils import to_parquet
 
 # WDC data from qc_stats.py
 WDC_DATA = {
@@ -42,7 +43,7 @@ def merge_wdc_data():
     
     # Create backup
     print("💾 Creating backup...")
-    df.to_parquet(backup_path, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df, backup_path)
     print(f"✅ Backup saved to: {backup_path}")
     
     # Add WDC data
@@ -66,7 +67,7 @@ def merge_wdc_data():
     
     # Save updated data
     print("💾 Saving updated data...")
-    df_with_wdc.to_parquet(results_path, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df_with_wdc, results_path)
     print(f"✅ Updated data saved to: {results_path}")
     
     # Show the merged data

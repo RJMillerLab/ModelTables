@@ -10,6 +10,7 @@ Last Edited: 2025‑05‑05
 import json, pandas as pd
 from pathlib import Path
 from collections import defaultdict
+from src.utils import to_parquet
 
 # ---------- ❶ Path ----------
 DATA_DIR          = Path("data/processed")
@@ -56,8 +57,8 @@ if __name__ == "__main__":
         return pd.DataFrame(rows)
     df_cit = build_cache(cit_bucket, "citing_papers")
     df_ref = build_cache(ref_bucket, "cited_papers")
-    df_cit.to_parquet(CITATIONS_PQ , compression='zstd', engine='pyarrow', index=False)
-    df_ref.to_parquet(REFERENCES_PQ, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df_cit, CITATIONS_PQ)
+    to_parquet(df_ref, REFERENCES_PQ)
     print("✅  citations rows =", len(df_cit),  "→", CITATIONS_PQ)
     print("✅  references rows =", len(df_ref),  "→", REFERENCES_PQ)
     # ---------- ❺ stub: keep one empty row per whitelist id ----------

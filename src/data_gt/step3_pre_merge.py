@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
+from src.utils import to_parquet
 
 FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths.parquet"
 ALL_TITLE_PATH              = "data/processed/modelcard_all_title_list.parquet"
@@ -179,7 +180,7 @@ def merge_table_list_to_df2():
     side_df = populate_github_table_list(side_df, os.path.dirname(SIDE_PATH))
     df_final = pd.merge(df2_merged, side_df[['modelId', 'github_table_list', 'hugging_table_list']], on='modelId', how='left')
     df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
-    df_final.to_parquet(MERGE_PATH, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df_final, MERGE_PATH)
     return df_final
 
 if __name__ == "__main__":

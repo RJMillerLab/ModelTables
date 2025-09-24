@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from src.utils import load_config  # Ensure this function is available
+from src.utils import load_config, to_parquet  # Ensure this function is available
 from src.data_preprocess.step2_se_url_title import load_cache, save_cache  # if needed
 
 # Step 0: Load configuration and basic paths
@@ -85,7 +85,7 @@ print("✅ Mapped query results back to DataFrame in column 'mapped_title_info'.
 
 # Save final DataFrame to a new Parquet file
 output_parquet = os.path.join(processed_base_path, f"{data_type}_all_title_list_mapped.parquet")
-pq.write_table(pa.Table.from_pandas(df_final), output_parquet)
+to_parquet(df_final, output_parquet)
 print(f"✅ Final DataFrame saved to {output_parquet}")
 
 """

@@ -18,7 +18,7 @@ import pandas as pd
 import numpy as np                                              
 import pickle
 from tqdm import tqdm                            
-from src.utils import load_combined_data    
+from src.utils import load_combined_data, to_parquet    
 from itertools import combinations
 from collections import defaultdict
 from itertools import product
@@ -316,7 +316,7 @@ if __name__ == "__main__":
                     related_model[target].add(m)
     df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_model.get(m, [])))
     df.drop(columns=['card_tags', 'card_readme', 'downloads'], inplace=True, errors='ignore')
-    df.to_parquet("data/processed/modelcard_gt_related_model.parquet", compression='zstd', engine='pyarrow')
+    to_parquet(df, "data/processed/modelcard_gt_related_model.parquet")
 
     ########################################################################
     # 5 )  BUILD CSV-LEVEL GT via related_model_list （no self-pair） ########

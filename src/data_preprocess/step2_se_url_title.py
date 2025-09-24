@@ -24,7 +24,7 @@ from collections import defaultdict
 from xml.etree import ElementTree as ET
 from bs4 import BeautifulSoup
 from joblib import Parallel, delayed 
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 import html2text
 import hashlib
 from src.data_ingestion.readme_parser import BibTeXExtractor
@@ -746,7 +746,7 @@ def main():
         'downloaded_path': list(GITHUB_PATH_CACHE.values())
     })
     new_mapping_path = os.path.join(config.get('base_path'), "processed", "github_readme_cache_update.parquet")
-    new_mapping_df.to_parquet(new_mapping_path, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(new_mapping_df, new_mapping_path)
     print(f"Saved updated GitHub cache to {new_mapping_path}")
 
     print("Step 4D: other => HTML or PDF partial fetch (Parallel)")
@@ -883,7 +883,7 @@ def main():
     df_final["all_title_list"] = df_final.apply(merge_all_titles, axis=1)
     #df_final.to_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"), compression='zstd', engine='pyarrow')
     df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
-    pq.write_table(pa.Table.from_pandas(df_final), os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
+    to_parquet(df_final, os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
     print("✅ Merged BibTeX columns into 'all_bibtex_titles'")
 
 

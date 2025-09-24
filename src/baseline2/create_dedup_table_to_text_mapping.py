@@ -8,6 +8,7 @@ import re
 import pickle
 from joblib import Parallel, delayed
 from tqdm import tqdm
+from src.utils import to_parquet
 
 def create_tmp_folders():
     """
@@ -375,7 +376,7 @@ def create_enhanced_mapping():
     # Save the processed paths DataFrame for later use
     print("Step5: Saving processed paths DataFrame...")
     processed_paths_path = os.path.join('data', 'processed', 'processed_paths.parquet')
-    df_raw.to_parquet(processed_paths_path, compression='zstd', engine='pyarrow')
+    to_parquet(df_raw, processed_paths_path)
     print(f"Saved processed paths to {processed_paths_path}")
     
     # Create a mapping of dedup_csv_path to its group of processed text paths
@@ -396,7 +397,7 @@ def create_enhanced_mapping():
     # Save the group mapping
     print("Step6: Saving group mapping...")
     group_mapping_path = os.path.join('data', 'processed', 'group_mapping.parquet')
-    dedup_groups.to_parquet(group_mapping_path, compression='zstd', engine='pyarrow')
+    to_parquet(dedup_groups, group_mapping_path)
     print(f"Saved group mapping to {group_mapping_path}")
     
     # Build corpus in jsonl format

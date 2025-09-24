@@ -15,7 +15,7 @@ import numpy as np
 from shutil import copytree
 import shutil
 from src.data_ingestion.readme_parser import MarkdownHandler
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 import pickle
 
 global_symlink_mapping = {}
@@ -112,7 +112,7 @@ if __name__ == "__main__":
 
     # Save the final DataFrame
     df_merged.drop(columns=['hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'], inplace=True, errors='ignore')
-    df_merged.to_parquet(os.path.join(processed_base_path, f"{data_type}_step4.parquet"), compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df_merged, os.path.join(processed_base_path, f"{data_type}_step4.parquet"))
     print(f"Symlinks recreated and saved to data/processed/{data_type}_step4.parquet.")
 
     mapping_path = os.path.join(processed_base_path, "symlink_mapping.pickle")

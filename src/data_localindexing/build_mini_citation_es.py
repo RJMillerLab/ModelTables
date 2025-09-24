@@ -26,6 +26,7 @@ import pandas as pd
 from elasticsearch import Elasticsearch, helpers
 import matplotlib.pyplot as plt
 from elasticsearch.helpers import parallel_bulk
+from src.utils import to_parquet
 
 warnings.filterwarnings("ignore")
 
@@ -431,7 +432,7 @@ def batch_query(es, citations_index, input_file, output_file):
     elapsed = time.time() - start_time
     if results:
         df = pd.DataFrame(results)
-        df.to_parquet(output_file, compression='zstd', engine='pyarrow', index=False)
+        to_parquet(df, output_file)
         # —— add visualization for the count histogram —— #
         ref_counts = df["cited_papers"].apply(len)
         cit_counts = df["citing_papers"].apply(len)

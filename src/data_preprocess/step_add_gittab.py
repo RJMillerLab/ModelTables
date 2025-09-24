@@ -19,7 +19,7 @@ from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
 from src.data_ingestion.bibtex_parser import BibTeXFactory
 from src.data_preprocess.step2 import save_markdown_to_csv, extract_bibtex, add_extracted_tuples
 from src.data_preprocess.step1 import extract_markdown
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 
 def extract_table_from_pdf(pdf_path):
     try:
@@ -105,7 +105,7 @@ def main():
     print("Saving markdown extraction results to CSV files...")
     save_markdown_to_csv(df_readme, key="github_extracted_markdown_table", output_folder="github_markdown_csvs", new_key="github_csv_path")
     output_parquet = os.path.join(base_path, "step_add_github.parquet")
-    df_readme.to_parquet(output_parquet, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(df_readme, output_parquet)
     print("Final data saved as Parquet file:", output_parquet)
 
 if __name__ == "__main__":

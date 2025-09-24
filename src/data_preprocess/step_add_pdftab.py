@@ -16,7 +16,7 @@ import pandas as pd
 from PIL import Image, ImageOps, ImageChops
 import pytesseract
 import csv
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 from tqdm import tqdm
 import hashlib
 
@@ -33,7 +33,7 @@ def load_cache():
 def save_cache(cache_dict):
     """Save the processed cache to a local file."""
     cache_df = pd.DataFrame(list(cache_dict.items()), columns=["local_path", "csv_paths"])
-    cache_df.to_parquet(CACHE_FILE, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(cache_df, CACHE_FILE)
 
 def auto_crop_image(image):
     """Automatically crop blank margins around the image."""
@@ -177,7 +177,7 @@ def main_process():
 
     # Save the processed DataFrame as a new Parquet file
     output_parquet = os.path.join(base_path, "processed", "processed_pdf_with_ocr.parquet")
-    df_info.to_parquet(output_parquet, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(df_info, output_parquet)
     print(f"✅ Processing complete! Added column 'csv_paths' and saved to {output_parquet}")
 
 if __name__ == "__main__":

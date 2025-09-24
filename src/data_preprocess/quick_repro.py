@@ -8,6 +8,7 @@ Description: Update the CSV file's llm_response_raw field using the LLM outputs 
 
 import re
 import pandas as pd
+from src.utils import to_parquet
 
 # -------------- Helper Functions -------------- #
 def parse_llm_log(log_file_path: str) -> dict:
@@ -58,7 +59,7 @@ def main():
     df_updated = update_llm_responses_in_df(df, llm_responses)
     print("Updated the 'llm_response_raw' column based on log file.")  ########
 
-    df_updated.to_parquet(updated_csv_path, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(df_updated, updated_csv_path)
     print(f"Saved updated CSV to {updated_csv_path}.")  ########
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import pandas as pd
 import os, json, time, requests
 from tqdm import tqdm
 from dotenv import load_dotenv
+from src.utils import to_parquet
 
 # Constants
 INPUT_PARQUET = "data/processed/final_integration_with_paths.parquet"
@@ -84,7 +85,7 @@ def main():
 
     # Save results to Parquet
     df_results = pd.DataFrame(results)
-    df_results.to_parquet(OUTPUT_PARQUET, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df_results, OUTPUT_PARQUET)
     print(f"✅ Data saved to {OUTPUT_PARQUET}")
 
 

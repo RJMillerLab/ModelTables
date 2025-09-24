@@ -229,3 +229,246 @@ def load_table_from_sqlite(table_name, db_path="modellake_all.db", parquet_path=
 
 
 
+
+# ------------------------
+# Optimized Parquet writer
+# ------------------------
+def _choose_int_type_for_range(min_value: int, max_value: int):
+    """Return the smallest Arrow signed integer type that can represent [min, max]."""
+    if min_value >= -128 and max_value <= 127:
+        return pa.int8()
+    if min_value >= -32768 and max_value <= 32767:
+        return pa.int16()
+    if min_value >= -2147483648 and max_value <= 2147483647:
+        return pa.int32()
+    return pa.int64()
+
+def _safe_convert_to_int(series, target_type):
+    """Safely convert series to target integer type, falling back to int64 if needed."""
+    try:
+        # Try converting to target type
+        if target_type == pa.int8():
+            return pa.array(series.astype("Int8"))
+        elif target_type == pa.int16():
+            return pa.array(series.astype("Int16"))
+        elif target_type == pa.int32():
+            return pa.array(series.astype("Int32"))
+        else:
+            return pa.array(series.astype("Int64"))
+    except (ValueError, OverflowError, TypeError):
+        # If conversion fails, fall back to int64
+        return pa.array(series.astype("Int64"))
+
+
+def _infer_list_element_type(values):
+    """Infer Arrow element type for a list column without loss, supporting strings and integers.
+    Falls back to string if mixed or unknown.
+    """
+    has_null = False
+    min_v, max_v = None, None
+    all_int = True
+    all_str = True
+    for lst in values:
+        if lst is None:
+            has_null = True
+            continue
+        # Support numpy arrays too
+        if isinstance(lst, np.ndarray):
+            lst = lst.tolist()
+        if not isinstance(lst, (list, tuple)):
+            # non-list present; give up and treat as string list
+            return pa.string()
+        for x in lst:
+            if x is None:
+                has_null = True
+                continue
+            sx = str(x)
+            try:
+                ix = int(x)
+                # Check if it fits in int64 range
+                if ix < -9223372036854775808 or ix > 9223372036854775807:
+                    all_int = False
+                    break
+            except Exception:
+                all_int = False
+            else:
+                if min_v is None:
+                    min_v = ix
+                    max_v = ix
+                else:
+                    if ix < min_v:
+                        min_v = ix
+                    if ix > max_v:
+                        max_v = ix
+            if not isinstance(x, (str, bytes)):
+                all_str = False
+            # If we already know it's mixed, break early
+            if not all_int and not all_str:
+                break
+        if not all_int and not all_str:
+            break
+    if all_str and not all_int:
+        return pa.string()
+    if all_int and min_v is not None and max_v is not None:
+        # Only try to downcast if values fit in int32 range
+        if min_v >= -2147483648 and max_v <= 2147483647:
+            return _choose_int_type_for_range(min_v, max_v)
+        else:
+            # Large integers, use int64
+            return pa.int64()
+    # default: string
+    return pa.string()
+
+
+def _is_simple_string_list_column(series):
+    """Check if column is a simple string list column (np.array and elements are strings, not complex structures like dicts/structs)"""
+    if series.dtype != 'object':
+        return False
+    
+    # Check first few samples
+    for val in series.head(10):
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            continue
+        if isinstance(val, np.ndarray):
+            # Empty array 
+            if len(val) == 0:
+                continue
+            # Check if array elements are simple strings (not dict, list, tuple, etc.)
+            for x in val[:5]:
+                if not isinstance(x, str) or isinstance(x, (dict, list, tuple, np.ndarray)):
+                    return False
+        elif isinstance(val, (list, tuple)):
+            # Empty list 
+            if len(val) == 0:
+                continue
+            # Check if list elements are simple strings (not dicts/structs)
+            for x in val[:5]:  # Only check first 5 elements
+                if not isinstance(x, str) or isinstance(x, (dict, list, tuple, np.ndarray)):
+                    return False
+        else:
+            return False
+    return True
+
+def _is_struct_list_column(series):
+    """Check if column contains lists of structs/dictionaries (should NOT be compressed)"""
+    if series.dtype != 'object':
+        return False
+    
+    # Check first few samples
+    for val in series.head(10):
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            continue
+        if isinstance(val, np.ndarray):
+            # Empty array 
+            if len(val) == 0:
+                continue
+            # Check if array elements are dictionaries/structs
+            for x in val[:5]:
+                if isinstance(x, dict):
+                    return True
+        elif isinstance(val, (list, tuple)):
+            # Empty list 
+            if len(val) == 0:
+                continue
+            # Check if list elements are dictionaries/structs
+            for x in val[:5]:  # Only check first 5 elements
+                if isinstance(x, dict):
+                    return True
+    return False
+
+def save_parquet_optimized(
+    df: pd.DataFrame,
+    output_path: str,
+    *,
+    compression: str = "zstd",
+    compression_level: int = 6,
+    compress_list_cols: tuple = None,
+    downcast_integers: bool = True,
+    downcast_floats_to_fp32: bool = False,
+    use_dictionary: bool | list = True,
+):
+    """Save a DataFrame to Parquet with compact Arrow types and ZSTD compression.
+
+    Args:
+        compress_list_cols: columns to compress
+    """
+    if compress_list_cols is None:
+        compress_list_cols = []
+        for col in df.columns:
+            # Only compress simple string lists, NOT struct lists
+            if _is_simple_string_list_column(df[col]) and not _is_struct_list_column(df[col]):
+                compress_list_cols.append(col)
+        print(f"Auto detected columns to compress: {compress_list_cols}")
+    else:
+        print(f"Manually specified columns to compress: {compress_list_cols}")
+
+    arrays: list[pa.Array] = []
+    fields: list[pa.Field] = []
+
+    for col in df.columns:
+        s = df[col]
+
+        # Check if need to compress to Arrow List[string]
+        if col in compress_list_cols and _is_simple_string_list_column(s) and not _is_struct_list_column(s):
+            print(f"  Compress column {col}: np.array -> Arrow List[string]")
+            # Process list column: convert to Arrow List[string]
+            values = []
+            for v in s.tolist():
+                if v is None or (isinstance(v, float) and pd.isna(v)):
+                    values.append([])
+                    continue
+                seq = v.tolist() if isinstance(v, np.ndarray) else list(v)
+                values.append([str(x) for x in seq])
+
+            # Use Arrow List[string]
+            list_type = pa.list_(pa.string())
+            arrays.append(pa.array(values, type=list_type))
+            fields.append(pa.field(col, list_type))
+            continue
+
+        # Other columns keep original type - convert to Arrow preserving original structure
+        print(f"  Keep column {col} unchanged: {s.dtype}")
+        
+        # Convert pandas Series to Arrow Array preserving the original data structure
+        try:
+            # Use pyarrow to convert the entire DataFrame column to preserve complex types
+            # This is more reliable than converting individual series
+            temp_df = pd.DataFrame({col: s})
+            temp_table = pa.Table.from_pandas(temp_df, preserve_index=False)
+            arrow_array = temp_table[col]
+            arrays.append(arrow_array)
+            fields.append(pa.field(col, arrow_array.type))
+        except Exception as e:
+            print(f"    Warning: Could not preserve original type for {col}, falling back to string: {e}")
+            # Fallback to string if conversion fails
+            arrays.append(pa.array(s.astype(str)))
+            fields.append(pa.field(col, pa.string()))
+
+    schema = pa.schema(fields)
+    table = pa.Table.from_arrays(arrays, schema=schema)
+
+    pq.write_table(
+        table,
+        output_path,
+        compression=compression,
+        compression_level=compression_level,
+        use_dictionary=use_dictionary,
+    )
+
+    return output_path
+
+
+def to_parquet(df: pd.DataFrame, output_path: str, **kwargs):
+    """
+    Alias for save_parquet_optimized to maintain compatibility with pandas .to_parquet() interface.
+    
+    Args:
+        df: pandas DataFrame to save
+        output_path: path where to save the parquet file
+        **kwargs: additional arguments passed to save_parquet_optimized
+    
+    Returns:
+        str: output_path
+    """
+    return save_parquet_optimized(df, output_path, **kwargs)
+

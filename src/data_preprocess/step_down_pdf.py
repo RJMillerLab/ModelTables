@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 import hashlib
 import logging
 from bs4 import BeautifulSoup
@@ -99,7 +99,7 @@ def main_download(df, base_output_dir, to_path="data/downloaded_pdfs_info.parque
     
     download_info = [info for info in download_info if info is not None]
     download_info_df = pd.DataFrame(download_info)
-    download_info_df.to_parquet(to_path, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(download_info_df, to_path)
     
     print(f"Downloaded {len([d for d in download_info if d['local_path']])} PDFs.")
     print(f"Skipped {len([d for d in download_info if not d['local_path']])} PDFs.")

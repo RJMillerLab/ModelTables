@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from joblib import Parallel, delayed
 from tqdm import tqdm
+from src.utils import to_parquet
 
 
 def classify_page(html_path):
@@ -135,5 +136,5 @@ if __name__ == "__main__":
         # If there is nothing new, just keep the old
         df_final = df_existing
     ######## # 4) Save final results back to the parquet file
-    df_final.to_parquet(parquet_file, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(df_final, parquet_file)
     print(f"Done! Updated {parquet_file} with {len(df_final)} total records.")

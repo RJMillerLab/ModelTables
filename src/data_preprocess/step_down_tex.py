@@ -16,7 +16,7 @@ import requests
 import tarfile
 import subprocess
 from joblib import Parallel, delayed
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 import feedparser
 from stem.control import Controller
 
@@ -200,7 +200,7 @@ def main_download(df, base_output_dir="downloaded_tex_files", to_path="data/down
     )
     download_info = [info for info in download_info if info is not None]
     download_info_df = pd.DataFrame(download_info)
-    download_info_df.to_parquet(to_path, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(download_info_df, to_path)
     print(f"Downloaded {len(download_info)} .tar.gz files.")
     print(f"Skipped {len(df) - len(download_info)} .tar.gz files.")
     return download_info_df

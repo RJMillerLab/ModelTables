@@ -12,7 +12,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from src.data_ingestion.readme_parser import MarkdownHandler
 import os, re, time
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 
 tqdm.pandas()
 
@@ -115,7 +115,7 @@ def main():
     print("⚠️Step 6: Saving results to Parquet file...")
     start_time = time.time()
     output_file = os.path.join(processed_base_path, f"{data_type}_step2.parquet")
-    df.to_parquet(output_file, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(df, output_file)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Results saved to:", output_file)
 

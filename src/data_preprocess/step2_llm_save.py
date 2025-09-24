@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import json
 from src.data_ingestion.readme_parser import MarkdownHandler
+from src.utils import to_parquet
 
 
 def clean_markdown_block(md_block: str):
@@ -109,6 +110,6 @@ if __name__ == "__main__":
     df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=False)
     # Save updated parquet
     updated_parquet_path = "data/processed/final_integration_with_paths.parquet"
-    df_parquet.to_parquet(updated_parquet_path, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(df_parquet, updated_parquet_path)
     print(f"\n🎉 All markdown tables saved. Paths recorded in 'llm_table_list'.")
     print(f"📝 Updated parquet saved to: {updated_parquet_path}")

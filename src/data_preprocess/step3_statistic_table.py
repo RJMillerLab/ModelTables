@@ -6,7 +6,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
 from src.data_ingestion.bibtex_parser import BibTeXFactory
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 
 import os, re, time, json
 from src.utils import load_config, get_statistics_table, clean_title
@@ -61,7 +61,7 @@ def main():
     start_time = time.time()
     benchmark_df = get_statistics_table(unique_by_markdown)
     os.makedirs(os.path.join(config.get('base_path'), "statistics"), exist_ok=True)
-    benchmark_df.to_parquet(os.path.join(config.get('base_path'), "statistics", "benchmark_results.parquet"), compression='zstd', engine='pyarrow', index=False)
+    to_parquet(benchmark_df, os.path.join(config.get('base_path'), "statistics", "benchmark_results.parquet"))
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Final time cost: {:.2f} seconds.".format(time.time() - t1))
 

@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 from joblib import Parallel, delayed, parallel_backend
-from src.utils import load_config, load_combined_data, safe_json_dumps
+from src.utils import load_config, load_combined_data, safe_json_dumps, to_parquet
 
 # Initialize the YAML parser
 from ruamel.yaml import YAML
@@ -127,7 +127,7 @@ def main():
     print("⚠️Step 3: Saving results to Parquet file...")
     start_time = time.time()
     output_file = os.path.join(processed_base_path, f"{data_type}_step1_tags.parquet")
-    df.to_parquet(output_file, compression="zstd", engine="pyarrow", index=False)
+    to_parquet(df, output_file)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Results saved to:", output_file)
 

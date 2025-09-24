@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from matplotlib.patches import Patch
+from src.utils import to_parquet
 
 # Configuration
 INPUT_FILE = "data/processed/modelcard_step3_merged.parquet"
@@ -287,7 +288,7 @@ def main():
     
     # Only save modelId and the 3 new attributes to reduce file size
     df_optimized = df[['modelId', 'all_title_list', 'all_title_list_valid', 'has_title', 'has_valid_title']].copy()
-    df_optimized.to_parquet(VALID_TITLE_PARQUET, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df_optimized, VALID_TITLE_PARQUET)
     print(f"Saved valid‑title list to {VALID_TITLE_PARQUET}")
     del df_optimized
 
@@ -299,7 +300,7 @@ def main():
 
     results_df = create_combined_results(benchmark_data, resource_stats)
     results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
-    results_df.to_parquet(results_path, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(results_df, results_path)
     print(f"\nSaved results to {results_path}")
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from tqdm_joblib import tqdm_joblib
 from datetime import datetime
+from src.utils import to_parquet
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -547,7 +548,7 @@ def main():
     print('add new cols:', new_cols.keys())
     
     df.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped'], inplace=True, errors='ignore')
-    df.to_parquet(OUTPUT_PARQUET, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df, OUTPUT_PARQUET)
     print(f"Updated parquet saved as {OUTPUT_PARQUET}")
     print(f"Time taken: {time.time() - time_start} seconds")
 

@@ -16,7 +16,7 @@ import numpy as np
 from shutil import copytree
 import shutil
 from src.data_ingestion.readme_parser import MarkdownHandler
-from src.utils import load_config
+from src.utils import load_config, to_parquet
 
 tqdm.pandas()
 
@@ -200,7 +200,7 @@ def main():
     print(f"...Found {len(df_unique)} unique readme content out of {len(df_merged)} rows.")
     output_file = os.path.join(processed_base_path, f"{data_type}_step2.parquet")
     df_merged.drop(columns=['card_readme', 'github_link'], inplace=True, errors='ignore')
-    df_merged.to_parquet(output_file, compression='zstd', engine='pyarrow', index=False)
+    to_parquet(df_merged, output_file)
     print(f"✅ Results saved to: {output_file}")
 
     # 3) Extract markdown tables for each *unique* readme

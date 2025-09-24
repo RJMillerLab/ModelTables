@@ -18,6 +18,7 @@ import os
 import pandas as pd
 from tqdm import tqdm
 from src.data_preprocess.s2orc_API_query import get_single_citations_row, get_single_references_row
+from src.utils import to_parquet
 
 prefix = "_429"  # Set prefix if needed (e.g. "_429")
 DATA_FOLDER = "data/processed"
@@ -91,7 +92,7 @@ if __name__ == "__main__":
     if new_citations:
         df_new_citations = pd.DataFrame(new_citations)
         df_citations_missing = pd.concat([df_citations_missing, df_new_citations], ignore_index=True)
-        df_citations_missing.to_parquet(CITATIONS_MISSING_FILE, compression="zstd", engine="pyarrow", index=False)
+        to_parquet(df_citations_missing, CITATIONS_MISSING_FILE)
         print(f"Saved updated missing citations to {CITATIONS_MISSING_FILE}.")
     else:
         print(f"No new citations re-queried; {CITATIONS_MISSING_FILE} remains unchanged.")
@@ -110,7 +111,7 @@ if __name__ == "__main__":
     if new_references:
         df_new_references = pd.DataFrame(new_references)
         df_references_missing = pd.concat([df_references_missing, df_new_references], ignore_index=True)
-        df_references_missing.to_parquet(REFERENCES_MISSING_FILE, compression="zstd", engine="pyarrow", index=False)
+        to_parquet(df_references_missing, REFERENCES_MISSING_FILE)
         print(f"Saved updated missing references to {REFERENCES_MISSING_FILE}.")
     else:
         print(f"No new references re-queried; {REFERENCES_MISSING_FILE} remains unchanged.")
