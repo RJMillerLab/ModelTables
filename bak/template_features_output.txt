@@ -1,0 +1,242 @@
+Loading data and calculating template scores...
+
+Total deduplicated cards: 414972
+
+Template score distribution:
+  Score 0: 401,481 cards
+  Score 1: 3,051 cards
+  Score 2: 1,317 cards
+  Score 3: 841 cards
+  Score 4: 579 cards
+  Score 5: 7,703 cards
+
+Individual feature frequencies:
+  Feature 0: 9,909 cards - '[More Information Needed]...'
+  Feature 1: 10,539 cards - '<!-- Provide a quick summary of what the model is/...'
+  Feature 2: 10,196 cards - '<!-- Provide a longer summary of what this model i...'
+  Feature 3: 9,717 cards - 'Use the code below to get started with the model...'
+  Feature 4: 8,678 cards - 'Carbon emissions can be estimated using the [Machi...'
+
+Cards with template score >= 3: 9123
+
+Top 10 template cards:
+
+Rank 1:
+  ModelID: HuggingFaceM4/Florence-2-DocVQA
+  Author: HuggingFaceM4
+  Template Score: 5
+  Likes: 55
+  Downloads: 2793
+  Card length: 5375 characters
+  Card preview (first 200 chars): ---
+library_name: transformers
+pipeline_tag: image-text-to-text
+base_model:
+- microsoft/Florence-2-base-ft
+---
+
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/does. -->
+T...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 2:
+  ModelID: klx1204/DollLikeness
+  Author: klx1204
+  Template Score: 5
+  Likes: 40
+  Downloads: 0
+  Card length: 5127 characters
+  Card preview (first 200 chars): ---
+license: openrail
+---
+
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/does. -->
+
+**Disclaimer:**
+I have no associate with the models in repo. The models are only for ...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 3:
+  ModelID: grugger/chubas
+  Author: grugger
+  Template Score: 5
+  Likes: 23
+  Downloads: 0
+  Card length: 9177 characters
+  Card preview (first 200 chars): ---
+license: creativeml-openrail-m
+library_name: diffusers
+pipeline_tag: text-to-image
+tags:
+- art
+- stable-diffusion
+---
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/d...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 4:
+  ModelID: Tann-dev/sex-chat-dirty-girlfriend
+  Author: Tann-dev
+  Template Score: 5
+  Likes: 22
+  Downloads: 884
+  Card length: 5175 characters
+  Card preview (first 200 chars): ---
+library_name: transformers
+tags: []
+---
+
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/does. -->
+
+
+
+## Model Details
+
+### Model Description
+
+<!-- Provide a longer su...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 5:
+  ModelID: PvDeep/Add-Detail-XL
+  Author: PvDeep
+  Template Score: 5
+  Likes: 21
+  Downloads: 0
+  Card length: 5189 characters
+  Card preview (first 200 chars): ---
+license: unknown
+---
+
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/does. -->
+
+This modelcard aims to be a base template for new models. It has been generated using ...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 6:
+  ModelID: tennant/llava-llama-3-8b-hqedit
+  Author: tennant
+  Template Score: 5
+  Likes: 16
+  Downloads: 21
+  Card length: 5171 characters
+  Card preview (first 200 chars): ---
+library_name: transformers
+tags: []
+---
+
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/does. -->
+
+
+
+## Model Details
+
+### Model Description
+
+<!-- Provide a longer su...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 7:
+  ModelID: indischepartij/MiniCPM-3B-OpenHermes-2.5-v2
+  Author: indischepartij
+  Template Score: 5
+  Likes: 14
+  Downloads: 82
+  Card length: 8594 characters
+  Card preview (first 200 chars): ---
+license: apache-2.0
+library_name: transformers
+model-index:
+- name: MiniCPM-3B-OpenHermes-2.5-v2
+  results:
+  - task:
+      type: text-generation
+      name: Text Generation
+    dataset:
+      nam...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 8:
+  ModelID: HuggingFaceFW/ablation-model-fineweb-v1
+  Author: HuggingFaceFW
+  Template Score: 5
+  Likes: 13
+  Downloads: 1074
+  Card length: 5182 characters
+  Card preview (first 200 chars): ---
+library_name: transformers
+license: apache-2.0
+---
+
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/does. -->
+
+
+
+## Model Details
+
+### Model Description
+
+<!-- Provide ...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 9:
+  ModelID: BleachNick/SD3_UltraEdit_w_mask
+  Author: BleachNick
+  Template Score: 5
+  Likes: 12
+  Downloads: 4817
+  Card length: 6197 characters
+  Card preview (first 200 chars): ---
+library_name: diffusers
+license: other
+datasets:
+- BleachNick/UltraEdit
+pipeline_tag: text-to-image
+---
+
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/does. -->
+
+
+
+#...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Rank 10:
+  ModelID: Locutusque/gpt2-large-conversational-retrain
+  Author: Locutusque
+  Template Score: 5
+  Likes: 9
+  Downloads: 1500
+  Card length: 7891 characters
+  Card preview (first 200 chars): ---
+license: mit
+datasets:
+- Locutusque/InstructMix
+language:
+- en
+metrics:
+- bleu
+- perplexity
+pipeline_tag: text-generation
+widget:
+  - text: >-
+      <|USER|> Design a Neo4j database and Cypher fun...
+  Matched features: '[More Information Needed]...', '<!-- Provide a quick summary o...', '<!-- Provide a longer summary ...', 'Use the code below to get star...', 'Carbon emissions can be estima...'
+
+Detailed analysis saved to: template_feature_analysis.json
