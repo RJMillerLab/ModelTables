@@ -15,6 +15,7 @@ import sqlite3
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from src.utils import to_parquet
+from tqdm_joblib import tqdm_joblib
 
 
 def classify_page(html_path):
@@ -320,7 +321,7 @@ def extract_tables_and_save_to_sqlite(html_path, paper_id, sqlite_path='data/pro
     return table_names
 
 
-def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tables_output_v2'):
+def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tables_output_v2', preserve_bold=False):
     """
     Extracts all <table> tags from the given HTML file, converts them to CSV,
     and saves them directly in the output directory: {output_dir}/{paper_id}_table{idx}.csv
@@ -343,9 +344,14 @@ def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tabl
     os.makedirs(output_dir, exist_ok=True)
     
     for idx, table in enumerate(tables):
-        # Convert table to DataFrame
-        df = pd.read_html(str(table))[0]
-        
+        # Parse using the same robust parser used for DB outputs
+        table_data = parse_table_with_nested_structure(table, preserve_bold)
+        df = create_structured_dataframe(table_data)
+        if df is None or df.empty:
+            continue
+        df = clean_final_dataframe(df)
+        if df is None or df.empty:
+            continue
         # Save as CSV directly in output directory
         csv_path = os.path.join(output_dir, f"{paper_id}_table{idx}.csv")
         df.to_csv(csv_path, index=False)
@@ -384,7 +390,7 @@ def process_single_html(html_path, paper_id, output_dir='data/processed/tables_o
         
         # Extract tables based on save_mode
         if save_mode in ['csv', 'both']:
-            result['csv_paths'] = extract_tables_and_save(html_path, paper_id, output_dir)
+            result['csv_paths'] = extract_tables_and_save(html_path, paper_id, output_dir, preserve_bold)
         
         if save_mode in ['duckdb', 'both']:
             result['db_tables'] = extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path, preserve_bold)
@@ -426,12 +432,13 @@ def main():
     print(f"Save mode: {args.save_mode}")
     print(f"Preserve bold: {args.preserve_bold}")
     
-    # Process files in parallel
-    results = Parallel(n_jobs=args.n_jobs)(
-        delayed(process_single_html)(
-            html_path, paper_id, args.output_dir, args.db_path, args.preserve_bold, args.save_mode
-        ) for html_path, paper_id in tqdm(html_files, desc="Processing HTML files")
-    )
+    # Process files in parallel with proper progress tracking
+    with tqdm_joblib(tqdm(total=len(html_files), desc="Processing HTML files")):
+        results = Parallel(n_jobs=args.n_jobs)(
+            delayed(process_single_html)(
+                html_path, paper_id, args.output_dir, args.db_path, args.preserve_bold, args.save_mode
+            ) for html_path, paper_id in html_files
+        )
     
     # Save results to parquet
     results_df = pd.DataFrame(results)

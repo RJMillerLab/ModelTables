@@ -385,7 +385,7 @@ def save_parquet_optimized(
     compress_list_cols: tuple = None,
     downcast_integers: bool = True,
     downcast_floats_to_fp32: bool = False,
-    use_dictionary: bool | list = True,
+    use_dictionary: bool = True,
 ):
     """Save a DataFrame to Parquet with compact Arrow types and ZSTD compression.
 
