@@ -124,7 +124,7 @@ python -m src.data_preprocess.step2_get_html
 # Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional)
 # Output: html_table.parquet, tables_output/*.csv
 python -m src.data_preprocess.step2_html_parsing
-python -m src.data_preprocess.step2_html_parsing_v2 --save_mode csv/duckdb/sqlite
+python -m src.data_preprocess.step2_html_parsing_v2 --n_jobs 8 --output_dir data/processed/tables_output_v2 --save_mode csv/duckdb/sqlite
 
 mkdir logs
 # Integrate all processed table data (HTML, potentially LLM-polished text).

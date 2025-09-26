@@ -45,6 +45,46 @@ def classify_page(html_path):
     return 'metadata'
 
 
+def extract_math_text(cell):
+    """Extract text from math elements and convert to readable format."""
+    # Find all math elements
+    math_elements = cell.find_all('math')
+    if not math_elements:
+        text = cell.get_text(strip=True)
+    else:
+        # Replace math elements with their alttext or annotation
+        text = str(cell)
+        for math in math_elements:
+            alttext = math.get('alttext', '')
+            if alttext:
+                text = text.replace(str(math), alttext)
+            else:
+                # Try to get annotation
+                annotation = math.find('annotation', encoding='application/x-tex')
+                if annotation:
+                    text = text.replace(str(math), annotation.get_text(strip=True))
+        
+        # Parse the modified HTML
+        soup = BeautifulSoup(text, 'html.parser')
+        text = soup.get_text(strip=True)
+    
+    # Clean up math formatting like BERTbasebase{}_{\text{base}} to BERT_base
+    import re
+    # Remove {}_{\text{base}} and similar patterns
+    text = re.sub(r'\{_\{\\text\{base\}\}\}', '_base', text)
+    text = re.sub(r'\{_\{\\text\{large\}\}\}', '_large', text)
+    # Remove any remaining LaTeX formatting
+    text = re.sub(r'\{[^}]*\}', '', text)
+    # Clean up multiple underscores
+    text = re.sub(r'_+', '_', text)
+    # Remove trailing underscores
+    text = text.rstrip('_')
+    # Fix cases like "BERT_}" to "BERT_base"
+    text = re.sub(r'([A-Za-z]+)_\}', r'\1_base', text)
+    text = re.sub(r'([A-Za-z]+)_\}', r'\1_large', text)
+    
+    return text
+
 def parse_table_with_nested_structure(table, preserve_bold=True):
     """Parse HTML table while handling nested tables properly."""
     # Check if this is a nested table structure
@@ -57,31 +97,62 @@ def parse_table_with_nested_structure(table, preserve_bold=True):
         table = nested_tables[0]
     
     rows = table.find_all('tr')
-    table_data = []
+    if not rows:
+        return []
     
-    for row in rows:
+    # First pass: extract all cell data with their positions
+    cell_data = []
+    for row_idx, row in enumerate(rows):
         cells = row.find_all(['td', 'th'])
-        row_data = []
-        
         for cell in cells:
-            # Get cell text and preserve formatting
-            text = cell.get_text(strip=True)
+            text = extract_math_text(cell)
             
             # Check for bold formatting
             if preserve_bold and cell.find('span', class_='ltx_text ltx_font_bold'):
                 text = f"**{text}**"
             
-            # Handle colspan by duplicating the value across columns
             colspan = int(cell.get('colspan', 1))
-            for _ in range(colspan):
-                row_data.append(text)
-            
-            # Note: For rowspan, we could implement more sophisticated handling
-            # but for now we'll duplicate values as requested
-        
-        table_data.append(row_data)
+            rowspan = int(cell.get('rowspan', 1))
+            cell_data.append({
+                'row': row_idx,
+                'text': text,
+                'colspan': colspan,
+                'rowspan': rowspan
+            })
     
-    return table_data
+    # Find max columns
+    max_cols = 0
+    for row in rows:
+        cells = row.find_all(['td', 'th'])
+        col_count = sum(int(cell.get('colspan', 1)) for cell in cells)
+        max_cols = max(max_cols, col_count)
+    
+    # Create grid
+    grid = []
+    for row_idx in range(len(rows)):
+        grid.append([''] * max_cols)
+    
+    # Fill grid with cell data
+    for cell_info in cell_data:
+        row_start = cell_info['row']
+        text = cell_info['text']
+        colspan = cell_info['colspan']
+        rowspan = cell_info['rowspan']
+        
+        # Find the correct column position for this cell
+        col_idx = 0
+        for col in range(max_cols):
+            if grid[row_start][col] == '':
+                col_idx = col
+                break
+        
+        # Fill the grid with this cell's data
+        for r in range(row_start, row_start + rowspan):
+            for c in range(col_idx, col_idx + colspan):
+                if r < len(grid) and c < max_cols:
+                    grid[r][c] = text
+    
+    return grid
 
 
 def create_structured_dataframe(table_data):
@@ -194,7 +265,7 @@ def extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path='data/pro
                 continue
                 
             caption = caption_elem.get_text(strip=True)
-            print(f"Processing table {fig_idx}: {caption[:50]}...")
+            # print(f"Processing table {fig_idx}: {caption[:50]}...")  # Commented for speed
             
             # Find the actual table within the figure
             table = figure.find('table')
@@ -277,7 +348,7 @@ def extract_tables_and_save_to_sqlite(html_path, paper_id, sqlite_path='data/pro
                 continue
                 
             caption = caption_elem.get_text(strip=True)
-            print(f"Processing table {fig_idx}: {caption[:50]}...")
+            # print(f"Processing table {fig_idx}: {caption[:50]}...")  # Commented for speed
             
             # Find the actual table within the figure
             table = figure.find('table')
@@ -335,15 +406,32 @@ def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tabl
     with open(html_path, 'r', encoding='utf-8') as f:
         html = f.read()
     soup = BeautifulSoup(html, 'html.parser')
-    tables = soup.find_all('table')
     
-    if not tables:
+    # Find all table figures (tables with captions) - same as DB version
+    table_figures = soup.find_all('figure', class_='ltx_table')
+    
+    if not table_figures:
         return table_paths
     
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
     
-    for idx, table in enumerate(tables):
+    for fig_idx, figure in enumerate(table_figures):
+        # Extract caption - only process tables with captions
+        caption_elem = figure.find('figcaption')
+        if not caption_elem:
+            print(f"Skipping table {fig_idx}: No caption found")
+            continue
+            
+        caption = caption_elem.get_text(strip=True)
+        # print(f"Processing table {fig_idx}: {caption[:50]}...")  # Commented for speed
+        
+        # Find the actual table within the figure
+        table = figure.find('table')
+        if not table:
+            print(f"Skipping table {fig_idx}: No table element found")
+            continue
+        
         # Parse using the same robust parser used for DB outputs
         table_data = parse_table_with_nested_structure(table, preserve_bold)
         df = create_structured_dataframe(table_data)
@@ -353,8 +441,8 @@ def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tabl
         if df is None or df.empty:
             continue
         # Save as CSV directly in output directory
-        csv_path = os.path.join(output_dir, f"{paper_id}_table{idx}.csv")
-        df.to_csv(csv_path, index=False)
+        csv_path = os.path.join(output_dir, f"{paper_id}_table{fig_idx}.csv")
+        df.to_csv(csv_path, index=False, header=False)
         table_paths.append(csv_path)
     
     return table_paths
