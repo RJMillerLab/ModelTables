@@ -112,7 +112,7 @@ python -m src.data_localindexing.extract_full_records_to_merge
  # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query |
   # I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
  - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext -> ref/cit info
-# I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, merged_df.parquet
+# I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_merged_df.parquet, tmp_extracted_lines.parquet
 
 
 # Download HTML content for table extraction.
@@ -124,6 +124,7 @@ python -m src.data_preprocess.step2_get_html
 # Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional)
 # Output: html_table.parquet, tables_output/*.csv
 python -m src.data_preprocess.step2_html_parsing
+python -m src.data_preprocess.step2_html_parsing_v2 --save_mode csv/duckdb/sqlite
 
 mkdir logs
 # Integrate all processed table data (HTML, potentially LLM-polished text).
@@ -358,12 +359,26 @@ python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1
 # Count unique CSVs in retrieval results.
 python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json --gt /u1/z6dong/Repo/ModelLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl
 
-# input csv, get modelIds
-# in starmie, get tmp/top_tables.csv
-# in CitationLake, query the modelIds for each table
+# CSV to ModelID Mapping
+# Get modelIDs from CSV files (supports GitHub, HuggingFace, HTML, LLM sources)
 python batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keywords.csv
-# input modelId, get csvs
+
+# For HuggingFace CSVs specifically:
+# Input file format: csv_name<TAB>score (e.g., "a1b2c3d4e5_table1.csv	0.95")
+# Output includes: table_file, modelId, source, has_label_scheme, has_view_label_scheme
+
+# Reverse lookup: Get CSVs from modelID
 python -m src.data_analysis.get_csvs_by_model --model "google-bert/bert-base-uncased"
+
+# Get GitHub README paths from GitHub CSV paths
+# Get README path from single CSV file
+python -m src.data_analysis.get_github_readme --csv-path "data/processed/deduped_github_csvs/abc123_table1.csv"
+# Get README path from CSV filename only
+python -m src.data_analysis.get_github_readme --csv-path "abc123_table1.csv"
+# Process multiple CSV paths from file 
+python -m src.data_analysis.get_github_readme --input-file csv_paths.txt --output results.json
+
+python quick_csv_to_modelid.py --csv "64dc62e53f_table2.csv"
 ```
 
 ### Additional Statistics Analysis
@@ -379,23 +394,23 @@ TODO: add statistics analysis from dataset_processed.ipynb
 (Deprecated scripts: Previously we download pdfs and try to parse them. However, we find semantic scholar dataset includes it.)
 ```bash
 # deprecated as we don't use PDF for extraction at this time
-#python -m src.data_preprocess.step2_get_pdf #TODO: wait se_url_tab and then test
-python -m src.data_preprocess.step_down_pdf
-python -m src.data_preprocess.step_add_pdftab # Issue: deterministic PDF2table is not accurate enough. Try LLM based image extraction (not implemented here)
-python -m src.data_preprocess.step_down_tex # Issue: IP rate limit on accessing tex files, Possible solution: use arxiv bulk downloading
-python -m src.data_preprocess.step_add_textab
-python -m src.data_preprocess.step_add_gittab
-python -m src.data_ingestion.tmp_extract_url # Update PDF url from extracted url (some don't have .pdf, need to extract from html or add)
-python -m src.data_ingestion.tmp_extract_table # Extract table/figures caption and cited text from s2orc dumped data, but don't contain text and figure detailed content!
-python -m src.data_preprocess.step4 # process groundtruth (work for API, not work for dump data)
-python -m src.data_preprocess.step2_Citation_Info
-# (Optional) python -m src.data_preprocess.step3_statistic_table # get statistic tables
-python -m src.data_preprocess.step1_parsetags # Parse tags into columns with name start with `card_tag_xx`
-bash src/data_symlink/trick_str.sh # too slow
-bash src/data_symlink/trick_tr.sh # too slow
-bash src/data_symlink/trick_tr_str.sh # too slow
-bash src/data_symlink/ln_scilake_large.sh # too slow
-bash src/data_symlink/ln_scilake_final.sh
+#python -m bak.step2_get_pdf #TODO: wait se_url_tab and then test
+python -m bak.step_down_pdf
+python -m bak.step_add_pdftab # Issue: deterministic PDF2table is not accurate enough. Try LLM based image extraction (not implemented here)
+python -m bak.step_down_tex # Issue: IP rate limit on accessing tex files, Possible solution: use arxiv bulk downloading
+python -m bak.step_add_textab
+python -m bak.step_add_gittab
+python -m bak.tmp_extract_url # Update PDF url from extracted url (some don't have .pdf, need to extract from html or add)
+python -m bak.tmp_extract_table # Extract table/figures caption and cited text from s2orc dumped data, but don't contain text and figure detailed content!
+python -m bak.step4 # process groundtruth (work for API, not work for dump data)
+python -m bak.step2_Citation_Info
+# (Optional) python -m bak.step3_statistic_table # get statistic tables
+python -m bak.step1_parsetags # Parse tags into columns with name start with `card_tag_xx`
+bash bak/symlink_trick_str.sh # too slow
+bash bak/symlink_trick_tr.sh # too slow
+bash bak/symlink_trick_tr_str.sh # too slow
+bash bak/symlink_ln_scilake_large.sh # too slow
+bash bak/symlink_ln_scilake_final.sh
 ```
 
 
@@ -451,5 +466,11 @@ python src/modelsearch/pipeline_table2mc/build_faiss.py ...
 ```
 
 ```bash
+# get parquet schema
 python tmp_list_parquet_schemas.py > logs/parquet_schema.log    
+# get attributes duplicate analysis
+#python complete_duplicate_analysis.py > logs/complete_duplicate_analysis_results.txt
+python column_size_analysis.py --include-modelid > logs/parquet_storage.log
 ```
+
+
