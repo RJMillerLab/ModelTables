@@ -19,8 +19,16 @@ import shutil
 from bs4 import BeautifulSoup
 from src.data_ingestion.readme_parser import MarkdownHandler
 from src.utils import load_config, to_parquet
+from functools import lru_cache
 
 tqdm.pandas()
+
+# Pre-compile regex patterns for better performance
+MARKDOWN_TABLE_PATTERN = re.compile(r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+", re.MULTILINE)
+SEPARATOR_PATTERN = re.compile(r'^[\s\-:|]*$')
+CDATA_PATTERN = re.compile(r'<!\[CDATA\[.*?\]\]>', re.DOTALL)
+COMMENT_PATTERN = re.compile(r'<![^>]*>')
+TABLE_PATTERN = re.compile(r'<table[^>]*>.*?</table>', re.DOTALL | re.IGNORECASE)
 
 def compute_file_hash(file_path):
     """
@@ -130,6 +138,89 @@ def parse_html_table_gitcard(table):
     
     return grid
 
+def create_structured_dataframe_gitcard(table_data):
+    """Create DataFrame with proper structure handling for gitcard tables."""
+    if not table_data:
+        return None
+    
+    # Find the maximum number of columns
+    max_cols = max(len(row) for row in table_data) if table_data else 0
+    
+    # Pad all rows to have the same number of columns
+    padded_data = []
+    for row in table_data:
+        padded_row = row + [""] * (max_cols - len(row))
+        padded_data.append(padded_row)
+    
+    # Create DataFrame
+    df = pd.DataFrame(padded_data)
+    
+    # Remove first row if it's just column numbers (0,1,2,3,4...)
+    if not df.empty and len(df) > 0:
+        first_row = df.iloc[0]
+        if all(str(val).strip().isdigit() for val in first_row if str(val).strip() != ''):
+            df = df.iloc[1:].reset_index(drop=True)
+    
+    return df
+
+def clean_final_dataframe_gitcard(df):
+    """Final DataFrame cleaning with all requirements for gitcard tables."""
+    if df is None or df.empty:
+        return df
+    
+    # 1. Remove rows that are all numbers (like 0,1,2,3,4)
+    def is_number_row(row):
+        try:
+            # Check if all non-empty values are numbers
+            non_empty = [str(val).strip() for val in row if str(val).strip() != '']
+            if not non_empty:
+                return True
+            # Check if all non-empty values are numbers
+            for val in non_empty:
+                float(val)
+            return True
+        except (ValueError, TypeError):
+            return False
+    
+    # Remove number-only rows
+    df = df[~df.apply(is_number_row, axis=1)]
+    
+    # 1.5. Remove first row if it's just column numbers (0,1,2,3,4...)
+    if not df.empty and len(df) > 0:
+        first_row = df.iloc[0]
+        if all(str(val).strip().isdigit() for val in first_row if str(val).strip() != ''):
+            df = df.iloc[1:].reset_index(drop=True)
+    
+    # 2. Remove completely empty columns
+    df = df.dropna(axis=1, how='all')
+    
+    # 3. Remove columns that are all empty strings
+    df = df.loc[:, ~(df == '').all()]
+    
+    # 4. Remove columns with unnamed headers (like "Unnamed: 0") or empty headers
+    df = df.loc[:, ~df.columns.astype(str).str.contains('Unnamed', na=False)]
+    
+    # 4.5. Remove columns where the header is empty or just whitespace
+    if not df.empty:
+        # Check if first row (header) has empty values or "Unnamed" values
+        first_row = df.iloc[0]
+        non_empty_cols = []
+        for i, val in enumerate(first_row):
+            val_str = str(val).strip()
+            # Keep columns that are not empty and don't start with "Unnamed"
+            if val_str != '' and not val_str.startswith('Unnamed'):
+                non_empty_cols.append(i)
+        if non_empty_cols:
+            df = df.iloc[:, non_empty_cols]
+    
+    # 5. Remove completely empty rows
+    df = df.dropna(axis=0, how='all')
+    
+    # 6. Reset index
+    df = df.reset_index(drop=True)
+    
+    return df
+
 def detect_and_extract_markdown_tables_v2(content: str):
     """
     Enhanced version: Detect and extract all Markdown tables (both | format and HTML <table>) from the given text.
@@ -141,9 +232,8 @@ def detect_and_extract_markdown_tables_v2(content: str):
     
     all_tables = []
     
-    # 1. Extract markdown tables (| format)
-    markdown_table_pattern = r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+"
-    md_matches = re.findall(markdown_table_pattern, content, re.MULTILINE)
+    # 1. Extract markdown tables (| format) - using pre-compiled pattern
+    md_matches = MARKDOWN_TABLE_PATTERN.findall(content)
     
     for table in md_matches:
         try:
@@ -152,16 +242,41 @@ def detect_and_extract_markdown_tables_v2(content: str):
             if len(lines) < 3:  # Must have header, separator, and at least one data row
                 continue
             
-            # Clean lines and split by |
+            # Clean lines and split by |, but be more careful about content with |
             cleaned_lines = []
             for line in lines:
                 line = line.strip()
                 if line.startswith('|') and line.endswith('|'):
                     line = line[1:-1]  # Remove outer pipes
                 # Skip separator lines (containing only :, -, |, and spaces)
-                if re.match(r'^[\s\-:|]*$', line):
+                if SEPARATOR_PATTERN.match(line):
                     continue
-                cells = [cell.strip() for cell in line.split('|')]
+                
+                # Split by | but be more careful about content that might contain |
+                # First, try to identify the actual table structure by looking at the header
+                if not cleaned_lines:  # This is the header row
+                    cells = [cell.strip() for cell in line.split('|')]
+                else:
+                    # For data rows, we need to be more careful
+                    # Count the number of | in the line to determine if it's a real separator
+                    pipe_count = line.count('|')
+                    if pipe_count <= 1:  # Likely a real table row with minimal |
+                        cells = [cell.strip() for cell in line.split('|')]
+                    else:
+                        # This might be content with | symbols, so we need to be more careful
+                        # Try to split only on | that are likely separators
+                        # Look for patterns like " | " (space-pipe-space) as likely separators
+                        parts = line.split(' | ')
+                        if len(parts) >= 2:
+                            cells = [part.strip() for part in parts]
+                        else:
+                            # Fall back to regular split but limit to reasonable number of columns
+                            cells = [cell.strip() for cell in line.split('|')]
+                            # If we get too many columns, it's likely content with | symbols
+                            if len(cells) > 10:  # Arbitrary threshold
+                                # Treat the whole line as one cell except for the first part
+                                cells = [cells[0], ' | '.join(cells[1:])]
+                
                 # Remove empty cells at the end
                 while cells and not cells[-1]:
                     cells.pop()
@@ -175,7 +290,14 @@ def detect_and_extract_markdown_tables_v2(content: str):
                     while len(row) < max_cols:
                         row.append('')
                 
-                all_tables.append(cleaned_lines)
+                # Apply the same cleaning logic as HTML parsing
+                df = create_structured_dataframe_gitcard(cleaned_lines)
+                if df is not None and not df.empty:
+                    df = clean_final_dataframe_gitcard(df)
+                    if not df.empty:
+                        # Convert back to list of lists
+                        cleaned_table = df.values.tolist()
+                        all_tables.append(cleaned_table)
         except Exception as e:
             print(f"Error extracting markdown table: {e}")
             continue
@@ -191,8 +313,8 @@ def detect_and_extract_markdown_tables_v2(content: str):
         cleaned_content = content
         
         # Remove problematic CDATA sections and other invalid markup
-        cleaned_content = re.sub(r'<!\[CDATA\[.*?\]\]>', '', cleaned_content, flags=re.DOTALL)
-        cleaned_content = re.sub(r'<![^>]*>', '', cleaned_content)  # Remove other invalid comments
+        cleaned_content = CDATA_PATTERN.sub('', cleaned_content)
+        cleaned_content = COMMENT_PATTERN.sub('', cleaned_content)
         
         # Try different parsers for problematic content
         soup = None
@@ -208,8 +330,7 @@ def detect_and_extract_markdown_tables_v2(content: str):
             # If all parsers fail, try with minimal content
             try:
                 # Extract only table tags using regex as fallback
-                table_pattern = r'<table[^>]*>.*?</table>'
-                table_matches = re.findall(table_pattern, cleaned_content, re.DOTALL | re.IGNORECASE)
+                table_matches = TABLE_PATTERN.findall(cleaned_content)
                 if table_matches:
                     for table_html in table_matches:
                         try:
@@ -218,7 +339,14 @@ def detect_and_extract_markdown_tables_v2(content: str):
                             if table:
                                 table_data = parse_html_table_gitcard(table)
                                 if table_data and len(table_data) >= 2:
-                                    all_tables.append(table_data)
+                                    # Apply the same cleaning logic as HTML parsing
+                                    df = create_structured_dataframe_gitcard(table_data)
+                                    if df is not None and not df.empty:
+                                        df = clean_final_dataframe_gitcard(df)
+                                        if not df.empty:
+                                            # Convert back to list of lists
+                                            cleaned_table = df.values.tolist()
+                                            all_tables.append(cleaned_table)
                         except Exception as e:
                             print(f"Error parsing table with regex fallback: {e}")
                             continue
@@ -231,7 +359,14 @@ def detect_and_extract_markdown_tables_v2(content: str):
                     # Use the proven HTML table parser
                     table_data = parse_html_table_gitcard(table)
                     if table_data and len(table_data) >= 2:
-                        all_tables.append(table_data)
+                        # Apply the same cleaning logic as HTML parsing
+                        df = create_structured_dataframe_gitcard(table_data)
+                        if df is not None and not df.empty:
+                            df = clean_final_dataframe_gitcard(df)
+                            if not df.empty:
+                                # Convert back to list of lists
+                                cleaned_table = df.values.tolist()
+                                all_tables.append(cleaned_table)
                 except Exception as e:
                     print(f"Error extracting HTML table: {e}")
                     continue
@@ -322,9 +457,13 @@ def save_markdown_to_csv_from_content_v2(model_id, content, source, file_idx, ou
         # Convert table_data to DataFrame and save
         try:
             if len(table_data) >= 2:  # Has header and data
-                df = pd.DataFrame(table_data[1:], columns=table_data[0])
-                df.to_csv(csv_path, index=False)
-                saved_paths.append(csv_path)
+                # Apply additional cleaning to ensure proper structure
+                df = create_structured_dataframe_gitcard(table_data)
+                if df is not None and not df.empty:
+                    df = clean_final_dataframe_gitcard(df)
+                    if not df.empty:
+                        df.to_csv(csv_path, index=False, header=False)
+                        saved_paths.append(csv_path)
         except Exception as e:
             print(f"Error saving table {table_idx}: {e}")
             continue
@@ -364,45 +503,104 @@ def process_github_readmes_v2(row, output_folder, config):
     return csv_files
 
 ########
-def process_markdown_files_v2(github_folder, output_folder):
+@lru_cache(maxsize=1000)
+def _cached_table_extraction(content_hash, content):
     """
-    Enhanced process all markdown files using improved parsing.
+    Cached table extraction to avoid reprocessing identical content.
     """
-    os.makedirs(output_folder, exist_ok=True)
-    markdown_files = [f for f in os.listdir(github_folder) if f.endswith(".md")]
-    md_to_csv_mapping = {}
-    for md_file in tqdm(markdown_files, desc="Processing Markdown files"):
-        md_path = os.path.join(github_folder, md_file)
-        # Check file size (skip if > 5MB, but still record in mapping)
-        if os.path.getsize(md_path) > 5 * 1024 * 1024:  # 5MB threshold
-            print(f"⚠️ Skipping {md_file} (File too large: {os.path.getsize(md_path) / (1024 * 1024):.2f} MB)")
-            md_to_csv_mapping[md_file.replace(".md", "")] = None  # Record as None
-            continue
-        base_csv_name = md_file.replace(".md", "")
+    return detect_and_extract_markdown_tables_v2(content)
+
+def process_single_markdown_file(md_file, github_folder, output_folder):
+    """
+    Process a single markdown file - optimized for parallel processing.
+    """
+    md_path = os.path.join(github_folder, md_file)
+    base_csv_name = md_file.replace(".md", "")
+    
+    # Check file size (skip if > 5MB)
+    if os.path.getsize(md_path) > 5 * 1024 * 1024:  # 5MB threshold
+        return {
+            'file': base_csv_name,
+            'tables': None,
+            'error': f"File too large: {os.path.getsize(md_path) / (1024 * 1024):.2f} MB"
+        }
+    
+    try:
         with open(md_path, 'r', encoding='utf-8') as f:
             md_content = f.read()
         
-        # Use the improved extraction
-        _, tables = detect_and_extract_markdown_tables_v2(md_content)
+        # Use cached extraction for identical content
+        content_hash = hashlib.md5(md_content.encode('utf-8')).hexdigest()
+        _, tables = _cached_table_extraction(content_hash, md_content)
+        
         table_csv_basenames = []
+        
         for i, table_data in enumerate(tables):
             csv_basename = f"{base_csv_name}_table_{i}.csv"
             csv_path = os.path.join(output_folder, csv_basename)
             try:
-                # Convert table_data to DataFrame and save
+                # Convert table_data to DataFrame and save with proper cleaning
                 if len(table_data) >= 2:  # Has header and data
-                    df = pd.DataFrame(table_data[1:], columns=table_data[0])
-                    df.to_csv(csv_path, index=False)
-                    table_csv_basenames.append(csv_basename)
+                    # Apply additional cleaning to ensure proper structure
+                    df = create_structured_dataframe_gitcard(table_data)
+                    if df is not None and not df.empty:
+                        df = clean_final_dataframe_gitcard(df)
+                        if not df.empty:
+                            df.to_csv(csv_path, index=False, header=False)
+                            table_csv_basenames.append(csv_basename)
             except Exception as e:
                 print(f"Error saving {csv_basename}: {e}")
                 continue
-        # If no tables found, store an empty list instead of skipping
-        md_to_csv_mapping[base_csv_name] = table_csv_basenames if table_csv_basenames else []
+        
+        return {
+            'file': base_csv_name,
+            'tables': table_csv_basenames if table_csv_basenames else [],
+            'error': None
+        }
+        
+    except Exception as e:
+        return {
+            'file': base_csv_name,
+            'tables': [],
+            'error': str(e)
+        }
+
+def process_markdown_files_v2(github_folder, output_folder, n_jobs=-1):
+    """
+    Enhanced process all markdown files using improved parsing with parallel processing.
+    """
+    os.makedirs(output_folder, exist_ok=True)
+    markdown_files = [f for f in os.listdir(github_folder) if f.endswith(".md")]
+    
+    print(f"Found {len(markdown_files)} markdown files to process")
+    
+    # Use parallel processing
+    if n_jobs == -1:
+        n_jobs = min(8, os.cpu_count() or 1)  # Use more cores for file processing
+    
+    print(f"Processing with {n_jobs} parallel jobs...")
+    
+    # Process files in parallel
+    results = Parallel(n_jobs=n_jobs, batch_size=20)(
+        delayed(process_single_markdown_file)(md_file, github_folder, output_folder) 
+        for md_file in tqdm(markdown_files, desc="Processing Markdown files")
+    )
+    
+    # Build mapping from results
+    md_to_csv_mapping = {}
+    for result in results:
+        if result['error']:
+            print(f"⚠️ Error processing {result['file']}: {result['error']}")
+            md_to_csv_mapping[result['file']] = None
+        else:
+            md_to_csv_mapping[result['file']] = result['tables']
+    
     # Save mapping as JSON for reference
     mapping_json_path = os.path.join(output_folder, "md_to_csv_mapping.json")
     with open(mapping_json_path, 'w', encoding='utf-8') as json_file:
         json.dump(md_to_csv_mapping, json_file, indent=4)
+    
+    print(f"✅ Processed {len(markdown_files)} files, mapping saved to {mapping_json_path}")
 
 def main():
     config = load_config('config.yaml')
@@ -469,7 +667,7 @@ def main():
     output_folder_github = os.path.join(processed_base_path, "deduped_github_csvs_v2")
     os.makedirs(output_folder_github, exist_ok=True)
     input_folder_github = os.path.join(config.get('base_path'), 'downloaded_github_readmes')
-    process_markdown_files_v2(input_folder_github, output_folder_github) # save csv and md_to_csv_mapping
+    process_markdown_files_v2(input_folder_github, output_folder_github, n_jobs=-1) # save csv and md_to_csv_mapping
 
 if __name__ == "__main__":
     main()
