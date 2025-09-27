@@ -69,12 +69,13 @@ This step extracts tabular data from various sources and processes it.
 # Input: data/processed/modelcard_step1.parquet, github_readmes_info.parquet, downloaded_github_readmes/
 # Output: modelcard_step2.parquet, deduped_hugging_csvs/, hugging_deduped_mapping.json, deduped_github_csvs/, md_to_csv_mapping.json
 python -m src.data_preprocess.step2_gitcard_tab
+python -m src.data_preprocess.step2_gitcard_tab_v2
 
 # Process downloaded GitHub HTML files to Markdown.
 # Input: data/downloaded_github_readmes/
 # Output: data/downloaded_github_readmes_processed/
 python -m src.data_preprocess.step2_md2text
-py
+#python -m src.data_preprocess.step2_md2text_v2 --n_jobs 8 --output_dir data/processed/md_processed_v2 --save_mode csv/duckdb/sqlite
 # Fetch titles from BibTeX entries and PDF URLs using Semantic Scholar.
 # Input: modelcard_step1.parquet, github_readme_cache.parquet, github_readmes_processed/, PDF/GitHub URLs
 # Output: modelcard_all_title_list.parquet, github_readme_cache_update.parquet, github_extraction_cache.json, all_links_with_category.csv
@@ -362,6 +363,7 @@ python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/s
 # CSV to ModelID Mapping
 # Get modelIDs from CSV files (supports GitHub, HuggingFace, HTML, LLM sources)
 python batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keywords.csv
+python src/data_analysis/analyze_html_tables.py
 
 # For HuggingFace CSVs specifically:
 # Input file format: csv_name<TAB>score (e.g., "a1b2c3d4e5_table1.csv	0.95")
