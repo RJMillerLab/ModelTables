@@ -112,14 +112,63 @@ class MarkdownHandler:
         return "\n".join(standardized_rows)
 
     @staticmethod
+    def detect_table_type(df):
+        """Detect if this is a label scheme table or performance table."""
+        component_col = None
+        labels_col = None
+        
+        # Look for Component and Labels columns (handle spaces)
+        for col in df.columns:
+            if 'Component' in col.strip():
+                component_col = col
+            if 'Labels' in col.strip():
+                labels_col = col
+        
+        return component_col, labels_col
+
+    @staticmethod
+    def process_label_scheme_table(df, component_col, labels_col):
+        """Process label scheme table by converting comma-separated labels to pipe-separated."""
+        result = []
+        for i, row in df.iterrows():
+            component = row[component_col]
+            labels = row[labels_col]
+            if pd.notna(labels):
+                # Convert comma-separated to pipe-separated
+                label_list = [label.strip() for label in str(labels).split(',')]
+                result.append([component, '|'.join(label_list)])
+        return result
+
+    @staticmethod
     def markdown_to_csv(markdown_text, output_path, verbose=False):
-        """Convert cleaned and standardized markdown table to CSV and save it."""
+        """Enhanced convert markdown table to CSV with smart table type detection."""
         cleaned_markdown = MarkdownHandler.clean_markdown_table(markdown_text)
         standardized_markdown = MarkdownHandler.standardize_table_format(cleaned_markdown)
+        
         try:
+            # Parse the markdown table
             df = pd.read_csv(StringIO(standardized_markdown), sep="|", engine='python').dropna(axis=1, how="all")
-            df.to_csv(output_path, index=False, encoding="utf-8")
+            
+            # Detect table type
+            component_col, labels_col = MarkdownHandler.detect_table_type(df)
+            is_label_scheme = component_col and labels_col
+            
+            if is_label_scheme:
+                if verbose:
+                    print(f"🎯 Detected Label Scheme table: {os.path.basename(output_path)}")
+                # Process as label scheme table
+                processed_data = MarkdownHandler.process_label_scheme_table(df, component_col, labels_col)
+                result_df = pd.DataFrame(processed_data, columns=['Component', 'Labels'])
+            else:
+                if verbose:
+                    print(f"📈 Detected Performance table: {os.path.basename(output_path)}")
+                # Process as performance table (keep as-is)
+                result_df = df
+            
+            # Save the processed data
+            result_df.to_csv(output_path, index=False, encoding="utf-8")
             return output_path
+            
         except Exception as e:
             if verbose:
                 print(f"Failed to convert markdown to CSV for {output_path}: {e}")

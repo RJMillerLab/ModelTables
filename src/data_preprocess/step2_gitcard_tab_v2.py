@@ -1,11 +1,10 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-03-11
-Last Modified: 2025-09-26
+Last Modified: 2025-04-02
 Description: Extract markdown tables from GitHub | Huggingface html, modelcards, readme files, and save them to CSV files.
-Enhanced version with improved HTML table parsing and using raw card data.
 Usage:
-    python -m src.data_preprocess.step2_gitcard_tab_v2
+    python -m src.data_preprocess.step2_gitcard_tab
 Tips: We deduplicate the card content, and use the symlink to save data storage later.
 """
 
@@ -16,18 +15,10 @@ from tqdm import tqdm
 import numpy as np
 from shutil import copytree
 import shutil
-from bs4 import BeautifulSoup
 from src.data_ingestion.readme_parser import MarkdownHandler
 from src.utils import load_config, to_parquet
 
 tqdm.pandas()
-
-# Pre-compile regex patterns for better performance
-MARKDOWN_TABLE_PATTERN = re.compile(r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+", re.MULTILINE)
-SEPARATOR_PATTERN = re.compile(r'^[\s\-:|]*$')
-CDATA_PATTERN = re.compile(r'<!\[CDATA\[.*?\]\]>', re.DOTALL)
-COMMENT_PATTERN = re.compile(r'<![^>]*>')
-TABLE_PATTERN = re.compile(r'<table[^>]*>.*?</table>', re.DOTALL | re.IGNORECASE)
 
 def compute_file_hash(file_path):
     """
@@ -48,352 +39,6 @@ def setup_logging(log_filename):
     logging.info("Logging started.")
 
 ########
-def extract_math_text_gitcard(cell):
-    """Extract text from math elements and convert to readable format."""
-    math_elements = cell.find_all('math')
-    if not math_elements:
-        text = cell.get_text(strip=True)
-    else:
-        text = str(cell)
-        for math in math_elements:
-            alttext = math.get('alttext', '')
-            if alttext:
-                text = text.replace(str(math), alttext)
-            else:
-                annotation = math.find('annotation', encoding='application/x-tex')
-                if annotation:
-                    text = text.replace(str(math), annotation.get_text(strip=True))
-        
-        soup = BeautifulSoup(text, 'html.parser')
-        text = soup.get_text(strip=True)
-    
-    # Clean up math formatting
-    text = re.sub(r'\{_\{\\text\{base\}\}\}', '_base', text)
-    text = re.sub(r'\{_\{\\text\{large\}\}\}', '_large', text)
-    text = re.sub(r'\{[^}]*\}', '', text)
-    text = re.sub(r'_+', '_', text)
-    text = text.rstrip('_')
-    text = re.sub(r'([A-Za-z]+)_\}', r'\1_base', text)
-    
-    return text
-
-def parse_html_table_gitcard(table):
-    """Parse HTML table with proper rowspan and colspan handling."""
-    rows = table.find_all('tr')
-    if not rows:
-        return []
-    
-    # First pass: extract all cell data with their positions
-    cell_data = []
-    for row_idx, row in enumerate(rows):
-        cells = row.find_all(['td', 'th'])
-        for cell in cells:
-            text = extract_math_text_gitcard(cell)
-            
-            # Clean HTML content (remove bold tags for cleaner text)
-            text = re.sub(r'<[^>]+>', '', text)
-            text = text.strip()
-            
-            colspan = int(cell.get('colspan', 1))
-            rowspan = int(cell.get('rowspan', 1))
-            cell_data.append({
-                'row': row_idx,
-                'text': text,
-                'colspan': colspan,
-                'rowspan': rowspan
-            })
-    
-    # Find max columns
-    max_cols = 0
-    for row in rows:
-        cells = row.find_all(['td', 'th'])
-        col_count = sum(int(cell.get('colspan', 1)) for cell in cells)
-        max_cols = max(max_cols, col_count)
-    
-    # Create grid
-    grid = []
-    for row_idx in range(len(rows)):
-        grid.append([''] * max_cols)
-    
-    # Fill grid with cell data
-    for cell_info in cell_data:
-        row_start = cell_info['row']
-        text = cell_info['text']
-        colspan = cell_info['colspan']
-        rowspan = cell_info['rowspan']
-        
-        # Find the correct column position for this cell
-        col_idx = 0
-        for col in range(max_cols):
-            if grid[row_start][col] == '':
-                col_idx = col
-                break
-        
-        # Fill the grid with this cell's data
-        for r in range(row_start, row_start + rowspan):
-            for c in range(col_idx, col_idx + colspan):
-                if r < len(grid) and c < max_cols:
-                    grid[r][c] = text
-    
-    return grid
-
-def create_structured_dataframe_gitcard(table_data):
-    """Create DataFrame with proper structure handling for gitcard tables."""
-    if not table_data:
-        return None
-    
-    # Find the maximum number of columns
-    max_cols = max(len(row) for row in table_data) if table_data else 0
-    
-    # Pad all rows to have the same number of columns
-    padded_data = []
-    for row in table_data:
-        padded_row = row + [""] * (max_cols - len(row))
-        padded_data.append(padded_row)
-    
-    # Create DataFrame
-    df = pd.DataFrame(padded_data)
-    
-    # Remove first row if it's just column numbers (0,1,2,3,4...)
-    if not df.empty and len(df) > 0:
-        first_row = df.iloc[0]
-        if all(str(val).strip().isdigit() for val in first_row if str(val).strip() != ''):
-            df = df.iloc[1:].reset_index(drop=True)
-    
-    return df
-
-def clean_final_dataframe_gitcard(df):
-    """Final DataFrame cleaning with all requirements for gitcard tables."""
-    if df is None or df.empty:
-        return df
-    
-    # 1. Remove rows that are all numbers (like 0,1,2,3,4)
-    def is_number_row(row):
-        try:
-            # Check if all non-empty values are numbers
-            non_empty = [str(val).strip() for val in row if str(val).strip() != '']
-            if not non_empty:
-                return True
-            # Check if all non-empty values are numbers
-            for val in non_empty:
-                float(val)
-            return True
-        except (ValueError, TypeError):
-            return False
-    
-    # Remove number-only rows
-    df = df[~df.apply(is_number_row, axis=1)]
-    
-    # 1.5. Remove first row if it's just column numbers (0,1,2,3,4...)
-    if not df.empty and len(df) > 0:
-        first_row = df.iloc[0]
-        if all(str(val).strip().isdigit() for val in first_row if str(val).strip() != ''):
-            df = df.iloc[1:].reset_index(drop=True)
-    
-    # 2. Remove completely empty columns
-    df = df.dropna(axis=1, how='all')
-    
-    # 3. Remove columns that are all empty strings
-    df = df.loc[:, ~(df == '').all()]
-    
-    # 4. Remove columns with unnamed headers (like "Unnamed: 0") or empty headers
-    df = df.loc[:, ~df.columns.astype(str).str.contains('Unnamed', na=False)]
-    
-    # 4.5. Remove columns where the header is empty or just whitespace
-    if not df.empty:
-        # Check if first row (header) has empty values or "Unnamed" values
-        first_row = df.iloc[0]
-        non_empty_cols = []
-        for i, val in enumerate(first_row):
-            val_str = str(val).strip()
-            # Keep columns that are not empty and don't start with "Unnamed"
-            if val_str != '' and not val_str.startswith('Unnamed'):
-                non_empty_cols.append(i)
-        if non_empty_cols:
-            df = df.iloc[:, non_empty_cols]
-    
-    # 5. Remove completely empty rows
-    df = df.dropna(axis=0, how='all')
-    
-    # 6. Reset index
-    df = df.reset_index(drop=True)
-    
-    return df
-
-def detect_and_extract_markdown_tables_v2(content: str):
-    """
-    Enhanced version: Detect and extract all Markdown tables (both | format and HTML <table>) from the given text.
-    Returns a tuple (bool, list), where the boolean indicates whether at least one table was found,
-    and the list contains all matched table data (as list of lists).
-    """
-    if not isinstance(content, str) or not content.strip():
-        return (False, [])
-    
-    all_tables = []
-    
-    # 1. Extract markdown tables (| format) - using pre-compiled pattern
-    md_matches = MARKDOWN_TABLE_PATTERN.findall(content)
-    
-    for table in md_matches:
-        try:
-            # Parse markdown table manually for better control
-            lines = table.strip().split('\n')
-            if len(lines) < 3:  # Must have header, separator, and at least one data row
-                continue
-            
-            # Clean lines and split by |, but be more careful about content with |
-            cleaned_lines = []
-            for line in lines:
-                line = line.strip()
-                if line.startswith('|') and line.endswith('|'):
-                    line = line[1:-1]  # Remove outer pipes
-                # Skip separator lines (containing only :, -, |, and spaces)
-                if SEPARATOR_PATTERN.match(line):
-                    continue
-                
-                # Split by pipe '|' but avoid splitting when the pipe is inside code spans (`...`) or escaped (\|)
-                def split_markdown_row(row_text):
-                    cells = []
-                    cur = []
-                    in_backtick = False
-                    esc = False
-                    for ch in row_text:
-                        if esc:
-                            # preserve escaped char
-                            cur.append(ch)
-                            esc = False
-                            continue
-                        if ch == '\\':
-                            esc = True
-                            continue
-                        if ch == '`':
-                            in_backtick = not in_backtick
-                            cur.append(ch)
-                            continue
-                        if ch == '|' and not in_backtick:
-                            cells.append(''.join(cur).strip())
-                            cur = []
-                        else:
-                            cur.append(ch)
-                    cells.append(''.join(cur).strip())
-                    return cells
-
-                # Use the safe splitter for both header and data rows
-                cells = [cell.strip() for cell in split_markdown_row(line)]
-                
-                # Remove trailing empty cells at the end
-                while cells and cells[-1] == '':
-                    cells.pop()
-                if cells:  # Only add non-empty rows
-                    # If this is the header row, record expected column count
-                    if not cleaned_lines:
-                        expected_cols = len(cells)
-                        cleaned_lines.append(cells)
-                    else:
-                        # If the row split into more columns than header, assume extra pipes belong to the last cell
-                        if 'expected_cols' in locals() and len(cells) > expected_cols:
-                            # join extras into last cell
-                            cells = cells[:expected_cols-1] + ['|'.join(cells[expected_cols-1:])]
-                        # If fewer, pad
-                        if 'expected_cols' in locals() and len(cells) < expected_cols:
-                            cells += [''] * (expected_cols - len(cells))
-                        cleaned_lines.append(cells)
-            
-            if len(cleaned_lines) >= 2:  # Must have header and at least one data row
-                # Ensure all rows have the same number of columns
-                max_cols = max(len(row) for row in cleaned_lines)
-                for row in cleaned_lines:
-                    while len(row) < max_cols:
-                        row.append('')
-                
-                # Apply the same cleaning logic as HTML parsing
-                df = create_structured_dataframe_gitcard(cleaned_lines)
-                if df is not None and not df.empty:
-                    df = clean_final_dataframe_gitcard(df)
-                    if not df.empty:
-                        # Convert back to list of lists
-                        cleaned_table = df.values.tolist()
-                        all_tables.append(cleaned_table)
-        except Exception as e:
-            print(f"Error extracting markdown table: {e}")
-            continue
-    
-    # 2. Extract HTML tables (<table> format)
-    try:
-        # Suppress BeautifulSoup warnings
-        from bs4 import MarkupResemblesLocatorWarning
-        import warnings
-        warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
-        
-        # Clean content before parsing to avoid parser errors
-        cleaned_content = content
-        
-        # Remove problematic CDATA sections and other invalid markup
-        cleaned_content = CDATA_PATTERN.sub('', cleaned_content)
-        cleaned_content = COMMENT_PATTERN.sub('', cleaned_content)
-        
-        # Try different parsers for problematic content
-        soup = None
-        for parser in ['html.parser', 'lxml', 'html5lib']:
-            try:
-                soup = BeautifulSoup(cleaned_content, parser)
-                break
-            except Exception as e:
-                print(f"Parser {parser} failed: {e}")
-                continue
-        
-        if soup is None:
-            # If all parsers fail, try with minimal content
-            try:
-                # Extract only table tags using regex as fallback
-                table_matches = TABLE_PATTERN.findall(cleaned_content)
-                if table_matches:
-                    for table_html in table_matches:
-                        try:
-                            table_soup = BeautifulSoup(table_html, 'html.parser')
-                            table = table_soup.find('table')
-                            if table:
-                                table_data = parse_html_table_gitcard(table)
-                                if table_data and len(table_data) >= 2:
-                                    # Apply the same cleaning logic as HTML parsing
-                                    df = create_structured_dataframe_gitcard(table_data)
-                                    if df is not None and not df.empty:
-                                        df = clean_final_dataframe_gitcard(df)
-                                        if not df.empty:
-                                            # Convert back to list of lists
-                                            cleaned_table = df.values.tolist()
-                                            all_tables.append(cleaned_table)
-                        except Exception as e:
-                            print(f"Error parsing table with regex fallback: {e}")
-                            continue
-            except Exception as e:
-                print(f"Regex fallback failed: {e}")
-        else:
-            html_tables = soup.find_all('table')
-            for table in html_tables:
-                try:
-                    # Use the proven HTML table parser
-                    table_data = parse_html_table_gitcard(table)
-                    if table_data and len(table_data) >= 2:
-                        # Apply the same cleaning logic as HTML parsing
-                        df = create_structured_dataframe_gitcard(table_data)
-                        if df is not None and not df.empty:
-                            df = clean_final_dataframe_gitcard(df)
-                            if not df.empty:
-                                # Convert back to list of lists
-                                cleaned_table = df.values.tolist()
-                                all_tables.append(cleaned_table)
-                except Exception as e:
-                    print(f"Error extracting HTML table: {e}")
-                    continue
-    except Exception as e:
-        print(f"Error parsing HTML content: {e}")
-        # Continue with markdown tables only
-    
-    return (len(all_tables) > 0, all_tables)
-
-########
-
 def detect_and_extract_markdown_tables(content: str):
     """
     Detect and extract all Markdown tables (supporting multi-line) from the given text.
@@ -402,10 +47,48 @@ def detect_and_extract_markdown_tables(content: str):
     """
     if not isinstance(content, str):
         return (False, [])
-    markdown_table_pattern = r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+"
-    matches = re.findall(markdown_table_pattern, content, re.MULTILINE)
-    matches = [match.strip() for match in matches] if matches else []
-    return (len(matches) > 0, matches)
+    
+    # Enhanced pattern that handles indentation and various table formats
+    lines = content.split('\n')
+    tables = []
+    current_table = []
+    in_table = False
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if in_table and current_table:
+                # End of table
+                tables.append('\n'.join(current_table))
+                current_table = []
+                in_table = False
+            continue
+            
+        # Check if line looks like a table row (starts and ends with |)
+        if line.startswith('|') and line.endswith('|'):
+            if not in_table:
+                in_table = True
+            current_table.append(line)
+        elif in_table:
+            # Check if this is a separator line (contains |, -, :, spaces only)
+            if re.match(r'^[\|\-\s:]+$', line):
+                current_table.append(line)
+            else:
+                # End of table
+                if current_table:
+                    tables.append('\n'.join(current_table))
+                current_table = []
+                in_table = False
+    
+    # Don't forget the last table if content ends with a table
+    if in_table and current_table:
+        tables.append('\n'.join(current_table))
+    
+    # Filter out tables that are too short (less than 2 rows)
+    valid_tables = [table for table in tables if len([line for line in table.split('\n') if line.strip()]) >= 2]
+    
+    return (len(valid_tables) > 0, valid_tables)
+########
 
 def extract_markdown_tables_in_parallel(df_unique, col_name, n_jobs=-1):
     """
@@ -413,6 +96,10 @@ def extract_markdown_tables_in_parallel(df_unique, col_name, n_jobs=-1):
     in the DataFrame using joblib.Parallel.
     Returns a list of tuples (bool, list) for each row.
     """
+    #results = Parallel(n_jobs=n_jobs)(
+    #    delayed(detect_and_extract_markdown_tables)(content) for content in tqdm(df[col_name], total=len(df))
+    #)
+    #return results
     contents = df_unique[col_name].tolist()
     indices = df_unique.index.tolist()
     results = Parallel(n_jobs=n_jobs)(
@@ -424,95 +111,56 @@ def extract_markdown_tables_in_parallel(df_unique, col_name, n_jobs=-1):
         row_index_to_result[r_idx] = results[i]
     return row_index_to_result
 
-def extract_markdown_tables_in_parallel_v2(df_unique, col_name, n_jobs=-1):
-    """
-    Enhanced parallel extraction of Markdown tables from the specified column
-    using the improved table extraction logic.
-    """
-    def process_single_content(content):
-        try:
-            # Limit content size to avoid memory issues
-            if isinstance(content, str) and len(content) > 100000:  # 100KB limit
-                content = content[:100000]
-                print(f"Truncated large content")
-            
-            return detect_and_extract_markdown_tables_v2(content)
-        except Exception as e:
-            print(f"Error processing content: {e}")
-            return (False, [])
-    
-    contents = df_unique[col_name].tolist()
-    indices = df_unique.index.tolist()
-    
-    # Use fewer jobs to avoid memory issues
-    if n_jobs == -1:
-        n_jobs = min(4, os.cpu_count() or 1)
-    
-    results = Parallel(n_jobs=n_jobs, batch_size=50)(
-        delayed(process_single_content)(content) for content in tqdm(contents, total=len(contents))
-    )
-    # Build a dict of row_index -> (found_tables_bool, tables_list)
-    row_index_to_result = {}
-    for i, r_idx in enumerate(indices):
-        row_index_to_result[r_idx] = results[i]
-    return row_index_to_result
-
 ########
-def save_markdown_to_csv_from_content_v2(model_id, content, source, file_idx, output_folder):
+def save_markdown_to_csv_from_content(model_id, content, source, file_idx, output_folder):
     """
-    Enhanced version: Extract markdown tables using improved parser and save to CSV files.
-    Simple naming: model_id_table_x.csv
+    Given file content, extract Markdown tables and save them to CSV files.
+    The CSV filenames are generated as "modelId_{source}_git_readme{file_idx}_table{table_idx}.csv".
+    Returns the list of saved CSV file paths.
     """
-    # Use the improved table extraction
-    _, tables = detect_and_extract_markdown_tables_v2(content)
+    _, tables = detect_and_extract_markdown_tables(content)
     saved_paths = []
-    for table_idx, table_data in enumerate(tables):
-        # Simple naming: model_id_table_x.csv (same as original format)
-        csv_path = os.path.join(output_folder, f"{model_id}_table_{table_idx}.csv")
-        
-        # Convert table_data to DataFrame and save
-        try:
-                if len(table_data) >= 2:  # Has header and data
-                    # Apply additional cleaning to ensure proper structure
-                    df = create_structured_dataframe_gitcard(table_data)
-                    if df is not None and not df.empty:
-                        df = clean_final_dataframe_gitcard(df)
-                        if not df.empty:
-                            # Reconstruct markdown and escape internal pipes before saving via MarkdownHandler
-                            md_lines = []
-                            for row_cells in df.values.tolist():
-                                safe_cells = []
-                                for cell in row_cells:
-                                    s = '' if cell is None else str(cell)
-                                    s = s.replace('|', '&#124;')
-                                    safe_cells.append(s)
-                                md_lines.append('|' + '|'.join(safe_cells) + '|')
-                            md_text = '\n'.join(md_lines)
-                            tmp_path = MarkdownHandler.markdown_to_csv(md_text, csv_path)
-                            if tmp_path:
-                                saved_paths.append(csv_path)
-        except Exception as e:
-            print(f"Error saving table {table_idx}: {e}")
-            continue
+    for table_idx, table in enumerate(tables, start=1):
+        identifier = f"git_readme{file_idx}_table{table_idx}"
+        csv_path = generate_csv_path(model_id, source, identifier, output_folder)
+        tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path, verbose=True) # print failed saving, avoid it work silently
+        if tmp_path:
+            #saved_paths.append(tmp_path)
+            saved_paths.append(csv_path)
     return saved_paths
 
 ########
+def generate_csv_path(model_id, source, identifier, folder):
+    """
+    Generate a unique CSV file path using modelId, source (e.g., hugging or github),
+    and an identifier string (e.g., "git_readme1_table2").
+    """
+    model_id = model_id.replace('/', '_') # Bug here: notice if not replaced, it will cause saving error without any warning
+    filename = f"{model_id}_{source}_{identifier}.csv"
+    return os.path.join(folder, filename)
+
 def generate_csv_path_for_dedup(hash_str, table_idx, folder):
     """
-    Generate CSV path for deduplicated content using hash.
+    Generate a unique CSV file path based on the readme_hash and table index.
+    Example: /path/to/deduped_hugging_csvs/<hash>_table1.csv
     """
-    short_hash = hash_str[:10]  # Use first 10 characters of hash
+    short_hash = hash_str[:10]
     filename = f"{short_hash}_table{table_idx}.csv"
     return os.path.join(folder, filename)
 
 ########
-def process_github_readmes_v2(row, output_folder, config):
+def process_github_readmes(row, output_folder, config):
     """
-    Enhanced process GitHub readme files for one row using improved parsing.
+    Process GitHub readme files for one row.
+    For each file in row['readme_path'] (a list of paths), read the file,
+    extract all Markdown tables, save each table to a CSV file, and return a list
+    of the saved CSV file paths.
     """
     model_id = row["modelId"]
     readme_paths = row["readme_path"]
     readme_paths = [os.path.join(config.get('base_path'), csv_path.split("data", 1)[-1].lstrip("/\\")) for csv_path in readme_paths]
+    #print('readme_paths: ', readme_paths)
+    #print('type:', type(readme_paths))
     csv_files = []
     if not isinstance(readme_paths, (list, np.ndarray, tuple)) or len(readme_paths) == 0:
         print(f"Skipping {model_id} due to missing or empty readme paths.")
@@ -520,118 +168,55 @@ def process_github_readmes_v2(row, output_folder, config):
     # Process each file (with index starting at 1 for naming)
     for file_idx, path in enumerate(readme_paths, start=1):
         if path and os.path.exists(path):
+            #print('exists path: ', path)
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     content = f.read()
-                saved = save_markdown_to_csv_from_content_v2(model_id, content, "git", file_idx, output_folder)
+                saved = save_markdown_to_csv_from_content(model_id, content, "git", file_idx, output_folder)
+                #print('saved: ', saved)
                 csv_files.extend(saved)
             except Exception as e:
                 print(f"Error processing {path}: {e}")
     return csv_files
-
 ########
-def _cached_table_extraction(content_hash, content):
-    """
-    Table extraction function (caching removed for parallel processing compatibility).
-    """
-    return detect_and_extract_markdown_tables_v2(content)
 
-def process_single_markdown_file(md_file, github_folder, output_folder):
+def process_markdown_files(github_folder, output_folder):
     """
-    Process a single markdown file - optimized for parallel processing.
-    """
-    md_path = os.path.join(github_folder, md_file)
-    base_csv_name = md_file.replace(".md", "")
-    
-    # Check file size (skip if > 5MB)
-    if os.path.getsize(md_path) > 5 * 1024 * 1024:  # 5MB threshold
-        return {
-            'file': base_csv_name,
-            'tables': None,
-            'error': f"File too large: {os.path.getsize(md_path) / (1024 * 1024):.2f} MB"
-        }
-    
-    try:
-        with open(md_path, 'r', encoding='utf-8') as f:
-            md_content = f.read()
-        
-        # Use cached extraction for identical content
-        content_hash = hashlib.md5(md_content.encode('utf-8')).hexdigest()
-        _, tables = _cached_table_extraction(content_hash, md_content)
-        
-        table_csv_basenames = []
-        
-        for i, table_data in enumerate(tables):
-            csv_basename = f"{base_csv_name}_table_{i}.csv"
-            csv_path = os.path.join(output_folder, csv_basename)
-            try:
-                # Convert table_data to DataFrame and save with proper cleaning
-                if len(table_data) >= 2:  # Has header and data
-                    # Apply additional cleaning to ensure proper structure
-                    df = create_structured_dataframe_gitcard(table_data)
-                    if df is not None and not df.empty:
-                        df = clean_final_dataframe_gitcard(df)
-                        if not df.empty:
-                            df.to_csv(csv_path, index=False, header=False)
-                            table_csv_basenames.append(csv_basename)
-            except Exception as e:
-                print(f"Error saving {csv_basename}: {e}")
-                continue
-        
-        return {
-            'file': base_csv_name,
-            'tables': table_csv_basenames if table_csv_basenames else [],
-            'error': None
-        }
-        
-    except Exception as e:
-        return {
-            'file': base_csv_name,
-            'tables': [],
-            'error': str(e)
-        }
-
-def process_markdown_files_v2(github_folder, output_folder, n_jobs=-1):
-    """
-    Enhanced process all markdown files using improved parsing with parallel processing.
+    Process all markdown files in github_folder and save them as CSV in output_folder.
+    Skips files larger than 100MB, but still records them in the mapping with value None.
+    If no tables are found, records an empty list.
     """
     os.makedirs(output_folder, exist_ok=True)
     markdown_files = [f for f in os.listdir(github_folder) if f.endswith(".md")]
-    
-    print(f"Found {len(markdown_files)} markdown files to process")
-    
-    # Use parallel processing
-    if n_jobs == -1:
-        n_jobs = min(4, os.cpu_count() or 1)  # Use 4 cores
-    
-    print(f"Processing with {n_jobs} parallel jobs...")
-    
-    # Process files in parallel
-    results = Parallel(n_jobs=n_jobs, batch_size=20)(
-        delayed(process_single_markdown_file)(md_file, github_folder, output_folder) 
-        for md_file in tqdm(markdown_files, desc="Processing Markdown files")
-    )
-    
-    # Build mapping from results
     md_to_csv_mapping = {}
-    for result in results:
-        if result['error']:
-            print(f"⚠️ Error processing {result['file']}: {result['error']}")
-            md_to_csv_mapping[result['file']] = None
-        else:
-            md_to_csv_mapping[result['file']] = result['tables']
-    
+    for md_file in tqdm(markdown_files, desc="Processing Markdown files"):
+        md_path = os.path.join(github_folder, md_file)
+        # Check file size (skip if > 5MB, but still record in mapping)
+        if os.path.getsize(md_path) > 5 * 1024 * 1024:  # 5MB threshold
+            print(f"⚠️ Skipping {md_file} (File too large: {os.path.getsize(md_path) / (1024 * 1024):.2f} MB)")
+            md_to_csv_mapping[md_file.replace(".md", "")] = None  # Record as None
+            continue
+        base_csv_name = md_file.replace(".md", "")
+        with open(md_path, 'r', encoding='utf-8') as f:
+            md_content = f.read()
+        _, tables = detect_and_extract_markdown_tables(md_content)
+        table_csv_basenames = []
+        for i, table in enumerate(tables):
+            csv_basename = f"{base_csv_name}_table_{i}.csv"
+            csv_path = os.path.join(output_folder, csv_basename)
+            tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path)
+            if tmp_path:
+                table_csv_basenames.append(csv_basename)
+        # If no tables found, store an empty list instead of skipping
+        md_to_csv_mapping[base_csv_name] = table_csv_basenames if table_csv_basenames else []
     # Save mapping as JSON for reference
     mapping_json_path = os.path.join(output_folder, "md_to_csv_mapping.json")
     with open(mapping_json_path, 'w', encoding='utf-8') as json_file:
         json.dump(md_to_csv_mapping, json_file, indent=4)
-    
-    print(f"✅ Processed {len(markdown_files)} files, mapping saved to {mapping_json_path}")
 
 def main():
-    #config = load_config('config.yaml')
-    base_path = 'data'
-    processed_base_path = os.path.join('data', 'processed')
+    config = load_config('config.yaml')
+    processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
     print("⚠️Step 1: Loading modelcard_step1 data...")
     df_modelcard = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'card_readme', 'github_link'])
@@ -650,7 +235,7 @@ def main():
     df_unique = df_merged.drop_duplicates(subset=['readme_hash'], keep='first').copy()
     df_unique = df_unique[df_unique['readme_hash'].notnull()]
     print(f"...Found {len(df_unique)} unique readme content out of {len(df_merged)} rows.")
-    output_file = os.path.join(processed_base_path, f"{data_type}_step2_v2.parquet")
+    output_file = os.path.join(processed_base_path, f"{data_type}_step2.parquet")
     df_merged.drop(columns=['card_readme', 'github_link'], inplace=True, errors='ignore')
     to_parquet(df_merged, output_file)
     print(f"✅ Results saved to: {output_file}")
@@ -664,7 +249,7 @@ def main():
     #df_unique['extracted_markdown_table_hugging'] = df_unique.index.map(lambda idx: row_index_to_result[idx][1])
     # We'll store these results in a dict: readme_hash -> list_of_tables
     print('Start creating dictionary for {readme_path: list_of_tables}...')
-    dedup_folder_hugging = os.path.join(processed_base_path, "deduped_hugging_csvs_v2")  ########
+    dedup_folder_hugging = os.path.join(processed_base_path, "deduped_hugging_csvs")  ########
     os.makedirs(dedup_folder_hugging, exist_ok=True)  ########
     hash_to_csv_map = {}  # readme_hash -> [list_of_csv_paths (absolute paths)]  ########
     for idx, row in tqdm(df_unique.iterrows(), total=len(df_unique), desc="Storing deduped CSVs"):
@@ -678,24 +263,11 @@ def main():
             out_csv_path = generate_csv_path_for_dedup(hval, j, dedup_folder_hugging)  ########
             if os.path.lexists(out_csv_path):
                 os.remove(out_csv_path)
-            # table_content is a list of rows; reconstruct markdown while escaping internal pipes in cells
-            try:
-                md_lines = []
-                for row_cells in table_content:
-                    safe_cells = []
-                    for cell in row_cells:
-                        s = '' if cell is None else str(cell)
-                        s = s.replace('|', '&#124;')
-                        safe_cells.append(s)
-                    md_lines.append('|' + '|'.join(safe_cells) + '|')
-                md_text = '\n'.join(md_lines)
-                tmp_csv_path = MarkdownHandler.markdown_to_csv(md_text, out_csv_path)
-            except Exception:
-                tmp_csv_path = None
+            tmp_csv_path = MarkdownHandler.markdown_to_csv(table_content, out_csv_path)
             if tmp_csv_path:
                 csv_list.append(os.path.abspath(out_csv_path))  ########
         hash_to_csv_map[hval] = csv_list
-    hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping_v2.json")  ########
+    hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping.json")  ########
     with open(hugging_map_json_path, 'w', encoding='utf-8') as jf:
         json.dump(hash_to_csv_map, jf, indent=2)
     print(f"✅ Deduped CSV mapping saved to: {hugging_map_json_path}")
@@ -704,10 +276,52 @@ def main():
     
     # ---------- GitHub part ----------
     print("⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...")
-    output_folder_github = os.path.join(processed_base_path, "deduped_github_csvs_v2")
+    output_folder_github = os.path.join(processed_base_path, "deduped_github_csvs")
     os.makedirs(output_folder_github, exist_ok=True)
-    input_folder_github = os.path.join(base_path, 'downloaded_github_readmes')
-    process_markdown_files_v2(input_folder_github, output_folder_github, n_jobs=-1) # save csv and md_to_csv_mapping
+    input_folder_github = os.path.join(config.get('base_path'), 'downloaded_github_readmes')
+    process_markdown_files(input_folder_github, output_folder_github) # save csv and md_to_csv_mapping
 
 if __name__ == "__main__":
     main()
+
+
+"""
+Exampled Output
+
+⚠️⚠️Step 1: Loading modelcard_step1 data...
+✅ After merge: 1108759 rows.
+⚠️Step 2: Extracting markdown tables from 'card_readme' (HuggingFace)...
+...adding readme_hash
+...Found 387883 unique readme content out of 1108759 rows.
+100%|███████████████████████████████████████████████████| 387883/387883 [01:20<00:00, 4793.16it/s]
+Start creating dictionary for {readme_path: list_of_tables}...
+Storing deduped CSVs: 100%|██████████████████████████████| 387883/387883 [13:59<00:00, 461.85it/s]
+✅ Deduped CSV mapping saved to: /Users/doradong/Repo/CitationLake/data/processed/hugging_deduped_mapping.json
+⚠️Step 2.2: Creating symlinks to 'sym_hugging_csvs' ...
+Linking CSVs: 100%|███████████████████████████████████| 1108759/1108759 [04:25<00:00, 4178.61it/s]
+End of HuggingFace part.
+
+⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...
+Processing Markdown files:   7%|█▉                           | 1304/19916 [00:19<04:15, 72.82it/s]⚠️ Skipping 8d77428a41be7b07877aed1208e7106a.md (File too large: 14.38 MB)
+Processing Markdown files:  11%|███▏                         | 2156/19916 [00:30<03:20, 88.65it/s]⚠️ Skipping 3769fd2d562ed5bfb1412b4be4ea91f4.md (File too large: 49.72 MB)
+Processing Markdown files:  11%|███▏                         | 2199/19916 [00:33<09:34, 30.81it/s]⚠️ Skipping 57e6cbf06af2077ad39f6dc022f448a0.md (File too large: 8.64 MB)
+Processing Markdown files:  12%|███▌                         | 2457/19916 [00:36<03:11, 91.12it/s]⚠️ Skipping 88f0e7f02c674aa25e628a3d79e9bbdb.md (File too large: 12.53 MB)
+Processing Markdown files:  38%|███████████                  | 7616/19916 [01:49<06:46, 30.29it/s]⚠️ Skipping 6880c06f052a3e6d52e5f6da9258bb1a.md (File too large: 7.17 MB)
+Processing Markdown files:  45%|████████████▉                | 8903/19916 [02:06<02:11, 83.58it/s]⚠️ Skipping fc2193033fac642fbc50a27e31291ca7.md (File too large: 12.78 MB)
+Processing Markdown files:  50%|██████████████▍              | 9900/19916 [02:36<02:39, 62.71it/s]⚠️ Skipping 665b970b8e4c4aeead66dd542331c37e.md (File too large: 5.95 MB)
+Processing Markdown files:  62%|█████████████████▍          | 12394/19916 [11:46<01:23, 90.36it/s]⚠️ Skipping 44a0008dcc96aad0da0c0ac00fdc4d09.md (File too large: 8.12 MB)
+Processing Markdown files:  66%|██████████████████▍         | 13093/19916 [11:55<01:15, 90.02it/s]⚠️ Skipping b7c00a7974825548053cb4a8501f1440.md (File too large: 22.23 MB)
+Processing Markdown files:  67%|██████████████████▊         | 13350/19916 [11:59<01:56, 56.30it/s]⚠️ Skipping de3a438afd20c4649d2b2fbe800e71e4.md (File too large: 10.60 MB)
+Processing Markdown files:  67%|██████████████████▊         | 13365/19916 [11:59<02:01, 53.93it/s]⚠️ Skipping b6c76f03d949332d18f77b4030d3493d.md (File too large: 6.07 MB)
+Processing Markdown files:  69%|███████████████████▎        | 13772/19916 [12:05<01:27, 70.34it/s]⚠️ Skipping fc856ed1392888cab683eed4deb8e61b.md (File too large: 14.79 MB)
+Processing Markdown files:  71%|███████████████████▊        | 14106/19916 [12:10<01:12, 80.65it/s]⚠️ Skipping bbb830ff97cb048d9dbd1fd0523f28b4.md (File too large: 29.72 MB)
+Processing Markdown files:  71%|████████████████████        | 14231/19916 [12:11<01:08, 83.58it/s]⚠️ Skipping ca9977191569120dcb613632526bede5.md (File too large: 11.89 MB)
+Processing Markdown files:  78%|█████████████████████▉      | 15633/19916 [12:31<01:03, 67.55it/s]⚠️ Skipping d288d0c1b17b6c35cb56533d4b75c3b8.md (File too large: 34.09 MB)
+Processing Markdown files:  85%|███████████████████████▉    | 16989/19916 [12:51<00:38, 75.88it/s]⚠️ Skipping 874f2976b310e16e87d24db0eee0e440.md (File too large: 24.67 MB)
+Processing Markdown files:  88%|████████████████████████▌   | 17452/19916 [12:59<00:56, 43.41it/s]⚠️ Skipping 3803c3116946fc9c859c576a724b0a47.md (File too large: 12.10 MB)
+Processing Markdown files:  94%|██████████████████████████▎ | 18744/19916 [13:18<00:13, 84.76it/s]⚠️ Skipping 50acb0cbbf98479df6ed5323953efc13.md (File too large: 14.31 MB)
+Processing Markdown files: 100%|████████████████████████████| 19916/19916 [13:54<00:00, 23.87it/s]
+Processing GitHub readmes: 100%|█████████████████████| 1108759/1108759 [01:42<00:00, 10784.97it/s]
+⚠️Step 4: Saving integrated DataFrame to Parquet file...
+✅ All done. Results saved to: /Users/doradong/Repo/CitationLake/data/processed/modelcard_step2.parquet
+"""

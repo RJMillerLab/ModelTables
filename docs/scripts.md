@@ -368,11 +368,6 @@ python batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keyw
 # Output: tmp/html_table_analysis.csv with column count comparison
 # Purpose: Compare HTML table v2 vs v1 column counts and analyze reduction
 python src/data_analysis/analyze_html_tables.py
-
-# Analyze HuggingFace table files and compare column counts between v1 and v2
-# Input: tmp/top_tables_with_keywords.csv (filtered for HuggingFace source)
-# Output: tmp/huggingface_table_analysis.csv with column count comparison
-# Purpose: Compare HuggingFace table v2 vs v1 column counts and analyze reduction
 python src/data_analysis/analyze_huggingface_tables.py
 
 # For HuggingFace CSVs specifically:
@@ -483,6 +478,10 @@ python tmp_list_parquet_schemas.py > logs/parquet_schema.log
 # get attributes duplicate analysis
 #python complete_duplicate_analysis.py > logs/complete_duplicate_analysis_results.txt
 python column_size_analysis.py --include-modelid > logs/parquet_storage.log
+# after debug: rerun the step2_gitcard_v2
+python src/data_analysis/top_col_tables.py
+# load all files into duckdb
+python src/data_analysis/load_sv_to_db.py --engine duckdb --db-path deduped_hugging_csvs_v2.duckdb --input-dir data/processed/deduped_hugging_csvs_v2
 ```
 
 
