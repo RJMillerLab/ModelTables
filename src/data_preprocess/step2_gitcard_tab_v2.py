@@ -19,7 +19,6 @@ import shutil
 from bs4 import BeautifulSoup
 from src.data_ingestion.readme_parser import MarkdownHandler
 from src.utils import load_config, to_parquet
-from functools import lru_cache
 
 tqdm.pandas()
 
@@ -252,36 +251,53 @@ def detect_and_extract_markdown_tables_v2(content: str):
                 if SEPARATOR_PATTERN.match(line):
                     continue
                 
-                # Split by | but be more careful about content that might contain |
-                # First, try to identify the actual table structure by looking at the header
-                if not cleaned_lines:  # This is the header row
-                    cells = [cell.strip() for cell in line.split('|')]
-                else:
-                    # For data rows, we need to be more careful
-                    # Count the number of | in the line to determine if it's a real separator
-                    pipe_count = line.count('|')
-                    if pipe_count <= 1:  # Likely a real table row with minimal |
-                        cells = [cell.strip() for cell in line.split('|')]
-                    else:
-                        # This might be content with | symbols, so we need to be more careful
-                        # Try to split only on | that are likely separators
-                        # Look for patterns like " | " (space-pipe-space) as likely separators
-                        parts = line.split(' | ')
-                        if len(parts) >= 2:
-                            cells = [part.strip() for part in parts]
+                # Split by pipe '|' but avoid splitting when the pipe is inside code spans (`...`) or escaped (\|)
+                def split_markdown_row(row_text):
+                    cells = []
+                    cur = []
+                    in_backtick = False
+                    esc = False
+                    for ch in row_text:
+                        if esc:
+                            # preserve escaped char
+                            cur.append(ch)
+                            esc = False
+                            continue
+                        if ch == '\\':
+                            esc = True
+                            continue
+                        if ch == '`':
+                            in_backtick = not in_backtick
+                            cur.append(ch)
+                            continue
+                        if ch == '|' and not in_backtick:
+                            cells.append(''.join(cur).strip())
+                            cur = []
                         else:
-                            # Fall back to regular split but limit to reasonable number of columns
-                            cells = [cell.strip() for cell in line.split('|')]
-                            # If we get too many columns, it's likely content with | symbols
-                            if len(cells) > 10:  # Arbitrary threshold
-                                # Treat the whole line as one cell except for the first part
-                                cells = [cells[0], ' | '.join(cells[1:])]
+                            cur.append(ch)
+                    cells.append(''.join(cur).strip())
+                    return cells
+
+                # Use the safe splitter for both header and data rows
+                cells = [cell.strip() for cell in split_markdown_row(line)]
                 
-                # Remove empty cells at the end
-                while cells and not cells[-1]:
+                # Remove trailing empty cells at the end
+                while cells and cells[-1] == '':
                     cells.pop()
                 if cells:  # Only add non-empty rows
-                    cleaned_lines.append(cells)
+                    # If this is the header row, record expected column count
+                    if not cleaned_lines:
+                        expected_cols = len(cells)
+                        cleaned_lines.append(cells)
+                    else:
+                        # If the row split into more columns than header, assume extra pipes belong to the last cell
+                        if 'expected_cols' in locals() and len(cells) > expected_cols:
+                            # join extras into last cell
+                            cells = cells[:expected_cols-1] + ['|'.join(cells[expected_cols-1:])]
+                        # If fewer, pad
+                        if 'expected_cols' in locals() and len(cells) < expected_cols:
+                            cells += [''] * (expected_cols - len(cells))
+                        cleaned_lines.append(cells)
             
             if len(cleaned_lines) >= 2:  # Must have header and at least one data row
                 # Ensure all rows have the same number of columns
@@ -456,14 +472,25 @@ def save_markdown_to_csv_from_content_v2(model_id, content, source, file_idx, ou
         
         # Convert table_data to DataFrame and save
         try:
-            if len(table_data) >= 2:  # Has header and data
-                # Apply additional cleaning to ensure proper structure
-                df = create_structured_dataframe_gitcard(table_data)
-                if df is not None and not df.empty:
-                    df = clean_final_dataframe_gitcard(df)
-                    if not df.empty:
-                        df.to_csv(csv_path, index=False, header=False)
-                        saved_paths.append(csv_path)
+                if len(table_data) >= 2:  # Has header and data
+                    # Apply additional cleaning to ensure proper structure
+                    df = create_structured_dataframe_gitcard(table_data)
+                    if df is not None and not df.empty:
+                        df = clean_final_dataframe_gitcard(df)
+                        if not df.empty:
+                            # Reconstruct markdown and escape internal pipes before saving via MarkdownHandler
+                            md_lines = []
+                            for row_cells in df.values.tolist():
+                                safe_cells = []
+                                for cell in row_cells:
+                                    s = '' if cell is None else str(cell)
+                                    s = s.replace('|', '&#124;')
+                                    safe_cells.append(s)
+                                md_lines.append('|' + '|'.join(safe_cells) + '|')
+                            md_text = '\n'.join(md_lines)
+                            tmp_path = MarkdownHandler.markdown_to_csv(md_text, csv_path)
+                            if tmp_path:
+                                saved_paths.append(csv_path)
         except Exception as e:
             print(f"Error saving table {table_idx}: {e}")
             continue
@@ -503,10 +530,9 @@ def process_github_readmes_v2(row, output_folder, config):
     return csv_files
 
 ########
-@lru_cache(maxsize=1000)
 def _cached_table_extraction(content_hash, content):
     """
-    Cached table extraction to avoid reprocessing identical content.
+    Table extraction function (caching removed for parallel processing compatibility).
     """
     return detect_and_extract_markdown_tables_v2(content)
 
@@ -576,7 +602,7 @@ def process_markdown_files_v2(github_folder, output_folder, n_jobs=-1):
     
     # Use parallel processing
     if n_jobs == -1:
-        n_jobs = min(8, os.cpu_count() or 1)  # Use more cores for file processing
+        n_jobs = min(4, os.cpu_count() or 1)  # Use 4 cores
     
     print(f"Processing with {n_jobs} parallel jobs...")
     
@@ -603,8 +629,9 @@ def process_markdown_files_v2(github_folder, output_folder, n_jobs=-1):
     print(f"✅ Processed {len(markdown_files)} files, mapping saved to {mapping_json_path}")
 
 def main():
-    config = load_config('config.yaml')
-    processed_base_path = os.path.join(config.get('base_path'), 'processed')
+    #config = load_config('config.yaml')
+    base_path = 'data'
+    processed_base_path = os.path.join('data', 'processed')
     data_type = 'modelcard'
     print("⚠️Step 1: Loading modelcard_step1 data...")
     df_modelcard = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'card_readme', 'github_link'])
@@ -651,7 +678,20 @@ def main():
             out_csv_path = generate_csv_path_for_dedup(hval, j, dedup_folder_hugging)  ########
             if os.path.lexists(out_csv_path):
                 os.remove(out_csv_path)
-            tmp_csv_path = MarkdownHandler.markdown_to_csv(table_content, out_csv_path)
+            # table_content is a list of rows; reconstruct markdown while escaping internal pipes in cells
+            try:
+                md_lines = []
+                for row_cells in table_content:
+                    safe_cells = []
+                    for cell in row_cells:
+                        s = '' if cell is None else str(cell)
+                        s = s.replace('|', '&#124;')
+                        safe_cells.append(s)
+                    md_lines.append('|' + '|'.join(safe_cells) + '|')
+                md_text = '\n'.join(md_lines)
+                tmp_csv_path = MarkdownHandler.markdown_to_csv(md_text, out_csv_path)
+            except Exception:
+                tmp_csv_path = None
             if tmp_csv_path:
                 csv_list.append(os.path.abspath(out_csv_path))  ########
         hash_to_csv_map[hval] = csv_list
@@ -666,7 +706,7 @@ def main():
     print("⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...")
     output_folder_github = os.path.join(processed_base_path, "deduped_github_csvs_v2")
     os.makedirs(output_folder_github, exist_ok=True)
-    input_folder_github = os.path.join(config.get('base_path'), 'downloaded_github_readmes')
+    input_folder_github = os.path.join(base_path, 'downloaded_github_readmes')
     process_markdown_files_v2(input_folder_github, output_folder_github, n_jobs=-1) # save csv and md_to_csv_mapping
 
 if __name__ == "__main__":

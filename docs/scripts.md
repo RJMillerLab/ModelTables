@@ -363,7 +363,17 @@ python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/s
 # CSV to ModelID Mapping
 # Get modelIDs from CSV files (supports GitHub, HuggingFace, HTML, LLM sources)
 python batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keywords.csv
+# Analyze HTML table files and compare column counts between v1 and v2
+# Input: tmp/top_tables_with_keywords.csv (filtered for HTML source)
+# Output: tmp/html_table_analysis.csv with column count comparison
+# Purpose: Compare HTML table v2 vs v1 column counts and analyze reduction
 python src/data_analysis/analyze_html_tables.py
+
+# Analyze HuggingFace table files and compare column counts between v1 and v2
+# Input: tmp/top_tables_with_keywords.csv (filtered for HuggingFace source)
+# Output: tmp/huggingface_table_analysis.csv with column count comparison
+# Purpose: Compare HuggingFace table v2 vs v1 column counts and analyze reduction
+python src/data_analysis/analyze_huggingface_tables.py
 
 # For HuggingFace CSVs specifically:
 # Input file format: csv_name<TAB>score (e.g., "a1b2c3d4e5_table1.csv	0.95")
