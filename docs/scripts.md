@@ -481,7 +481,7 @@ python column_size_analysis.py --include-modelid > logs/parquet_storage.log
 # after debug: rerun the step2_gitcard_v2
 python src/data_analysis/top_col_tables.py
 # load all files into duckdb
-python src/data_analysis/load_sv_to_db.py --engine duckdb --db-path deduped_hugging_csvs_v2.duckdb --input-dir data/processed/deduped_hugging_csvs_v2
+python src/data_analysis/load_sv_to_db.py --engine sqlite --db-path deduped_hugging_csvs_v2.sqlite --input-dir data/processed/deduped_hugging_csvs_v2
 ```
 
 

@@ -99,16 +99,31 @@ class MarkdownHandler:
     def standardize_table_format(cleaned_markdown):
         """Standardize table format by ensuring each row has the same number of columns."""
         rows = cleaned_markdown.split("\n")
-        max_columns = max(len(row.split("|")) - 2 for row in rows if "|" in row)  # Exclude leading and trailing '|'
+        
+        # Find rows with pipes and calculate max columns
+        pipe_rows = [row for row in rows if "|" in row]
+        if not pipe_rows:
+            # If no rows contain pipes, return the original content
+            return cleaned_markdown
+            
+        max_columns = max(len(row.split("|")) - 2 for row in pipe_rows)  # Exclude leading and trailing '|'
+        
+        # If max_columns is 0 or negative, return original content
+        if max_columns <= 0:
+            return cleaned_markdown
 
         standardized_rows = []
         for row in rows:
-            columns = row.split("|")[1:-1]  # Remove leading/trailing '|'
-            if len(columns) < max_columns:
-                columns.extend([""] * (max_columns - len(columns)))  # Fill missing columns
-            elif len(columns) > max_columns:
-                columns = columns[:max_columns]  # Truncate extra columns
-            standardized_rows.append("|" + "|".join(columns) + "|")
+            if "|" in row:
+                columns = row.split("|")[1:-1]  # Remove leading/trailing '|'
+                if len(columns) < max_columns:
+                    columns.extend([""] * (max_columns - len(columns)))  # Fill missing columns
+                elif len(columns) > max_columns:
+                    columns = columns[:max_columns]  # Truncate extra columns
+                standardized_rows.append("|" + "|".join(columns) + "|")
+            else:
+                # Keep non-pipe rows as-is
+                standardized_rows.append(row)
         return "\n".join(standardized_rows)
 
     @staticmethod
