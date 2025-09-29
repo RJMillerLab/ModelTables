@@ -105,8 +105,9 @@ class MarkdownHandler:
         if not pipe_rows:
             # If no rows contain pipes, return the original content
             return cleaned_markdown
-            
-        # Calculate max columns, but ensure it's at least 1
+        
+        # Calculate max columns based on ALL pipe rows, not just header
+        # This ensures we capture the maximum number of columns across all rows
         column_counts = [len(row.split("|")) - 2 for row in pipe_rows]  # Exclude leading and trailing '|'
         max_columns = max(column_counts) if column_counts else 0
         
@@ -145,41 +146,68 @@ class MarkdownHandler:
 
     @staticmethod
     def process_label_scheme_table(df, component_col, labels_col):
-        """Process label scheme table by converting comma-separated labels to pipe-separated."""
+        """Process label scheme table by converting comma-separated labels to semicolon-separated."""
         result = []
         for i, row in df.iterrows():
             component = row[component_col]
             labels = row[labels_col]
             if pd.notna(labels):
-                # Convert comma-separated to pipe-separated
+                # Convert comma-separated to semicolon-separated
                 label_list = [label.strip() for label in str(labels).split(',')]
-                result.append([component, '|'.join(label_list)])
+                result.append([component, ';'.join(label_list)])
         return result
 
     @staticmethod
-    def markdown_to_csv(markdown_text, output_path, verbose=False):
+    def markdown_to_csv(markdown_text, output_path, verbose=False, preserve_empty_cols=False):
         """Enhanced convert markdown table to CSV with smart table type detection."""
         cleaned_markdown = MarkdownHandler.clean_markdown_table(markdown_text)
         standardized_markdown = MarkdownHandler.standardize_table_format(cleaned_markdown)
         
         try:
-            # Parse the markdown table
-            df = pd.read_csv(StringIO(standardized_markdown), sep="|", engine='python').dropna(axis=1, how="all")
+            # Parse the markdown table first
+            df = pd.read_csv(StringIO(standardized_markdown), sep="|", engine='python')
             
-            # Check if the DataFrame is empty or has no data rows (only headers)
-            if df.empty or len(df) == 0:
-                if verbose:
-                    print(f"⚠️ Empty table detected: {os.path.basename(output_path)}")
-                return None
+            # Check if this is a Label Scheme table (Component + Labels columns)
+            is_label_scheme = False
+            component_col = None
+            labels_col = None
             
-            # Detect table type
-            component_col, labels_col = MarkdownHandler.detect_table_type(df)
-            is_label_scheme = component_col and labels_col
+            for col in df.columns:
+                if 'Component' in col.strip():
+                    component_col = col
+                if 'Labels' in col.strip():
+                    labels_col = col
             
-            if is_label_scheme:
+            if component_col and labels_col:
+                is_label_scheme = True
                 if verbose:
                     print(f"🎯 Detected Label Scheme table: {os.path.basename(output_path)}")
-                # Process as label scheme table
+                
+                # Special processing for Label Scheme tables
+                # Handle pipes in Labels column by merging extra columns
+                if len(df.columns) > 2:  # More than Component and Labels
+                    # Find the Labels column index
+                    labels_idx = df.columns.get_loc(labels_col)
+                    
+                    # Merge all columns after Labels into Labels column
+                    for i, row in df.iterrows():
+                        labels_value = str(row[labels_col]) if pd.notna(row[labels_col]) else ''
+                        
+                        # Collect all values from columns after Labels
+                        extra_values = []
+                        for j in range(labels_idx + 1, len(df.columns)):
+                            if pd.notna(row.iloc[j]) and str(row.iloc[j]).strip():
+                                extra_values.append(str(row.iloc[j]).strip())
+                        
+                        # Merge with Labels column using |
+                        if extra_values:
+                            labels_value = labels_value + ' | ' + ' | '.join(extra_values)
+                            df.at[i, labels_col] = labels_value
+                    
+                    # Keep only Component and Labels columns
+                    df = df[[component_col, labels_col]]
+                
+                # Process label scheme table by converting comma-separated labels to semicolon-separated
                 processed_data = MarkdownHandler.process_label_scheme_table(df, component_col, labels_col)
                 result_df = pd.DataFrame(processed_data, columns=['Component', 'Labels'])
             else:
@@ -187,6 +215,16 @@ class MarkdownHandler:
                     print(f"📈 Detected Performance table: {os.path.basename(output_path)}")
                 # Process as performance table (keep as-is)
                 result_df = df
+            
+            # Optionally remove empty columns
+            if not preserve_empty_cols:
+                result_df = result_df.dropna(axis=1, how="all")
+            
+            # Check if the DataFrame is empty or has no data rows (only headers)
+            if result_df.empty or len(result_df) == 0:
+                if verbose:
+                    print(f"⚠️ Empty table detected: {os.path.basename(output_path)}")
+                return None
             
             # Save the processed data
             result_df.to_csv(output_path, index=False, encoding="utf-8")

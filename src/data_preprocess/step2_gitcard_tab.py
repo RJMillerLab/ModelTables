@@ -268,7 +268,7 @@ def main():
     #df_unique['extracted_markdown_table_hugging'] = df_unique.index.map(lambda idx: row_index_to_result[idx][1])
     # We'll store these results in a dict: readme_hash -> list_of_tables
     print('Start creating dictionary for {readme_path: list_of_tables}...')
-    dedup_folder_hugging = os.path.join(processed_base_path, "deduped_hugging_csvs")  ########
+    dedup_folder_hugging = os.path.join(processed_base_path, "deduped_hugging_csvs_v2")  ########
     os.makedirs(dedup_folder_hugging, exist_ok=True)  ########
     hash_to_csv_map = {}  # readme_hash -> [list_of_csv_paths (absolute paths)]  ########
     for idx, row in tqdm(df_unique.iterrows(), total=len(df_unique), desc="Storing deduped CSVs"):
@@ -286,7 +286,7 @@ def main():
             if tmp_csv_path:
                 csv_list.append(os.path.abspath(out_csv_path))  ########
         hash_to_csv_map[hval] = csv_list
-    hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping.json")  ########
+    hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping_v2.json")  ########
     with open(hugging_map_json_path, 'w', encoding='utf-8') as jf:
         json.dump(hash_to_csv_map, jf, indent=2)
     print(f"✅ Deduped CSV mapping saved to: {hugging_map_json_path}")
@@ -295,7 +295,7 @@ def main():
     
     # ---------- GitHub part ----------
     print("⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...")
-    output_folder_github = os.path.join(processed_base_path, "deduped_github_csvs")
+    output_folder_github = os.path.join(processed_base_path, "deduped_github_csvs_v2")
     os.makedirs(output_folder_github, exist_ok=True)
     input_folder_github = os.path.join(config.get('base_path'), 'downloaded_github_readmes')
     process_markdown_files(input_folder_github, output_folder_github) # save csv and md_to_csv_mapping
