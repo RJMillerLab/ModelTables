@@ -47,10 +47,66 @@ def detect_and_extract_markdown_tables(content: str):
     """
     if not isinstance(content, str):
         return (False, [])
-    markdown_table_pattern = r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+"
-    matches = re.findall(markdown_table_pattern, content, re.MULTILINE)
-    matches = [match.strip() for match in matches] if matches else []
-    return (len(matches) > 0, matches)
+    
+    # Enhanced pattern that handles indentation and various table formats
+    lines = content.split('\n')
+    tables = []
+    current_table = []
+    in_table = False
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if in_table and current_table:
+                # End of table
+                tables.append('\n'.join(current_table))
+                current_table = []
+                in_table = False
+            continue
+            
+        # Check if line looks like a table row (starts and ends with |)
+        if line.startswith('|') and line.endswith('|'):
+            if not in_table:
+                in_table = True
+            
+            # Handle lines with double pipes (||) - split them into separate rows
+            if '||' in line:
+                # Split by || and process each part
+                parts = line.split('||')
+                for i, part in enumerate(parts):
+                    part = part.strip()
+                    if part.startswith('|') and part.endswith('|'):
+                        current_table.append(part)
+                    elif part.startswith('|') and not part.endswith('|'):
+                        # Add missing closing |
+                        current_table.append(part + '|')
+                    elif not part.startswith('|') and part.endswith('|'):
+                        # Add missing opening |
+                        current_table.append('|' + part)
+                    elif part and not part.startswith('|') and not part.endswith('|'):
+                        # Add both missing |
+                        current_table.append('|' + part + '|')
+            else:
+                current_table.append(line)
+        elif in_table:
+            # Check if this is a separator line (contains |, -, :, spaces only)
+            if re.match(r'^[\|\-\s:]+$', line):
+                current_table.append(line)
+            else:
+                # End of table
+                if current_table:
+                    tables.append('\n'.join(current_table))
+                current_table = []
+                in_table = False
+    
+    # Don't forget the last table if content ends with a table
+    if in_table and current_table:
+        tables.append('\n'.join(current_table))
+    
+    # Filter out tables that are too short (less than 2 rows)
+    valid_tables = [table for table in tables if len([line for line in table.split('\n') if line.strip()]) >= 2]
+    
+    return (len(valid_tables) > 0, valid_tables)
 ########
 
 def extract_markdown_tables_in_parallel(df_unique, col_name, n_jobs=-1):

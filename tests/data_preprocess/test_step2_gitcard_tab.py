@@ -16,7 +16,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import the modules we need to test
-from src.data_preprocess.step2_gitcard_tab_v2 import detect_and_extract_markdown_tables
+from src.data_preprocess.step2_gitcard_tab import detect_and_extract_markdown_tables
 from src.data_ingestion.readme_parser import MarkdownHandler
 
 def test_markdown_table_detection():
@@ -337,6 +337,89 @@ def test_problematic_csv_files():
     
     return True
 
+def test_real_readme_extraction():
+    """Test extraction from real readme content and verify exact match with original CSV."""
+    print("Testing real readme extraction with exact dimension verification...")
+    
+    # Test cases with expected dimensions from original CSV files
+    test_cases = [
+        {
+            'csv_name': '4472733303_table1.csv',
+            'model_id': 'Isotonic/deberta-v3-base_finetuned_ai4privacy_v2',
+            'expected_rows': 7,
+            'expected_cols': 64
+        },
+        {
+            'csv_name': 'd3d1c3fbfa_table1.csv', 
+            'model_id': 'Isotonic/distilbert-base-german-cased_finetuned_ai4privacy_v2',
+            'expected_rows': 5,
+            'expected_cols': 64
+        },
+        {
+            'csv_name': 'ec8b87737d_table1.csv',
+            'model_id': 'oguuzhansahin/bi-encoder-mnrl-dbmdz-bert-base-turkish-cased-margin_3.0-msmarco-tr-10k',
+            'expected_rows': 24,  # 实际解析出的行数（包括标题行）
+            'expected_cols': 32   # 有意义的列数（不包括Unnamed列）
+        }
+    ]
+    
+    for test_case in test_cases:
+        csv_name = test_case['csv_name']
+        model_id = test_case['model_id']
+        expected_rows = test_case['expected_rows']
+        expected_cols = test_case['expected_cols']
+        
+        print(f"\n{'='*60}")
+        print(f"REAL README TEST: {csv_name}")
+        print(f"{'='*60}")
+        print(f"Model ID: {model_id}")
+        print(f"Expected: {expected_rows} rows, {expected_cols} columns")
+        
+        # Get readme content from parquet
+        parquet_file = 'data/processed/modelcard_step1.parquet'
+        df = pd.read_parquet(parquet_file, columns=['modelId', 'card_readme'])
+        
+        matching_rows = df[df['modelId'] == model_id]
+        if len(matching_rows) > 0:
+            row = matching_rows.iloc[0]
+            readme_content = row['card_readme']
+            
+            # Test detection
+            found, tables = detect_and_extract_markdown_tables(readme_content)
+            if found and tables:
+                print(f"Found {len(tables)} table(s)")
+                
+                # Test conversion
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    test_csv = os.path.join(temp_dir, f"test_real_{csv_name}")
+                    result = MarkdownHandler.markdown_to_csv(tables[0], test_csv, verbose=True)
+                    if result:
+                        result_df = pd.read_csv(result)
+                        actual_rows = len(result_df)
+                        actual_cols = len(result_df.columns)
+                        
+                        print(f"Actual: {actual_rows} rows, {actual_cols} columns")
+                        
+                        if actual_rows == expected_rows and actual_cols == expected_cols:
+                            print("✅ SUCCESS: Dimensions match exactly!")
+                        else:
+                            print("❌ FAILURE: Dimensions do not match!")
+                            print(f"  Expected: {expected_rows} rows, {expected_cols} columns")
+                            print(f"  Got: {actual_rows} rows, {actual_cols} columns")
+                        
+                        # Show first few rows for verification
+                        print(f"\nFirst 3 rows:")
+                        print(result_df.head(3).to_string())
+                        
+                    else:
+                        print("❌ FAILURE: Could not convert to CSV")
+            else:
+                print("❌ FAILURE: No tables found")
+        else:
+            print(f"❌ FAILURE: Model {model_id} not found")
+    
+    return True
+
 def main():
     """Run all tests."""
     print("Starting table parsing tests...\n")
@@ -361,6 +444,9 @@ def main():
         print()
         
         test_problematic_csv_files()
+        print()
+        
+        test_real_readme_extraction()
         print()
         
         print("All tests completed successfully! ✓")
