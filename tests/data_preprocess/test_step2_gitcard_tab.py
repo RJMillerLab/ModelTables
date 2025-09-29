@@ -277,6 +277,66 @@ def test_enhanced_markdown_handler():
         else:
             print("❌ Label scheme table processing failed")
 
+def test_problematic_csv_files():
+    """Test with problematic CSV files that are failing."""
+    print("Testing with problematic CSV files...")
+    
+    # Test with the problematic CSV files
+    problematic_files = [
+        "data/processed/deduped_hugging_csvs/4472733303_table1.csv",
+        "data/processed/deduped_hugging_csvs/d3d1c3fbfa_table1.csv",
+        "data/processed/deduped_hugging_csvs/ec8b87737d_table1.csv"
+    ]
+    
+    for csv_file in problematic_files:
+        print(f"\n{'='*60}")
+        print(f"PROBLEMATIC EXAMPLE: {os.path.basename(csv_file)}")
+        print(f"{'='*60}")
+        
+        if os.path.exists(csv_file):
+            # Read the CSV file
+            df = pd.read_csv(csv_file)
+            print(f"ORIGINAL CSV:")
+            print(f"  - Shape: {df.shape}")
+            print(f"  - Columns: {list(df.columns)[:5]}...")
+            print(f"  - First 3 rows:")
+            print(df.head(3).to_string())
+            
+            # Reconstruct markdown table from CSV
+            markdown_table = df.to_markdown(index=False)
+            print(f"\nRECONSTRUCTED MARKDOWN TABLE:")
+            print(markdown_table[:500] + "..." if len(markdown_table) > 500 else markdown_table)
+            
+            # Test detection
+            found, tables = detect_and_extract_markdown_tables(markdown_table)
+            print(f"\nDETECTION RESULT:")
+            print(f"  - Found: {found}")
+            print(f"  - Number of tables: {len(tables) if tables else 0}")
+            
+            if found and tables:
+                print(f"\nEXTRACTED TABLE DATA:")
+                print(f"  - Table content: {tables[0][:200]}...")
+                
+                # Test conversion
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    test_csv = os.path.join(temp_dir, f"test_problematic_{os.path.basename(csv_file)}")
+                    result = MarkdownHandler.markdown_to_csv(tables[0], test_csv, verbose=True)
+                    if result:
+                        df_result = pd.read_csv(result)
+                        print(f"\nCONVERTED CSV OUTPUT:")
+                        print(f"  - Shape: {df_result.shape}")
+                        print(f"  - Content:")
+                        print(df_result.head(3).to_string())
+                        print(f"  - ✓ Successfully converted to CSV")
+                    else:
+                        print(f"  - ❌ Failed to convert to CSV")
+            else:
+                print(f"  - ❌ No tables detected")
+        else:
+            print(f"File not found: {csv_file}")
+    
+    return True
+
 def main():
     """Run all tests."""
     print("Starting table parsing tests...\n")
@@ -298,6 +358,9 @@ def main():
         print()
         
         test_enhanced_markdown_handler()
+        print()
+        
+        test_problematic_csv_files()
         print()
         
         print("All tests completed successfully! ✓")

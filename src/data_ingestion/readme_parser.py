@@ -106,7 +106,9 @@ class MarkdownHandler:
             # If no rows contain pipes, return the original content
             return cleaned_markdown
             
-        max_columns = max(len(row.split("|")) - 2 for row in pipe_rows)  # Exclude leading and trailing '|'
+        # Calculate max columns, but ensure it's at least 1
+        column_counts = [len(row.split("|")) - 2 for row in pipe_rows]  # Exclude leading and trailing '|'
+        max_columns = max(column_counts) if column_counts else 0
         
         # If max_columns is 0 or negative, return original content
         if max_columns <= 0:
@@ -163,6 +165,12 @@ class MarkdownHandler:
         try:
             # Parse the markdown table
             df = pd.read_csv(StringIO(standardized_markdown), sep="|", engine='python').dropna(axis=1, how="all")
+            
+            # Check if the DataFrame is empty or has no data rows (only headers)
+            if df.empty or len(df) == 0:
+                if verbose:
+                    print(f"⚠️ Empty table detected: {os.path.basename(output_path)}")
+                return None
             
             # Detect table type
             component_col, labels_col = MarkdownHandler.detect_table_type(df)

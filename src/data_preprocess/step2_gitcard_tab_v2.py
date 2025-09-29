@@ -68,7 +68,26 @@ def detect_and_extract_markdown_tables(content: str):
         if line.startswith('|') and line.endswith('|'):
             if not in_table:
                 in_table = True
-            current_table.append(line)
+            
+            # Handle lines with double pipes (||) - split them into separate rows
+            if '||' in line:
+                # Split by || and process each part
+                parts = line.split('||')
+                for i, part in enumerate(parts):
+                    part = part.strip()
+                    if part.startswith('|') and part.endswith('|'):
+                        current_table.append(part)
+                    elif part.startswith('|') and not part.endswith('|'):
+                        # Add missing closing |
+                        current_table.append(part + '|')
+                    elif not part.startswith('|') and part.endswith('|'):
+                        # Add missing opening |
+                        current_table.append('|' + part)
+                    elif part and not part.startswith('|') and not part.endswith('|'):
+                        # Add both missing |
+                        current_table.append('|' + part + '|')
+            else:
+                current_table.append(line)
         elif in_table:
             # Check if this is a separator line (contains |, -, :, spaces only)
             if re.match(r'^[\|\-\s:]+$', line):
