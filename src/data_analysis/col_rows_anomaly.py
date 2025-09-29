@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-"""Compare two folders of CSVs: histogram of per-table columns and rows (by basename).
+"""
+Author: Zhengyuan Dong
+Date: 2025-09-28
+Last Edited: 2025-09-29
+Description: Compare two folders of CSVs: histogram of per-table columns and rows (by basename).
 
 Usage example:
     python src/data_analysis/top_col_tables.py \
@@ -241,22 +245,24 @@ def main():
     fig.savefig(args.png_out, dpi=200)
     plt.close(fig)
 
-    # Combined overlay histograms for V1 and V2
+    # Combined overlay histograms: Columns (V1 vs V2) and Rows (V1 vs V2)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    if v1_orig or v1_trans:
+    # Left: columns comparison
+    if v1_orig or v2_orig:
         ax1.hist(v1_orig, bins=args.bins, alpha=0.6, label='V1 columns', color='#1f77b4', edgecolor='black')
-        ax1.hist(v1_trans, bins=args.bins, alpha=0.5, label='V1 rows', color='#ff7f0e', edgecolor='black')
+        ax1.hist(v2_orig, bins=args.bins, alpha=0.6, label='V2 columns', color='#2ca02c', edgecolor='black')
         ax1.set_xlabel("Count")
         ax1.set_ylabel("Frequency")
-        ax1.set_title("V1: Columns vs Rows")
+        ax1.set_title("Columns: V1 vs V2")
         ax1.set_yscale('log')
         ax1.legend()
-    if v2_orig or v2_trans:
-        ax2.hist(v2_orig, bins=args.bins, alpha=0.6, label='V2 columns', color='#2ca02c', edgecolor='black')
-        ax2.hist(v2_trans, bins=args.bins, alpha=0.5, label='V2 rows', color='#9467bd', edgecolor='black')
+    # Right: rows comparison
+    if v1_trans or v2_trans:
+        ax2.hist(v1_trans, bins=args.bins, alpha=0.6, label='V1 rows', color='#ff7f0e', edgecolor='black')
+        ax2.hist(v2_trans, bins=args.bins, alpha=0.6, label='V2 rows', color='#9467bd', edgecolor='black')
         ax2.set_xlabel("Count")
         ax2.set_ylabel("Frequency")
-        ax2.set_title("V2: Columns vs Rows")
+        ax2.set_title("Rows: V1 vs V2")
         ax2.set_yscale('log')
         ax2.legend()
     fig.tight_layout()
@@ -277,15 +283,32 @@ def main():
             if v2_o is not None and v2_t is not None:
                 v2_x_rows.append(v2_t)
                 v2_y_cols.append(v2_o)
-        ax1.scatter(v1_x_rows, v1_y_cols, s=8, alpha=0.5, edgecolors='none', c='#1f77b4')
+        # Filter non-positive values for log-scale compatibility
+        v1_pairs = [(x, y) for x, y in zip(v1_x_rows, v1_y_cols) if (x is not None and y is not None and x > 0 and y > 0)]
+        v2_pairs = [(x, y) for x, y in zip(v2_x_rows, v2_y_cols) if (x is not None and y is not None and x > 0 and y > 0)]
+
+        if v1_pairs:
+            v1_x_plot, v1_y_plot = zip(*v1_pairs)
+        else:
+            v1_x_plot, v1_y_plot = [], []
+        if v2_pairs:
+            v2_x_plot, v2_y_plot = zip(*v2_pairs)
+        else:
+            v2_x_plot, v2_y_plot = [], []
+
+        ax1.scatter(v1_x_plot, v1_y_plot, s=8, alpha=0.5, edgecolors='none', c='#1f77b4')
         ax1.set_xlabel("Rows (count)")
         ax1.set_ylabel("Columns (count)")
         ax1.set_title("V1: Rows vs Columns")
+        ax1.set_xscale('log')
+        ax1.set_yscale('log')
         ax1.grid(True, linestyle='--', alpha=0.3)
-        ax2.scatter(v2_x_rows, v2_y_cols, s=8, alpha=0.5, edgecolors='none', c='#2ca02c')
+        ax2.scatter(v2_x_plot, v2_y_plot, s=8, alpha=0.5, edgecolors='none', c='#2ca02c')
         ax2.set_xlabel("Rows (count)")
         ax2.set_ylabel("Columns (count)")
         ax2.set_title("V2: Rows vs Columns")
+        ax2.set_xscale('log')
+        ax2.set_yscale('log')
         ax2.grid(True, linestyle='--', alpha=0.3)
         fig.suptitle("Combined Scatter Plots: V1 and V2")
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])

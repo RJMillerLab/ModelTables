@@ -369,23 +369,6 @@ python batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keyw
 # Purpose: Compare HTML table v2 vs v1 column counts and analyze reduction
 python src/data_analysis/analyze_html_tables.py
 python src/data_analysis/analyze_huggingface_tables.py
-
-# For HuggingFace CSVs specifically:
-# Input file format: csv_name<TAB>score (e.g., "a1b2c3d4e5_table1.csv	0.95")
-# Output includes: table_file, modelId, source, has_label_scheme, has_view_label_scheme
-
-# Reverse lookup: Get CSVs from modelID
-python -m src.data_analysis.get_csvs_by_model --model "google-bert/bert-base-uncased"
-
-# Get GitHub README paths from GitHub CSV paths
-# Get README path from single CSV file
-python -m src.data_analysis.get_github_readme --csv-path "data/processed/deduped_github_csvs/abc123_table1.csv"
-# Get README path from CSV filename only
-python -m src.data_analysis.get_github_readme --csv-path "abc123_table1.csv"
-# Process multiple CSV paths from file 
-python -m src.data_analysis.get_github_readme --input-file csv_paths.txt --output results.json
-
-python quick_csv_to_modelid.py --csv "64dc62e53f_table2.csv"
 ```
 
 ### Additional Statistics Analysis
@@ -479,6 +462,7 @@ python tmp_list_parquet_schemas.py > logs/parquet_schema.log
 #python complete_duplicate_analysis.py > logs/complete_duplicate_analysis_results.txt
 python column_size_analysis.py --include-modelid > logs/parquet_storage.log
 # after debug: rerun the step2_gitcard
+# draw column and row histogram, to get anomaly cases
 python src/data_analysis/col_rows_anomaly.py --recursive
 # load all files into duckdb
 python src/data_analysis/load_sv_to_db.py --engine sqlite --db-path deduped_hugging_csvs_v2.sqlite --input-dir data/processed/deduped_hugging_csvs_v2
