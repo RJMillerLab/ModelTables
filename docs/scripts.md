@@ -69,7 +69,6 @@ This step extracts tabular data from various sources and processes it.
 # Input: data/processed/modelcard_step1.parquet, github_readmes_info.parquet, downloaded_github_readmes/
 # Output: modelcard_step2.parquet, deduped_hugging_csvs/, hugging_deduped_mapping.json, deduped_github_csvs/, md_to_csv_mapping.json
 python -m src.data_preprocess.step2_gitcard_tab
-python -m src.data_preprocess.step2_gitcard_tab_v2
 
 # Process downloaded GitHub HTML files to Markdown.
 # Input: data/downloaded_github_readmes/
@@ -180,10 +179,8 @@ Ensure data quality and consistency before generating final ground truth.
 # Input: modelcard_step3_merged
 # Output: modelcard_step3_dedup
 python -m src.data_analysis.qc_dedup > logs/qc_dedup_0516.log
-
 # Generate figures for deduplication analysis.
 python -m src.data_analysis.qc_dedup_fig
-
 # Generate statistics on the processed dataset.
 # Input: modelcard_step4_dedup (ensure this is updated after deduplication)
 # Output: benchmark_results
@@ -270,13 +267,10 @@ Execute Starmie's pipeline for contrastive learning, embedding extraction, and s
 # python -m src.data_symlink.prepare_sample_server --root_dir /u4/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42
 # Another substitution:
 python -m src.data_symlink.prepare_sample --root_dir /u1/z6dong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42
-
-
 # Create file lists for trick-augmented files.
 # Input: scilake_final_filelist.txt
 # Output: scilake_final_filelist_{tricks}_filelist.txt
 # python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt
-
 # Create validation file lists.
 python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt
 
@@ -403,13 +397,6 @@ bash bak/symlink_ln_scilake_large.sh # too slow
 bash bak/symlink_ln_scilake_final.sh
 ```
 
-
-```bash
-python card_statistics.py # get statistics of model cards
-python hf_models_analysis.py # get statistics of models in Hugging Face
-```
-
-
 Add some experiments after rebuttal:
 ```bash
 # pipeline-A
@@ -457,15 +444,23 @@ python src/modelsearch/pipeline_table2mc/build_faiss.py ...
 
 ```bash
 # get parquet schema
-python tmp_list_parquet_schemas.py > logs/parquet_schema.log    
+python src.data_analysis.list_parquet_schemas > logs/parquet_schema.log    
 # get attributes duplicate analysis
 #python complete_duplicate_analysis.py > logs/complete_duplicate_analysis_results.txt
-python column_size_analysis.py --include-modelid > logs/parquet_storage.log
-# after debug: rerun the step2_gitcard
-# draw column and row histogram, to get anomaly cases
-python src/data_analysis/col_rows_anomaly.py --recursive
+python src.data_analysis.column_size_analysis --include-modelid > logs/parquet_storage.log
+# draw column and row histogram, to get anomaly cases, compare huggingface v1, v2 difference
+python src.data_analysis.col_rows_anomaly --recursive
+
 # load all files into duckdb
-python src/data_analysis/load_sv_to_db.py --engine sqlite --db-path deduped_hugging_csvs_v2.sqlite --input-dir data/processed/deduped_hugging_csvs_v2
+python src.data_analysis.load_sv_to_db --engine sqlite --db-path deduped_hugging_csvs_v2.sqlite --input-dir data/processed/deduped_hugging_csvs_v2
+# get relational keys from other key automatically (require logs/parquet_schema.log)
+python -m src.data_analysis.get_from --target html_table_list_mapped_dedup --source modelId --value google-bert/bert-base-uncased
+python -m src.data_analysis.get_from --target readme_path --source csv_paths --value "64dc62e53f_table2.csv" 
+python -m src.data_analysis.get_from --target modelId --source hugging_table_list --value data/processed/deduped_hugging_csvs/021f09961f_table1.csv
+# step by step filtering img
+python -m src.data_analysis.card_statistics # get statistics of model cards
+python -m src.data_analysis.hf_models_analysis # get statistics of models in Hugging Face
+# TODO: top-10!
 ```
 
 

@@ -11,8 +11,18 @@ def human(n: float) -> str:
         idx += 1
     return f"{n:.1f}{units[idx]}"
 
-base = Path('data/processed')
-files = sorted(base.rglob('*.parquet'), key=lambda p: p.stat().st_size, reverse=True)
+# Analyze parquet files in multiple directories
+directories = ['data/processed', 'data/gt', 'data/analysis']
+all_files = []
+
+for base_dir in directories:
+    base = Path(base_dir)
+    if base.exists():
+        files = list(base.rglob('*.parquet'))
+        all_files.extend(files)
+
+# Sort all files by size (largest first)
+files = sorted(all_files, key=lambda p: p.stat().st_size, reverse=True)
 for p in files:
     try:
         pf = pq.ParquetFile(str(p))
