@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-07
-Last Modified: 2025-08-30
+Last Modified: 2025-09-30
 Description: Plot benchmark results for number of tables, columns, and average rows per table.
 """
 
@@ -176,6 +176,8 @@ def plot_metrics_grid(df, include_wdc=True):
     plt.savefig(os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.pdf"), dpi=300, bbox_inches='tight')
     plt.savefig(os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.png"), dpi=300, bbox_inches='tight')
     plt.close()
+    print(f"Saved plot to {os.path.join(OUTPUT_DIR, 'benchmark_metrics_vertical.pdf')}")
+    print(f"Saved plot to {os.path.join(OUTPUT_DIR, 'benchmark_metrics_vertical.png')}")
 
 
 if __name__ == "__main__":

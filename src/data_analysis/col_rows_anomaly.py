@@ -6,7 +6,7 @@ Last Edited: 2025-09-29
 Description: Compare two folders of CSVs: histogram of per-table columns and rows (by basename).
 
 Usage example:
-    python src/data_analysis/top_col_tables.py \
+    python -m src.data_analysis.col_rows_anomaly \
              --v1-dir data/processed/deduped_hugging_csvs \
              --v2-dir data/processed/deduped_hugging_csvs_v2 \
              --recursive \
@@ -16,6 +16,7 @@ Notes:
     - Rows = number of lines in the file (including header)
     - Files are matched by basename between folders
     - The script saves a single overlay PNG with two subplots (columns and rows)
+    - Uses optimized binary reading functions from qc_stats.py for better performance
 """
 import argparse
 import os
@@ -23,60 +24,7 @@ import csv
 import matplotlib.pyplot as plt
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
-
-
-def count_rows_fast(csv_path, chunk_size=8 * 1024 * 1024):
-    """Count rows quickly by counting newlines in binary chunks.
-
-    - Counts b"\n" occurrences across the file
-    - If file is non-empty and does not end with a newline, adds 1
-    """
-    try:
-        file_size = os.path.getsize(csv_path)
-        if file_size == 0:
-            return 0
-        newline_count = 0
-        last_byte_newline = False
-        with open(csv_path, 'rb') as f:
-            while True:
-                data = f.read(chunk_size)
-                if not data:
-                    break
-                newline_count += data.count(b'\n')
-                last_byte_newline = data.endswith(b'\n')
-        # If file doesn't end with a newline, there's one more line
-        return newline_count if last_byte_newline else newline_count + 1
-    except Exception:
-        return 0
-
-
-def count_columns_from_header_fast(csv_path, max_scan_bytes=8 * 1024 * 1024):
-    """Read up to the first newline only and parse that header row with csv.reader.
-
-    This avoids scanning the entire file for malformed quoting elsewhere.
-    """
-    try:
-        header_bytes = bytearray()
-        with open(csv_path, 'rb') as f:
-            while True:
-                # Read moderately sized chunks to find first newline quickly
-                chunk = f.read(64 * 1024)
-                if not chunk:
-                    break
-                nl_pos = chunk.find(b'\n')
-                if nl_pos != -1:
-                    header_bytes.extend(chunk[:nl_pos])
-                    break
-                header_bytes.extend(chunk)
-                if len(header_bytes) >= max_scan_bytes:
-                    break
-        if not header_bytes:
-            return 0
-        header_str = header_bytes.decode('utf-8', errors='ignore')
-        row = next(csv.reader([header_str]), None)
-        return len(row) if row is not None else 0
-    except Exception:
-        return 0
+from src.data_analysis.qc_stats import count_rows_fast, count_columns_from_header_fast
 
 
 def count_columns_from_header_ultra_simple(csv_path, max_scan_bytes=8 * 1024 * 1024):
@@ -146,13 +94,13 @@ def main():
     ap.add_argument("--v1-dir", default="data/processed/deduped_hugging_csvs", help="Directory containing version 1 CSVs")
     ap.add_argument("--v2-dir", default="data/processed/deduped_hugging_csvs_v2", help="Directory containing version 2 CSVs")
     ap.add_argument("--recursive", action="store_true", help="Recurse into subdirectories of the provided directories")
-    ap.add_argument("--out", default="tmp/v1v2_overlay.tsv", help="Optional output TSV with basename and v1/v2 columns/rows")
-    ap.add_argument("--png-out", default="tmp/v1v2_overlay.png", help="Path to save the overlay histogram PNG")
+    ap.add_argument("--out", default="data/analysis/v1v2_overlay.tsv", help="Optional output TSV with basename and v1/v2 columns/rows")
+    ap.add_argument("--png-out", default="data/analysis/v1v2_overlay.png", help="Path to save the overlay histogram PNG")
     ap.add_argument("--bins", type=int, default=50, help="Number of bins for histograms")
     ap.add_argument("--workers", type=int, default=min(32, (os.cpu_count() or 4) * 2), help="Max worker threads for parallel file processing")
     ap.add_argument("--top", type=int, default=0, help="Print top-N examples where rows >> columns (by ratio)")
-    ap.add_argument("--csv-out", default="tmp/v1v2_overlay.csv", help="Optional CSV file with per-basename stats and ratios")
-    ap.add_argument("--anomalies-csv-out", default="tmp/v1v2_overlay_anomalies.csv", help="Optional CSV file to save anomaly cases only")
+    ap.add_argument("--csv-out", default="data/analysis/v1v2_overlay.csv", help="Optional CSV file with per-basename stats and ratios")
+    ap.add_argument("--anomalies-csv-out", default="data/analysis/v1v2_overlay_anomalies.csv", help="Optional CSV file to save anomaly cases only")
     ap.add_argument("--anomaly-ratio", type=float, default=100.0, help="Rows/cols ratio threshold to flag anomalies")
     ap.add_argument("--anomaly-min-rows", type=int, default=1000, help="Minimum rows to consider when flagging anomalies")
     args = ap.parse_args()
@@ -193,8 +141,8 @@ def main():
     def _proc_pair(v1_path, v2_path):
         v1_o = col_counter(v1_path)
         v2_o = col_counter(v2_path)
-        v1_t = count_rows_fast(v1_path)
-        v2_t = count_rows_fast(v2_path)
+        v1_t = count_rows_fast(v1_path, head_flag=True)  # Include header for comparison
+        v2_t = count_rows_fast(v2_path, head_flag=True)  # Include header for comparison
         return v1_o, v1_t, v2_o, v2_t, os.path.basename(v1_path)
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {ex.submit(_proc_pair, p1, p2): (p1, p2) for (p1, p2) in pairs}
@@ -266,7 +214,7 @@ def main():
         ax2.set_yscale('log')
         ax2.legend()
     fig.tight_layout()
-    combined_hist_path = "tmp/combined_hist.png"
+    combined_hist_path = "data/analysis/combined_hist.png"
     os.makedirs(os.path.dirname(combined_hist_path), exist_ok=True)
     fig.savefig(combined_hist_path, dpi=200)
     plt.close(fig)
@@ -312,7 +260,7 @@ def main():
         ax2.grid(True, linestyle='--', alpha=0.3)
         fig.suptitle("Combined Scatter Plots: V1 and V2")
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-        combined_scatter_path = "tmp/combined_scatter.png"
+        combined_scatter_path = "data/analysis/combined_scatter.png"
         os.makedirs(os.path.dirname(combined_scatter_path), exist_ok=True)
         fig.savefig(combined_scatter_path, dpi=200)
         plt.close(fig)

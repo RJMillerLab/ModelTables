@@ -185,8 +185,6 @@ python -m src.data_analysis.qc_dedup_fig
 # Input: modelcard_step4_dedup (ensure this is updated after deduplication)
 # Output: benchmark_results
 python -m src.data_analysis.qc_stats > logs/qc_stats_0516.log
-# (Optional) include WDC in the dataframe parquet
-python -m src.data_analysis.merge_wdc_data
 # Generate figures for dataset statistics.
 python -m src.data_analysis.qc_stats_fig
 
