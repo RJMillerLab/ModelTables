@@ -2,26 +2,7 @@
 Author: Zhengyuan Dong
 Created: 2025-04-03
 Last Modified: 2025-04-07
-Description:
-  Get statistics of tables in CSV files from different resources (optimized with joblib)
-  with additional model-level quality control. For each benchmark resource, two rows are generated:
-  one with deduped (weighted) statistics and one (labeled "(sym)") with raw statistics computed by processing
-  each CSV file instance (so if a file appears twice, its rows and columns are counted twice).
-
-  2025‑04‑07 update:
-  - Add non‑empty / valid‑title stats.
-  - Compute a new column "all_title_list_valid" (using integration file) to filter valid titles.
-  - Retain external resource hyperparameters.
-  - Switch mode between "table_only" (grouped bar chart for #tables only)
-    and "all_hyper" (grid of charts for all hyperparameters).
-  - For grouped bar chart: Cluster 1 (Baseline/Fix) uses a green gradient;
-    Clusters 2–5 (Sym, Dedup, w/ title, w/ valid title) use a blue gradient.
-  - Additionally, save final results locally and plot #Cols, #Avg Rows, and Size(GB) for baseline as well.
-
-  - Optimized CSV reading with binary methods for ~15x performance improvement
-  - Replaced pandas.read_csv() with optimized count_rows_fast() and count_columns_from_header_fast()
-  - Added head_flag parameter to count_rows_fast() for flexible header handling
-  - Maintains identical accuracy while dramatically reducing processing time
+Description: Get statistics of tables in CSV files from different resources with optimized binary reading for ~15x performance improvement.
 """
 
 import os

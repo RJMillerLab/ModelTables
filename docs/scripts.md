@@ -179,14 +179,14 @@ Ensure data quality and consistency before generating final ground truth.
 # Input: modelcard_step3_merged
 # Output: modelcard_step3_dedup
 python -m src.data_analysis.qc_dedup > logs/qc_dedup_0516.log
-# Generate figures for deduplication analysis.
 python -m src.data_analysis.qc_dedup_fig
 # Generate statistics on the processed dataset.
-# Input: modelcard_step4_dedup (ensure this is updated after deduplication)
+# Input: modelcard_step3_dedup (ensure this is updated after deduplication)
 # Output: benchmark_results
 python -m src.data_analysis.qc_stats > logs/qc_stats_0516.log
-# Generate figures for dataset statistics.
 python -m src.data_analysis.qc_stats_fig
+# (if compare 2 version's stats) 
+python -m src.data_analysis.qc_anomaly --recursive
 
 # (Optional) Double-check deduplication and mapping logic.
 # python -m src.data_analysis.qc_dc
@@ -446,8 +446,6 @@ python src.data_analysis.list_parquet_schemas > logs/parquet_schema.log
 # get attributes duplicate analysis
 #python complete_duplicate_analysis.py > logs/complete_duplicate_analysis_results.txt
 python src.data_analysis.column_size_analysis --include-modelid > logs/parquet_storage.log
-# draw column and row histogram, to get anomaly cases, compare huggingface v1, v2 difference
-python src.data_analysis.col_rows_anomaly --recursive
 
 # load all files into duckdb
 python src.data_analysis.load_sv_to_db --engine sqlite --db-path deduped_hugging_csvs_v2.sqlite --input-dir data/processed/deduped_hugging_csvs_v2
