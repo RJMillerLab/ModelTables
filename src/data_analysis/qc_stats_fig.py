@@ -9,12 +9,13 @@ Description: Plot benchmark results for number of tables, columns, and average r
 import pandas as pd
 import numpy as np
 import os
+from src.data_analysis.qc_stats import annotate_bars
 
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # V2 mode configuration (should match qc_stats.py)
-V2_MODE = True  # Set to True to use v2 versions of CSV files
+V2_MODE = False  # Set to True to use v2 versions of CSV files
 V2_SUFFIX = "_v2"  # Suffix for v2 output files
 
 RESOURCES = {
@@ -33,77 +34,6 @@ RESOURCE_LABELS = {
 
 # Define benchmark names that should be treated as baseline (not scilake)
 BASELINE_BENCHMARKS = ["SANTOS Small", "TUS Small", "TUS Large", "SANTOS Large"]
-
-def annotate_bars(ax, fontsize=16, baseline_count=0, metric="", bar_width=0.15, group_width=0.4):
-    """Annotate bars with different formatting for baseline vs scilake data.
-    
-    Args:
-        ax: matplotlib axis
-        fontsize: font size for annotations
-        baseline_count: number of baseline bars (to distinguish from scilake bars)
-        metric: metric name to determine special formatting rules
-        bar_width: width of individual bars
-        group_width: width of group spacing
-    """
-    # Reduce font size to minimize overlap
-    annotation_fontsize = max(8, fontsize - 4)
-    
-    # Get all bar heights for smart positioning
-    heights = [p.get_height() for p in ax.patches if p.get_height() > 0]
-    if not heights:
-        return
-    
-    # Calculate dynamic vertical offset based on data range
-    min_height = min(heights)
-    max_height = max(heights)
-    height_range = max_height - min_height
-    
-    # Base offset - smaller for better spacing
-    base_offset = 2
-    
-    for i, p in enumerate(ax.patches):
-        height = p.get_height()
-        if height > 0:
-            # Determine if this is a baseline bar or scilake bar
-            is_baseline = i < baseline_count
-            
-            # Special formatting for Avg # Rows
-            if metric == "Avg # Rows":
-                if is_baseline:
-                    # Baseline: keep as integer
-                    display_text = f'{int(height)}'
-                else:
-                    # Scilake: use 1 decimal place
-                    display_text = f'{height:.1f}'
-            else:
-                # For other metrics: integers show as int, decimals show 1 decimal place
-                if height == int(height):
-                    display_text = f'{int(height)}'
-                else:
-                    display_text = f'{height:.1f}'
-            
-            # Smart vertical positioning to reduce overlap
-            # Alternate between top and bottom positioning for nearby bars
-            if i % 2 == 0:
-                # Even bars: position above
-                va = 'bottom'
-                y_offset = base_offset + (height / max_height) * 2  # Reduced dynamic offset
-            else:
-                # Odd bars: position below (if there's space)
-                va = 'top'
-                y_offset = -(base_offset + 1)
-            
-            # Always keep horizontal centering - no horizontal offset
-            x_offset = 0
-            
-            ax.annotate(
-                display_text,
-                (p.get_x() + p.get_width() / 2, height),
-                ha='center', va=va,
-                fontsize=annotation_fontsize,
-                xytext=(x_offset, y_offset), 
-                textcoords='offset points'
-            )
 
 def plot_metrics_grid(df, include_wdc=True): 
     from matplotlib.patches import Patch

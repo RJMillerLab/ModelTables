@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-03
-Last Modified: 2025-04-07
+Last Modified: 2025-09-30
 Description: Get statistics of tables in CSV files from different resources with optimized binary reading for ~15x performance improvement.
 """
 
@@ -24,7 +24,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 VALID_TITLE_PARQUET = "data/processed/all_title_list_valid.parquet"
 
 # V2 mode configuration
-V2_MODE = True  # Set to True to use v2 versions of CSV files
+V2_MODE = False  # Set to True to use v2 versions of CSV files
 V2_SUFFIX = "_v2"  # Suffix for v2 output files
 
 # Benchmark data (WDC removed)
@@ -340,7 +340,8 @@ def annotate_bars(ax, fontsize=16, baseline_count=0, metric="", bar_width=0.15, 
                         (p.get_x() + p.get_width() / 2, height),
                         ha='center', va=va, fontsize=annotation_fontsize, rotation=0,
                         xytext=(x_offset, y_offset), 
-                        textcoords='offset points')
+                        textcoords='offset points',
+                        bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='none', alpha=0.6))
 
 def plot_metric(df, metric, filename):
     from matplotlib.patches import Patch
