@@ -13,6 +13,10 @@ import os
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# V2 mode configuration (should match qc_stats.py)
+V2_MODE = True  # Set to True to use v2 versions of CSV files
+V2_SUFFIX = "_v2"  # Suffix for v2 output files
+
 RESOURCES = {
     'hugging': ['hugging_table_list_dedup'],
     'github': ['github_table_list_dedup'],
@@ -30,16 +34,75 @@ RESOURCE_LABELS = {
 # Define benchmark names that should be treated as baseline (not scilake)
 BASELINE_BENCHMARKS = ["SANTOS Small", "TUS Small", "TUS Large", "SANTOS Large"]
 
-def annotate_bars(ax, fontsize=16):
-    for p in ax.patches:
+def annotate_bars(ax, fontsize=16, baseline_count=0, metric="", bar_width=0.15, group_width=0.4):
+    """Annotate bars with different formatting for baseline vs scilake data.
+    
+    Args:
+        ax: matplotlib axis
+        fontsize: font size for annotations
+        baseline_count: number of baseline bars (to distinguish from scilake bars)
+        metric: metric name to determine special formatting rules
+        bar_width: width of individual bars
+        group_width: width of group spacing
+    """
+    # Reduce font size to minimize overlap
+    annotation_fontsize = max(8, fontsize - 4)
+    
+    # Get all bar heights for smart positioning
+    heights = [p.get_height() for p in ax.patches if p.get_height() > 0]
+    if not heights:
+        return
+    
+    # Calculate dynamic vertical offset based on data range
+    min_height = min(heights)
+    max_height = max(heights)
+    height_range = max_height - min_height
+    
+    # Base offset - smaller for better spacing
+    base_offset = 2
+    
+    for i, p in enumerate(ax.patches):
         height = p.get_height()
         if height > 0:
+            # Determine if this is a baseline bar or scilake bar
+            is_baseline = i < baseline_count
+            
+            # Special formatting for Avg # Rows
+            if metric == "Avg # Rows":
+                if is_baseline:
+                    # Baseline: keep as integer
+                    display_text = f'{int(height)}'
+                else:
+                    # Scilake: use 1 decimal place
+                    display_text = f'{height:.1f}'
+            else:
+                # For other metrics: integers show as int, decimals show 1 decimal place
+                if height == int(height):
+                    display_text = f'{int(height)}'
+                else:
+                    display_text = f'{height:.1f}'
+            
+            # Smart vertical positioning to reduce overlap
+            # Alternate between top and bottom positioning for nearby bars
+            if i % 2 == 0:
+                # Even bars: position above
+                va = 'bottom'
+                y_offset = base_offset + (height / max_height) * 2  # Reduced dynamic offset
+            else:
+                # Odd bars: position below (if there's space)
+                va = 'top'
+                y_offset = -(base_offset + 1)
+            
+            # Always keep horizontal centering - no horizontal offset
+            x_offset = 0
+            
             ax.annotate(
-                f'{int(height)}',
+                display_text,
                 (p.get_x() + p.get_width() / 2, height),
-                ha='center', va='bottom',
-                fontsize=fontsize,
-                xytext=(0, 1), textcoords='offset points'
+                ha='center', va=va,
+                fontsize=annotation_fontsize,
+                xytext=(x_offset, y_offset), 
+                textcoords='offset points'
             )
 
 def plot_metrics_grid(df, include_wdc=True): 
@@ -140,7 +203,7 @@ def plot_metrics_grid(df, include_wdc=True):
         ax.bar(positions, heights, width=bar_width, color=colors)
         ax.set_yscale('log')
         ax.margins(y=0.1)
-        annotate_bars(ax, fontsize=12)
+        annotate_bars(ax, fontsize=12, baseline_count=len(baseline_df), metric=metric, bar_width=bar_width, group_width=group_width)
         ax.set_ylabel(f"{metric}", fontsize=24)
 
     axes[-1].set_xticks(xtick_positions)
@@ -173,15 +236,30 @@ def plot_metrics_grid(df, include_wdc=True):
         fontsize=13,
     )
 
-    plt.savefig(os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.pdf"), dpi=300, bbox_inches='tight')
-    plt.savefig(os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.png"), dpi=300, bbox_inches='tight')
+    # Add v2 suffix to output files if V2_MODE is enabled
+    if V2_MODE:
+        pdf_path = os.path.join(OUTPUT_DIR, f"benchmark_metrics_vertical{V2_SUFFIX}.pdf")
+        png_path = os.path.join(OUTPUT_DIR, f"benchmark_metrics_vertical{V2_SUFFIX}.png")
+    else:
+        pdf_path = os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.pdf")
+        png_path = os.path.join(OUTPUT_DIR, "benchmark_metrics_vertical.png")
+    
+    plt.savefig(pdf_path, dpi=300, bbox_inches='tight')
+    plt.savefig(png_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"Saved plot to {os.path.join(OUTPUT_DIR, 'benchmark_metrics_vertical.pdf')}")
-    print(f"Saved plot to {os.path.join(OUTPUT_DIR, 'benchmark_metrics_vertical.png')}")
+    
+    print(f"Saved plot to {pdf_path}")
+    print(f"Saved plot to {png_path}")
 
 
 if __name__ == "__main__":
-    results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
+    # Use v2 file if V2_MODE is enabled
+    if V2_MODE:
+        results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{V2_SUFFIX}.parquet")
+        print(f"🔧 V2 Mode enabled - reading from {results_path}")
+    else:
+        results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
+    
     results_df = pd.read_parquet(results_path)
     
     # Calculate average columns

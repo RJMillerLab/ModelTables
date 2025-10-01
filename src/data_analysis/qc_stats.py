@@ -15,14 +15,6 @@ from matplotlib.patches import Patch
 from src.utils import to_parquet
 import csv
 
-# Optional seaborn import
-try:
-    import seaborn as sns
-    HAS_SEABORN = True
-except ImportError:
-    HAS_SEABORN = False
-    print("Warning: seaborn not available, some plotting features may be limited")
-
 # Configuration
 INPUT_FILE = "data/processed/modelcard_step3_merged.parquet"
 INPUT_FILE_DEDUP = "data/processed/modelcard_step3_dedup.parquet"
@@ -30,6 +22,10 @@ INTEGRATION_FILE = "data/processed/final_integration_with_paths.parquet"
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 VALID_TITLE_PARQUET = "data/processed/all_title_list_valid.parquet"
+
+# V2 mode configuration
+V2_MODE = True  # Set to True to use v2 versions of CSV files
+V2_SUFFIX = "_v2"  # Suffix for v2 output files
 
 # Benchmark data (WDC removed)
 benchmark_data = [
@@ -48,6 +44,43 @@ RESOURCES = {
 }
 
 BENCHMARK_NAMES = [x[0] for x in benchmark_data]  # For legend
+
+
+def find_v2_csv_path(original_path):
+    """Find v2 version of CSV file if it exists, otherwise return original path.
+    
+    Args:
+        original_path: Original CSV file path
+        
+    Returns:
+        Path to v2 version if exists, otherwise original path
+    """
+    if not V2_MODE:
+        return original_path
+    
+    # Check if file exists
+    if not os.path.exists(original_path):
+        return original_path
+    
+    # Get directory and filename
+    dir_path = os.path.dirname(original_path)
+    filename = os.path.basename(original_path)
+    
+    # Look for v2 directory
+    v2_dir = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_v2')
+    v2_dir = v2_dir.replace('deduped_github_csvs', 'deduped_github_csvs_v2')
+    v2_dir = v2_dir.replace('tables_output', 'tables_output_v2')
+    
+    # Check if v2 directory exists
+    if not os.path.exists(v2_dir):
+        return original_path
+    
+    # Look for v2 file
+    v2_path = os.path.join(v2_dir, filename)
+    if os.path.exists(v2_path):
+        return v2_path
+    
+    return original_path
 
 
 def count_rows_fast(csv_path, chunk_size=8 * 1024 * 1024, head_flag=False):
@@ -118,17 +151,21 @@ def count_columns_from_header_fast(csv_path, max_scan_bytes=8 * 1024 * 1024):
 def process_csv_file(csv_file):
     """Optimized CSV processing using binary reading for better performance."""
     try:
-        # df = pd.read_csv(csv_file, dtype=str, keep_default_na=False)
+        # Find v2 version if V2_MODE is enabled
+        actual_csv_file = find_v2_csv_path(csv_file)
+        
+        # df = pd.read_csv(actual_csv_file, dtype=str, keep_default_na=False)
         # Use optimized binary reading methods with head_flag=False to match pandas behavior
-        rows = count_rows_fast(csv_file, head_flag=False)  # Exclude header to match pandas
-        cols = count_columns_from_header_fast(csv_file)
+        rows = count_rows_fast(actual_csv_file, head_flag=False)  # Exclude header to match pandas
+        cols = count_columns_from_header_fast(actual_csv_file)
         return {
-            'path': csv_file,
+            'path': actual_csv_file,  # Store actual path used (v2 if available)
+            'original_path': csv_file,  # Store original path for reference
             #'rows': df.shape[0],
             #'cols': df.shape[1],
             'rows': rows,
             'cols': cols,
-            'size': os.path.getsize(csv_file)/(1024**3),
+            'size': os.path.getsize(actual_csv_file)/(1024**3),
             'status': 'valid'
         }, None
     except Exception as e:
@@ -158,7 +195,7 @@ def compute_resource_stats(df, resource):
             return [0, 0, 0, 0]
         total_cols = sum(f['cols'] for f in file_list)
         total_rows = sum(f['rows'] for f in file_list)
-        avg_rows = int(total_rows / len(file_list))
+        avg_rows = total_rows / len(file_list)  # 保持小数，不使用 int()
         total_size = sum(f['size'] for f in file_list)
         return [len(file_list), total_cols, avg_rows, total_size]
 
@@ -237,13 +274,73 @@ def create_combined_results(benchmark_data, resource_stats):
         df = pd.concat([df, unique_row, symlink_row, w_title_row, w_valid_row], ignore_index=True)
     return df
 
-def annotate_bars(ax, fontsize=16):
-    for p in ax.patches:
+def annotate_bars(ax, fontsize=16, baseline_count=0, metric="", bar_width=0.15, group_width=0.4):
+    """Annotate bars with different formatting for baseline vs scilake data.
+    
+    Args:
+        ax: matplotlib axis
+        fontsize: font size for annotations
+        baseline_count: number of baseline bars (to distinguish from scilake bars)
+        metric: metric name to determine special formatting rules
+        bar_width: width of individual bars
+        group_width: width of group spacing
+    """
+    # Reduce font size to minimize overlap
+    annotation_fontsize = max(8, fontsize - 4)
+    
+    # Get all bar heights for smart positioning
+    heights = [p.get_height() for p in ax.patches if p.get_height() > 0]
+    if not heights:
+        return
+    
+    # Calculate dynamic vertical offset based on data range
+    min_height = min(heights)
+    max_height = max(heights)
+    height_range = max_height - min_height
+    
+    # Base offset - smaller for better spacing
+    base_offset = 2
+    
+    for i, p in enumerate(ax.patches):
         height = p.get_height()
         if height > 0:
-            ax.annotate(f'{int(height)}',
+            # Determine if this is a baseline bar or scilake bar
+            is_baseline = i < baseline_count
+            
+            # Special formatting for Avg # Rows
+            if metric == "Avg # Rows":
+                if is_baseline:
+                    # Baseline: keep as integer
+                    display_text = f'{int(height)}'
+                else:
+                    # Scilake: use 1 decimal place
+                    display_text = f'{height:.1f}'
+            else:
+                # For other metrics: integers show as int, decimals show 1 decimal place
+                if height == int(height):
+                    display_text = f'{int(height)}'
+                else:
+                    display_text = f'{height:.1f}'
+            
+            # Smart vertical positioning to reduce overlap
+            # Alternate between top and bottom positioning for nearby bars
+            if i % 2 == 0:
+                # Even bars: position above
+                va = 'bottom'
+                y_offset = base_offset + (height / max_height) * 2  # Reduced dynamic offset
+            else:
+                # Odd bars: position below (if there's space)
+                va = 'top'
+                y_offset = -(base_offset + 1)
+            
+            # Always keep horizontal centering - no horizontal offset
+            x_offset = 0
+            
+            ax.annotate(display_text,
                         (p.get_x() + p.get_width() / 2, height),
-                        ha='center', va='bottom', fontsize=fontsize, rotation=0)
+                        ha='center', va=va, fontsize=annotation_fontsize, rotation=0,
+                        xytext=(x_offset, y_offset), 
+                        textcoords='offset points')
 
 def plot_metric(df, metric, filename):
     from matplotlib.patches import Patch
@@ -369,7 +466,14 @@ def main():
         resource_stats.update(stats)
 
     results_df = create_combined_results(benchmark_data, resource_stats)
-    results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
+    
+    # Add v2 suffix to output files if V2_MODE is enabled
+    if V2_MODE:
+        results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{V2_SUFFIX}.parquet")
+        print(f"\n🔧 V2 Mode enabled - using v2 CSV files when available")
+    else:
+        results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
+    
     to_parquet(results_df, results_path)
     print(f"\nSaved results to {results_path}")
 

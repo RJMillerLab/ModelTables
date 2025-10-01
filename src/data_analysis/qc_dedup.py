@@ -107,7 +107,33 @@ def backup_and_remove(file_path, resource):
     except Exception as e:
         print(f"[QC] Error removing {file_path}: {e}")
 
-def qc_csv_file(file_path, resource, allow_one_row=True):
+def find_v2_csv_path(original_path):
+    """Find v2 version of CSV file if it exists, otherwise return original path."""
+    # Check if file exists
+    if not os.path.exists(original_path):
+        return original_path
+    
+    # Get directory and filename
+    dir_path = os.path.dirname(original_path)
+    filename = os.path.basename(original_path)
+    
+    # Look for v2 directory
+    v2_dir = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_v2')
+    v2_dir = v2_dir.replace('deduped_github_csvs', 'deduped_github_csvs_v2')
+    v2_dir = v2_dir.replace('tables_output', 'tables_output_v2')
+    
+    # Check if v2 directory exists
+    if not os.path.exists(v2_dir):
+        return original_path
+    
+    # Look for v2 file
+    v2_path = os.path.join(v2_dir, filename)
+    if os.path.exists(v2_path):
+        return v2_path
+    
+    return original_path
+
+def qc_csv_file(file_path, resource, allow_one_row=True, use_v2=False):
     """
     Perform quality control on a CSV file with a single read.
     Checks include:
@@ -115,12 +141,21 @@ def qc_csv_file(file_path, resource, allow_one_row=True):
         backup and remove the file.
       - If the first data row is entirely placeholders, backup the original file, remove the row,
         and overwrite with the cleaned data.
+    
+    Args:
+        file_path: Path to the CSV file
+        resource: Resource type (hugging, github, etc.)
+        allow_one_row: Whether to allow files with only one row
+        use_v2: Whether to use v2 version of the file if available
+    
     Returns:
       "valid" if the file passes QC (and is cleaned if needed),
       Otherwise returns an error status.
     """
     try:
-        df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
+        # Use v2 version if requested and available
+        actual_csv_file = find_v2_csv_path(file_path) if use_v2 else file_path
+        df = pd.read_csv(actual_csv_file, dtype=str, keep_default_na=False)
     except Exception as e:
         print(f"[QC] Error reading {file_path}: {e}")
         backup_and_remove(file_path, resource)

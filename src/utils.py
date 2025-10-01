@@ -59,7 +59,33 @@ def clean_title(title):
         return re.sub(r"[{}]", "", title).strip()
     return title
 
-def get_statistics_table(unique_by_markdown, key_csv_path = "csv_path"):
+def find_v2_csv_path(original_path):
+    """Find v2 version of CSV file if it exists, otherwise return original path."""
+    # Check if file exists
+    if not os.path.exists(original_path):
+        return original_path
+    
+    # Get directory and filename
+    dir_path = os.path.dirname(original_path)
+    filename = os.path.basename(original_path)
+    
+    # Look for v2 directory
+    v2_dir = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_v2')
+    v2_dir = v2_dir.replace('deduped_github_csvs', 'deduped_github_csvs_v2')
+    v2_dir = v2_dir.replace('tables_output', 'tables_output_v2')
+    
+    # Check if v2 directory exists
+    if not os.path.exists(v2_dir):
+        return original_path
+    
+    # Look for v2 file
+    v2_path = os.path.join(v2_dir, filename)
+    if os.path.exists(v2_path):
+        return v2_path
+    
+    return original_path
+
+def get_statistics_table(unique_by_markdown, key_csv_path = "csv_path", use_v2=False):
     assert key_csv_path in unique_by_markdown.columns, f"Key column {key_csv_path} not found in DataFrame."
     valid_csv_df = unique_by_markdown[unique_by_markdown[key_csv_path].apply(lambda x: os.path.exists(x) if isinstance(x, str) else False)]
     num_tables = len(valid_csv_df)
@@ -67,7 +93,9 @@ def get_statistics_table(unique_by_markdown, key_csv_path = "csv_path"):
     total_rows = 0
     for csv_file in tqdm(valid_csv_df[key_csv_path]):
         try:
-            df = pd.read_csv(csv_file)
+            # Use v2 version if requested and available
+            actual_csv_file = find_v2_csv_path(csv_file) if use_v2 else csv_file
+            df = pd.read_csv(actual_csv_file)
             num_cols += df.shape[1]  # Number of columns in the CSV
             total_rows += df.shape[0]  # Number of rows in the CSV
         except Exception as e:
