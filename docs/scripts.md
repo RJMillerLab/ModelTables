@@ -338,10 +338,10 @@ bash src/baseline2/hybrid_search.sh
 ### 10. Model Search - Dense first: 
 ```bash
 bash src/modelsearch/base_densesearch.sh
-python src/modelsearch/compare_baselines.py \
+python -m src.modelsearch.compare_baselines \
   --model_id Salesforce/codet5-base \
   --relationship_parquet data/processed/modelcard_step3_dedup.parquet \
-  --table_search_result results/table_search.json \
+  --table_search_result ~/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json \
   --modelsearch_base_result output/modelsearch/modelsearch_neighbors.json \
   --output_md output/compare_Salesforce_codet5-base.md
 ```
