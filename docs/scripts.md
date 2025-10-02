@@ -180,8 +180,8 @@ Ensure data quality and consistency before generating final ground truth.
 # Output: modelcard_step3_dedup
 python -m src.data_analysis.qc_dedup > logs/qc_dedup_0516.log
 python -m src.data_analysis.qc_dedup_fig
-# Generate statistics on the processed dataset.
-# Input: modelcard_step3_dedup (ensure this is updated after deduplication)
+# Print table #rows #cols
+# Input: modelcard_step3_dedup
 # Output: benchmark_results
 python -m src.data_analysis.qc_stats > logs/qc_stats_0516.log
 python -m src.data_analysis.qc_stats_fig
@@ -293,7 +293,7 @@ bash eval_per_resource.sh
 ```
 
 
-### 7\. Baseline Evaluation
+### 7\. Baseline1: Dense Search
 
 Run baseline table embedding and retrieval methods for comparison.
 
@@ -305,6 +305,8 @@ bash src/baseline1/table_retrieval_pipeline.sh
 bash src/baseline1/table_retrieval_pipeline_str.sh
 bash src/baseline1/table_retrieval_pipeline_tr.sh
 
+
+# for augmented ablation studies
 # step2: combine embedding and jsonl for ori+tr, ori+str, ori+tr+str
 bash src/baseline1/combine_embedding.sh
 # step3: build faiss
@@ -321,16 +323,37 @@ bash scripts/step3_processmetrics_all.sh <index> # run baseline metrics computat
 for faiss cpu/gpu installation, see [FAISS GitHub repository](https://github.com/facebookresearch/faiss).
 
 ____
-8. Baseline2: Sparse search
+### 8. Baseline2: Sparse search
 ```bash
 # get metadata
 bash src/baseline2/get_metadata.sh
 bash src/baseline2/sparse_search.sh
 ```
 
-9. Baseline3: Hybrid (Sparse + Dense search)
+### 9. Baseline3: Hybrid (Sparse + Dense search)
 ```bash
 bash src/baseline2/hybrid_search.sh
+```
+
+### 10. Model Search - Dense first: 
+```bash
+bash src/modelsearch/base_densesearch.sh
+python src/modelsearch/compare_baselines.py \
+  --model_id Salesforce/codet5-base \
+  --relationship_parquet data/processed/modelcard_step3_dedup.parquet \
+  --table_search_result results/table_search.json \
+  --modelsearch_base_result output/modelsearch/modelsearch_neighbors.json \
+  --output_md output/compare_Salesforce_codet5-base.md
+```
+
+### 11. GPT Evaluation of Table Relatedness and Model Relatedness:
+```bash
+
+```
+
+### 12. Table Integration:
+```bash
+
 ```
 
 ### Analysis on Results
@@ -341,9 +364,7 @@ Tools for analyzing the retrieval results and ground truth.
 # Get top-10 results from step3_search_hnsw.
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json
 # then gen markdown
-python -m src.data_analysis.report_generation \
-       --json_path data/baseline/baseline1_dense.json \
-       --query_table 1810.04805_table4.csv
+python -m src.data_analysis.report_generation --json_path data/baseline/baseline1_dense.json --query_table 1810.04805_table4.csv
 # --show_model_titles
 
 # Check if a specific CSV pair is related in the ground truth.
@@ -393,51 +414,6 @@ bash bak/symlink_trick_tr.sh # too slow
 bash bak/symlink_trick_tr_str.sh # too slow
 bash bak/symlink_ln_scilake_large.sh # too slow
 bash bak/symlink_ln_scilake_final.sh
-```
-
-Add some experiments after rebuttal:
-```bash
-# pipeline-A
-python src/modelsearch/pipeline_mc/build_corpus.py \
-       --field card \
-       --output output/baseline_mc/corpus.jsonl
-# --field choices: card / card_readme
-python -m src.modelsearch.pipeline_mc.encode_dense \
-       --jsonl output/baseline_mc/corpus.jsonl \
-       --output output/baseline_mc/embeddings.npy \
-       --model sentence-transformers/all-mpnet-base-v2 \
-       --batch-size 64 --device cuda
-python src/modelsearch/pipeline_mc/build_faiss.py \
-       --emb output/baseline_mc/embeddings.npy \
-       --output output/baseline_mc/faiss.index \
-       --nlist 100
-python src/modelsearch/pipeline_mc/sparse_search.py \
-       --index output/baseline_mc/bm25_index \
-       --topics data/queries_mc.jsonl \
-       --output output/baseline_mc/run.bm25.txt
-python src/modelsearch/pipeline_mc/dense_search.py \
-       --faiss output/baseline_mc/faiss.index \
-       --query-jsonl data/queries_mc.jsonl \
-       --query-emb output/baseline_mc/query_emb.npy \
-       --output output/baseline_mc/run.dense.txt
-python src/modelsearch/pipeline_mc/hybrid_search.py \
-       --sparse output/baseline_mc/run.bm25.txt \
-       --dense  output/baseline_mc/run.dense.txt \
-       --alpha 0.5 \
-       --output output/baseline_mc/run.hybrid.txt
-```
-
-```bash
-# 1. 生成 table 语料
-python src/modelsearch/pipeline_table2mc/build_table_corpus.py
-
-# 2. 编码
-python src/modelsearch/pipeline_table2mc/encode_dense.py ...
-
-# 3. 构建 FAISS
-python src/modelsearch/pipeline_table2mc/build_faiss.py ...
-
-# 4-6 同理：sparse_search.py / dense_search.py / hybrid_search.py
 ```
 
 ```bash
