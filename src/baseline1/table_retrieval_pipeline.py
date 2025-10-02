@@ -223,7 +223,7 @@ def search_neighbors(emb_npz: str, faiss_index: str,
 
     D, I = index.search(embs, top_k+1)
     neighbors = {}
-    for i, neigh in enumerate(I):
+    for i, neigh in enumerate(tqdm(I, desc='Postprocessing neighbors', unit='vec')):
         base = ids[i]
         nb = [ids[j] for j in neigh if j != i][:top_k]
         neighbors[base] = nb
