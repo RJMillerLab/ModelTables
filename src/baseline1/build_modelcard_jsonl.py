@@ -17,12 +17,7 @@ import pandas as pd
 import duckdb
 import pyarrow as pa
 
-# Prefer using the project utils if available; fallback to local reader
-try:
-    from src.utils import load_combined_data  # type: ignore
-except Exception:
-    load_combined_data = None  # Fallback if not available
-
+from src.utils import load_combined_data  # type: ignore
 
 def _ensure_text(x: Optional[str]) -> str:
     if x is None:
@@ -73,34 +68,47 @@ def build_jsonl_from_raw(raw_dir: str, field: str, output_jsonl: str) -> None:
     if field not in {"card", "card_readme"}:
         raise ValueError("field must be 'card' or 'card_readme'")
 
-    # Use DuckDB to scan shards via glob
-    pattern = os.path.join(raw_dir, "train-*.parquet")
-    con = duckdb.connect()
-    try:
-        query = f"""
-        SELECT CAST(modelId AS VARCHAR) AS id,
-               {field} AS contents
-        FROM read_parquet('{pattern}')
-        WHERE {field} IS NOT NULL AND length(trim({field})) > 0
-        """
-        table = con.execute(query).fetch_arrow_table()
+    # Prefer using load_combined_data to read raw shards
+    df = load_combined_data(
+        data_type="modelcard",
+        file_path=raw_dir,
+        columns=[],  # let it load default columns; we'll project below
+    )
 
-        os.makedirs(os.path.dirname(output_jsonl), exist_ok=True)
-        written = 0
-        with open(output_jsonl, "w", encoding="utf-8") as fout:
-            for batch in table.to_batches():
-                ids = batch.column("id").to_pylist()
-                contents = batch.column("contents").to_pylist()
-                for mid, text in zip(ids, contents):
-                    text_s = _ensure_text(text)
-                    if not mid or not text_s:
-                        continue
-                    doc = {"id": str(mid), "contents": text_s}
-                    fout.write(json.dumps(doc, ensure_ascii=False) + "\n")
-                    written += 1
-        print(f"Wrote {written} documents to {output_jsonl}")
-    finally:
-        con.close()
+    cols = set(df.columns)
+    # Resolve id column
+    id_col = None
+    for cand in ("modelId", "datasetId", "model_id", "id"):
+        if cand in cols:
+            id_col = cand
+            break
+    if id_col is None:
+        raise ValueError("Could not find an ID column in raw shards (tried modelId/datasetId/model_id/id)")
+
+    # Resolve text field
+    field_col = field if field in cols else None
+    if field_col is None:
+        alt = "card" if field == "card_readme" else "card_readme"
+        if alt in cols:
+            field_col = alt
+        else:
+            raise ValueError(f"Neither '{field}' nor its alternative found in raw shards. Columns seen: {sorted(cols)}")
+
+    df = df[[id_col, field_col]].copy()
+    df = df[df[field_col].notna()]
+
+    os.makedirs(os.path.dirname(output_jsonl), exist_ok=True)
+    written = 0
+    with open(output_jsonl, "w", encoding="utf-8") as fout:
+        for _, row in df.iterrows():
+            mid = str(row[id_col])
+            text_s = _ensure_text(row[field_col])
+            if not mid or not text_s:
+                continue
+            doc = {"id": mid, "contents": text_s}
+            fout.write(json.dumps(doc, ensure_ascii=False) + "\n")
+            written += 1
+    print(f"Wrote {written} documents to {output_jsonl}")
 
 
 def main():
