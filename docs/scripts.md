@@ -348,7 +348,16 @@ python -m src.modelsearch.compare_baselines \
 
 ### 11. GPT Evaluation of Table Relatedness and Model Relatedness:
 ```bash
-
+python -m src.gpt_evaluation.sample_pairs
+python -m src.gpt_evaluation.evaluate_pairs \
+  --mode tables \
+  --pairs output/_tmp_table_pairs.jsonl \
+  --output output/llm_eval_tables.jsonl \
+  --llm gpt-3.5-turbo-0125
+python -m src.gpt_evaluation.jsonl_to_markdown \
+  --input output/llm_eval_tables.jsonl \
+  --output output/llm_eval_tables.md \
+  --show-prompt
 ```
 
 ### 12. Table Integration:
