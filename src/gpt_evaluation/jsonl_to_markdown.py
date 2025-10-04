@@ -51,6 +51,30 @@ def truncate_block(text: str, max_chars: int = 1200) -> str:
     return text[:max_chars] + "\n... [truncated]"
 
 
+def extract_tables_from_prompt(prompt: str) -> tuple[str, str]:
+    """Extract Table A and Table B from the prompt text."""
+    lines = prompt.split('\n')
+    table_a_lines = []
+    table_b_lines = []
+    current_table = None
+    
+    for line in lines:
+        if line.strip() == "Table A:":
+            current_table = "A"
+            continue
+        elif line.strip() == "Table B:":
+            current_table = "B"
+            continue
+        elif line.strip() == "Respond with JSON only, no extra text.":
+            break
+        elif current_table == "A" and line.strip():
+            table_a_lines.append(line)
+        elif current_table == "B" and line.strip():
+            table_b_lines.append(line)
+    
+    return '\n'.join(table_a_lines), '\n'.join(table_b_lines)
+
+
 def to_markdown(items: List[Dict[str, Any]], show_prompt: bool = False) -> str:
     lines: List[str] = []
     lines.append("# LLM Evaluation Report\n")
@@ -69,6 +93,16 @@ def to_markdown(items: List[Dict[str, Any]], show_prompt: bool = False) -> str:
             counts[related] += 1
 
         lines.append(f"## Pair {idx}: {pid} ({mode})\n")
+        
+        # Extract and show the actual tables from prompt
+        prompt = obj.get("prompt", "")
+        if prompt and mode == "tables":
+            table_a, table_b = extract_tables_from_prompt(prompt)
+            lines.append("### Table A\n")
+            lines.append("```\n" + table_a + "\n```\n")
+            lines.append("### Table B\n")
+            lines.append("```\n" + table_b + "\n```\n")
+        
         if show_prompt:
             prompt = obj.get("prompt", "")
             if prompt:

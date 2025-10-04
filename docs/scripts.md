@@ -344,6 +344,9 @@ python -m src.modelsearch.compare_baselines \
   --table_search_result ~/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json \
   --modelsearch_base_result output/modelsearch/modelsearch_neighbors.json \
   --output_md output/compare_Salesforce_codet5-base.md
+
+# llm feedback
+
 ```
 
 ### 11. GPT Evaluation of Table Relatedness and Model Relatedness:

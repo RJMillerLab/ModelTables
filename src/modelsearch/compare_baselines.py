@@ -169,7 +169,7 @@ def write_markdown(model_id: str,
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(f"# Baseline Comparison for {model_id}\n\n")
-        f.write(f"![Pipeline](docs/pipeline.png)\n\n")
+        f.write(f"![Pipeline](../docs/modelsearch.png)\n\n")
         f.write(f"Experiment target: [{model_id}]({_link(model_id)})\n\n")
 
         f.write("## Baseline (Dense model-card neighbors)\n\n")
