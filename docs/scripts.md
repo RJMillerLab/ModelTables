@@ -187,6 +187,7 @@ python -m src.data_analysis.qc_stats > logs/qc_stats_0516.log
 python -m src.data_analysis.qc_stats_fig
 # (if compare 2 version's stats) 
 python -m src.data_analysis.qc_anomaly --recursive
+python -m src.tools.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv # compare v1 and v2 table diff
 
 # (Optional) Double-check deduplication and mapping logic.
 # python -m src.data_analysis.qc_dc

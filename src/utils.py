@@ -503,14 +503,25 @@ def to_parquet(df: pd.DataFrame, output_path: str, **kwargs):
 
 def sanitize_table_separators(obj):
     """
-    Remove extra all-separator rows (cells made only of '-', ':', spaces).
-    - If obj is a markdown string table: preserve only the first separator row.
-    - If obj is a pandas DataFrame: drop repeated separator rows, preserving the first.
+    Remove ALL separator rows (cells made only of '-', ':', spaces).
+    - If obj is a markdown string table: remove all separator rows.
+    - If obj is a pandas DataFrame: remove all separator rows.
+    
+    CSV files don't need markdown-style separators, so we remove them all.
+    
+    Handles various separator patterns:
+    - :----: (with any number of dashes)
+    - ---- (just dashes)
+    - :---: (with colons)
+    - Pure spaces
+    - Mixed : - and spaces
     """
     import pandas as pd
     import re
 
-    cell_sep_re = re.compile(r"^\s*:?-{1,}:?\s*$")
+    # More comprehensive regex to handle various separator patterns
+    # Matches: :----:, ----, :---:, mixed : - spaces, but NOT pure spaces or empty
+    cell_sep_re = re.compile(r"^\s*:?[-:]+:?\s*$")
 
     # Case 1: Markdown string table
     if isinstance(obj, str):
@@ -519,19 +530,28 @@ def sanitize_table_separators(obj):
             return table
         lines = table.split('\n')
         cleaned_lines = []
-        header_separator_seen = False
         for line in lines:
             stripped = line.strip()
+            
+            # Skip completely empty lines
+            if not stripped:
+                continue
+                
             if not (stripped.startswith('|') and stripped.endswith('|')):
                 cleaned_lines.append(line)
                 continue
             inner = stripped[1:-1]
             cells = [c.strip() for c in inner.split('|')]
-            if cells and all(cell_sep_re.match(c) is not None for c in cells):
-                if not header_separator_seen:
-                    header_separator_seen = True
-                    cleaned_lines.append(line)
-                # else: drop repeated separator row
+            # Filter out empty cells
+            non_empty_cells = [c for c in cells if c != '']
+            
+            # Skip rows with only empty cells
+            if not non_empty_cells:
+                continue
+                
+            # Remove ALL separator rows (CSV doesn't need them)
+            if all(cell_sep_re.match(c) is not None for c in non_empty_cells):
+                continue  # Skip this separator row
             else:
                 cleaned_lines.append(line)
         return '\n'.join(cleaned_lines)
@@ -541,21 +561,24 @@ def sanitize_table_separators(obj):
         df = obj
         if df.empty:
             return df
-        header_separator_seen = False
         keep_mask = []
         for _, row in df.iterrows():
-            # Treat non-string cells as not separator
-            values = [str(v) for v in row.tolist()]
-            non_empty = [v.strip() for v in values if v is not None and str(v).strip() != '']
-            is_sep_row = (len(non_empty) > 0) and all(cell_sep_re.match(v) is not None for v in non_empty)
+            # Convert all values to strings and strip whitespace
+            values = [str(v).strip() for v in row.tolist()]
+            # Filter out empty strings
+            non_empty = [v for v in values if v != '']
+            
+            # Remove completely empty rows (no useful information)
+            if len(non_empty) == 0:
+                keep_mask.append(False)
+                continue
+                
+            # Remove ALL separator rows (CSV doesn't need them)
+            is_sep_row = all(cell_sep_re.match(v) is not None for v in non_empty)
             if is_sep_row:
-                if not header_separator_seen:
-                    header_separator_seen = True
-                    keep_mask.append(True)
-                else:
-                    keep_mask.append(False)
+                keep_mask.append(False)  # Remove separator row
             else:
-                keep_mask.append(True)
+                keep_mask.append(True)   # Keep data row
         return df.loc[keep_mask].reset_index(drop=True)
 
     # Default: return unchanged
