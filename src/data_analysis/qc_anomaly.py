@@ -96,6 +96,7 @@ def prepare_file_maps(v1_dir, v2_dir, recursive, include_missing):
         print("No CSV files found in v1_dir.")
         return [], {}, {}, []
     v2_basenames = index_csv_basenames(v2_dir, recursive=recursive)
+    # If not including missing, filter to intersection; else we'll take union later
     if not include_missing:
         v1_files = [p for p in v1_files if os.path.basename(p) in v2_basenames]
         if not v1_files:
@@ -112,7 +113,10 @@ def prepare_file_maps(v1_dir, v2_dir, recursive, include_missing):
             if fname.lower().endswith('.csv'):
                 v2_file_map[fname] = os.path.join(v2_dir, fname)
     v1_file_map = {os.path.basename(p): p for p in v1_files}
-    basenames = list(v1_file_map.keys())
+    if include_missing:
+        basenames = sorted(set(v1_file_map.keys()) | set(v2_file_map.keys()))
+    else:
+        basenames = sorted(set(v1_file_map.keys()) & set(v2_file_map.keys()))
     return v1_files, v2_file_map, v1_file_map, basenames
 
 def build_resource_mappings(resource):
@@ -608,6 +612,18 @@ def plot_scatter_grid_multi(scatter_data, out_path="data/analysis/scatter_grid_m
     fig.savefig(out_path, dpi=220)
     plt.close(fig)
 
+def _print_aligned_table(headers, rows):
+    cols = len(headers)
+    widths = [len(str(h)) for h in headers]
+    for r in rows:
+        for i in range(cols):
+            widths[i] = max(widths[i], len(str(r[i])))
+    def fmt(row):
+        return "  ".join(str(v).ljust(widths[i]) for i, v in enumerate(row))
+    print(fmt(headers))
+    for r in rows:
+        print(fmt(r))
+
 def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_ratio):
     """Write only unequal rows using provided csv writer; return (kept, total)."""
     total = 0
@@ -626,7 +642,8 @@ def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_so
         total += 1
         is_rows_diff = (rows_equal not in ('', 'True', True))
         is_cols_diff = (cols_equal not in ('', 'True', True))
-        if not (is_rows_diff or is_cols_diff):
+        is_missing = (mode != 'both')
+        if not (is_rows_diff or is_cols_diff or is_missing):
             continue
         kept += 1
         csv_writer.writerow([
@@ -693,8 +710,17 @@ def main():
                 basenames, v1_file_map, v2_file_map, args.workers, args.include_missing
             )
             kept, total = write_overlay_rows(writer, res, csv_rows, csv_to_modelid, csv_to_sourcepath, args.anomaly_min_rows, args.anomaly_ratio)
+            # Count mode categories and equal/changed
+            mode_counts = {"both": 0, "v1_only": 0, "v2_only": 0}
+            changed = 0
+            for base, v1_o, v1_t, v2_o, v2_t in csv_rows:
+                mode = 'both' if (v1_o is not None and v2_o is not None) else ('v1_only' if v1_o is not None else 'v2_only')
+                mode_counts[mode] = mode_counts.get(mode, 0) + 1
+                if mode == 'both' and not (v1_o == v2_o and v1_t == v2_t):
+                    changed += 1
+            print(f"{res}: total={len(csv_rows)} | both={mode_counts['both']}, v1_only={mode_counts['v1_only']}, v2_only={mode_counts['v2_only']} | changed(both)={changed}")
             print(f"Saved unequal items for {res} to {args.csv_out} ({kept}/{total}).")
-            per_summary.append((res, kept, total))
+            per_summary.append((res, kept, total, mode_counts['both'], mode_counts['v1_only'], mode_counts['v2_only'], changed))
             density_data[res] = (v1_orig, v2_orig, v1_trans, v2_trans)
             ecdf_data[res] = (v1_orig, v2_orig, v1_trans, v2_trans)
             scatter_data[res] = (v1_trans, v1_orig, v2_trans, v2_orig)
@@ -703,9 +729,12 @@ def main():
         plot_ecdf_multi(ecdf_data, out_path="data/analysis/combined_ecdf_multi.png")
         plot_scatter_grid_multi(scatter_data, out_path="data/analysis/scatter_grid_multi.png", top_k=200)
         # Print summary table
-        print("=== Unequal summary (kept/total) ===")
-        for res, kept, total in per_summary:
-            print(f"{res}: {kept}/{total}")
+        print("=== Summary by resource ===")
+        headers = ["resource", "total_in_csv_rows", "both", "v1_only", "v2_only", "changed(both)", "unequal_saved"]
+        rows = []
+        for res, kept, total, both_c, v1_c, v2_c, changed in per_summary:
+            rows.append([res, total, both_c, v1_c, v2_c, changed, kept])
+        _print_aligned_table(headers, rows)
 
 if __name__ == "__main__":
     main()

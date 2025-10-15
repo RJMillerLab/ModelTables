@@ -15,6 +15,7 @@ import sqlite3
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from src.utils import to_parquet
+from src.utils import sanitize_table_separators
 from tqdm_joblib import tqdm_joblib
 
 
@@ -289,6 +290,8 @@ def extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path='data/pro
             
             # Clean the DataFrame according to requirements
             df = clean_final_dataframe(df)
+            # Remove repeated all-separator rows like ':--:' while preserving the first
+            df = sanitize_table_separators(df)
             
             if df.empty:
                 print(f"Skipping table {fig_idx}: Empty DataFrame after cleaning")
@@ -372,6 +375,8 @@ def extract_tables_and_save_to_sqlite(html_path, paper_id, sqlite_path='data/pro
             
             # Clean the DataFrame according to requirements
             df = clean_final_dataframe(df)
+            # Remove repeated all-separator rows
+            df = sanitize_table_separators(df)
             
             if df.empty:
                 print(f"Skipping table {fig_idx}: Empty DataFrame after cleaning")
@@ -435,9 +440,8 @@ def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tabl
         # Parse using the same robust parser used for DB outputs
         table_data = parse_table_with_nested_structure(table, preserve_bold)
         df = create_structured_dataframe(table_data)
-        if df is None or df.empty:
-            continue
         df = clean_final_dataframe(df)
+        df = sanitize_table_separators(df)
         if df is None or df.empty:
             continue
         # Save as CSV directly in output directory

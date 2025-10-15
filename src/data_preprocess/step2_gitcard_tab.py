@@ -109,6 +109,11 @@ def detect_and_extract_markdown_tables(content: str):
     return (len(valid_tables) > 0, valid_tables)
 ########
 
+def sanitize_markdown_table_separators(table: str) -> str:
+    from src.utils import sanitize_table_separators
+    return sanitize_table_separators(table)
+########
+
 def extract_markdown_tables_in_parallel(df_unique, col_name, n_jobs=-1):
     """
     Perform parallel extraction of Markdown tables from the specified column (a string)
@@ -142,6 +147,7 @@ def save_markdown_to_csv_from_content(model_id, content, source, file_idx, outpu
     for table_idx, table in enumerate(tables, start=1):
         identifier = f"git_readme{file_idx}_table{table_idx}"
         csv_path = generate_csv_path(model_id, source, identifier, output_folder)
+        table = sanitize_markdown_table_separators(table)
         tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path, verbose=True) # print failed saving, avoid it work silently
         if tmp_path:
             #saved_paths.append(tmp_path)
@@ -221,6 +227,7 @@ def process_markdown_files(github_folder, output_folder):
         _, tables = detect_and_extract_markdown_tables(md_content)
         table_csv_basenames = []
         for i, table in enumerate(tables):
+            table = sanitize_markdown_table_separators(table)
             csv_basename = f"{base_csv_name}_table_{i}.csv"
             csv_path = os.path.join(output_folder, csv_basename)
             tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path)
@@ -282,6 +289,7 @@ def main():
             out_csv_path = generate_csv_path_for_dedup(hval, j, dedup_folder_hugging)  ########
             if os.path.lexists(out_csv_path):
                 os.remove(out_csv_path)
+            table_content = sanitize_markdown_table_separators(table_content)
             tmp_csv_path = MarkdownHandler.markdown_to_csv(table_content, out_csv_path)
             if tmp_csv_path:
                 csv_list.append(os.path.abspath(out_csv_path))  ########

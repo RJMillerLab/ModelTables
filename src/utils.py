@@ -500,3 +500,64 @@ def to_parquet(df: pd.DataFrame, output_path: str, **kwargs):
     """
     return save_parquet_optimized(df, output_path, **kwargs)
 
+
+def sanitize_table_separators(obj):
+    """
+    Remove extra all-separator rows (cells made only of '-', ':', spaces).
+    - If obj is a markdown string table: preserve only the first separator row.
+    - If obj is a pandas DataFrame: drop repeated separator rows, preserving the first.
+    """
+    import pandas as pd
+    import re
+
+    cell_sep_re = re.compile(r"^\s*:?-{1,}:?\s*$")
+
+    # Case 1: Markdown string table
+    if isinstance(obj, str):
+        table = obj
+        if '|' not in table:
+            return table
+        lines = table.split('\n')
+        cleaned_lines = []
+        header_separator_seen = False
+        for line in lines:
+            stripped = line.strip()
+            if not (stripped.startswith('|') and stripped.endswith('|')):
+                cleaned_lines.append(line)
+                continue
+            inner = stripped[1:-1]
+            cells = [c.strip() for c in inner.split('|')]
+            if cells and all(cell_sep_re.match(c) is not None for c in cells):
+                if not header_separator_seen:
+                    header_separator_seen = True
+                    cleaned_lines.append(line)
+                # else: drop repeated separator row
+            else:
+                cleaned_lines.append(line)
+        return '\n'.join(cleaned_lines)
+
+    # Case 2: DataFrame (arxiv HTML parsed tables)
+    if isinstance(obj, pd.DataFrame):
+        df = obj
+        if df.empty:
+            return df
+        header_separator_seen = False
+        keep_mask = []
+        for _, row in df.iterrows():
+            # Treat non-string cells as not separator
+            values = [str(v) for v in row.tolist()]
+            non_empty = [v.strip() for v in values if v is not None and str(v).strip() != '']
+            is_sep_row = (len(non_empty) > 0) and all(cell_sep_re.match(v) is not None for v in non_empty)
+            if is_sep_row:
+                if not header_separator_seen:
+                    header_separator_seen = True
+                    keep_mask.append(True)
+                else:
+                    keep_mask.append(False)
+            else:
+                keep_mask.append(True)
+        return df.loc[keep_mask].reset_index(drop=True)
+
+    # Default: return unchanged
+    return obj
+
