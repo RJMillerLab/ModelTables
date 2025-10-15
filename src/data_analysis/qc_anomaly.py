@@ -2,26 +2,21 @@
 """
 Author: Zhengyuan Dong
 Date: 2025-09-28
-Last Edited: 2025-09-29
+Last Edited: 2025-10-15
 Description: Compare two folders of CSVs: histogram of per-table columns and rows (by basename).
 
 Usage example:
-    python -m src.data_analysis.col_rows_anomaly \
-             --v1-dir data/processed/deduped_hugging_csvs \
-             --v2-dir data/processed/deduped_hugging_csvs_v2 \
-             --recursive \
-
-Notes:
-    - Columns = number of fields in the header row (CSV-parsed)
-    - Rows = number of lines in the file (including header)
-    - Files are matched by basename between folders
-    - The script saves a single overlay PNG with two subplots (columns and rows)
-    - Uses optimized binary reading functions from qc_stats.py for better performance
+python -m src.data_analysis.qc_anomaly --recursive --include-missing
 """
 import argparse
 import os
 import csv
 import matplotlib.pyplot as plt
+import pandas as pd
+try:
+    from batch_process_tables import build_modelid_sql_query
+except Exception:
+    build_modelid_sql_query = None
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from src.data_analysis.qc_stats import count_rows_fast, count_columns_from_header_fast
@@ -88,238 +83,629 @@ def count_rows_including_header(csv_path):
     except Exception:
         return 0
 
-### updated ###
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--v1-dir", default="data/processed/deduped_hugging_csvs", help="Directory containing version 1 CSVs")
-    ap.add_argument("--v2-dir", default="data/processed/deduped_hugging_csvs_v2", help="Directory containing version 2 CSVs")
-    ap.add_argument("--recursive", action="store_true", help="Recurse into subdirectories of the provided directories")
-    ap.add_argument("--out", default="data/analysis/v1v2_overlay.tsv", help="Optional output TSV with basename and v1/v2 columns/rows")
-    ap.add_argument("--png-out", default="data/analysis/v1v2_overlay.png", help="Path to save the overlay histogram PNG")
-    ap.add_argument("--bins", type=int, default=50, help="Number of bins for histograms")
-    ap.add_argument("--workers", type=int, default=min(32, (os.cpu_count() or 4) * 2), help="Max worker threads for parallel file processing")
-    ap.add_argument("--top", type=int, default=0, help="Print top-N examples where rows >> columns (by ratio)")
-    ap.add_argument("--csv-out", default="data/analysis/v1v2_overlay.csv", help="Optional CSV file with per-basename stats and ratios")
-    ap.add_argument("--anomalies-csv-out", default="data/analysis/v1v2_overlay_anomalies.csv", help="Optional CSV file to save anomaly cases only")
-    ap.add_argument("--anomaly-ratio", type=float, default=100.0, help="Rows/cols ratio threshold to flag anomalies")
-    ap.add_argument("--anomaly-min-rows", type=int, default=1000, help="Minimum rows to consider when flagging anomalies")
-    args = ap.parse_args()
+def resolve_resource_dirs(resource):
+    if resource == "hugging":
+        return "data/processed/deduped_hugging_csvs", "data/processed/deduped_hugging_csvs_v2"
+    if resource == "github":
+        return "data/processed/deduped_github_csvs", "data/processed/deduped_github_csvs_v2"
+    return "data/processed/tables_output", "data/processed/tables_output_v2"
 
-    # Compare v1 vs v2 with shared x-limits, always counting columns and rows
-    v1_files = list_csv_files([args.v1_dir], recursive=args.recursive)
+def prepare_file_maps(v1_dir, v2_dir, recursive, include_missing):
+    v1_files = list_csv_files([v1_dir], recursive=recursive)
     if not v1_files:
         print("No CSV files found in v1_dir.")
-        return
-    v2_basenames = index_csv_basenames(args.v2_dir, recursive=args.recursive)
-    v1_files = [p for p in v1_files if os.path.basename(p) in v2_basenames]
-    if not v1_files:
-        print("No overlapping CSV basenames between v1_dir and v2_dir.")
-        return
-
-    # Build v2 file map by basename
+        return [], {}, {}, []
+    v2_basenames = index_csv_basenames(v2_dir, recursive=recursive)
+    if not include_missing:
+        v1_files = [p for p in v1_files if os.path.basename(p) in v2_basenames]
+        if not v1_files:
+            print("No overlapping CSV basenames between v1_dir and v2_dir.")
+            return [], {}, {}, []
     v2_file_map = {}
-    if args.recursive:
-        for root, _, fnames in os.walk(args.v2_dir):
+    if recursive:
+        for root, _, fnames in os.walk(v2_dir):
             for fname in fnames:
                 if fname.lower().endswith('.csv'):
                     v2_file_map[fname] = os.path.join(root, fname)
     else:
-        for fname in os.listdir(args.v2_dir):
+        for fname in os.listdir(v2_dir):
             if fname.lower().endswith('.csv'):
-                v2_file_map[fname] = os.path.join(args.v2_dir, fname)
+                v2_file_map[fname] = os.path.join(v2_dir, fname)
+    v1_file_map = {os.path.basename(p): p for p in v1_files}
+    basenames = list(v1_file_map.keys())
+    return v1_files, v2_file_map, v1_file_map, basenames
 
-    # Gather stats for v1 and v2
-    v1_orig, v1_trans = [], []
-    v2_orig, v2_trans = [], []
+def build_resource_mappings(resource):
+    csv_to_modelid = {}
+    csv_to_sourcepath = {}
+    if resource == "hugging":
+        csv_to_modelid = build_hugging_modelid_map()
+    elif resource == "github":
+        csv_to_sourcepath = build_github_source_map()
+    else:
+        csv_to_sourcepath = build_arxiv_source_map()
+    return csv_to_modelid, csv_to_sourcepath
+
+def build_hugging_modelid_map():
+    mapping = {}
+    try:
+        import duckdb
+        from batch_process_tables import build_modelid_sql_query
+        sql = build_modelid_sql_query() if build_modelid_sql_query else None
+        if sql:
+            con = duckdb.connect()
+            rows = con.execute(sql).fetchall()
+            con.close()
+            for csv_name, model_ids in rows:
+                if not csv_name:
+                    continue
+                base = os.path.basename(str(csv_name))
+                first_mid = str(model_ids).split(';')[0].strip() if model_ids else ''
+                if base and first_mid and base not in mapping:
+                    mapping[base] = first_mid
+        else:
+            rel_path = "data/processed/modelcard_step3_merged.parquet"
+            if os.path.exists(rel_path):
+                import pandas as pd
+                df_rel = pd.read_parquet(rel_path)
+                cols = df_rel.columns.tolist()
+                for col in ["hugging_table_list_dedup", "hugging_table_list", "csv_paths"]:
+                    if col not in cols:
+                        continue
+                    for _, row in df_rel.iterrows():
+                        mid = row.get("modelId")
+                        vals = row.get(col)
+                        if pd.isna(mid) or vals is None:
+                            continue
+                        if not isinstance(vals, (list, tuple)):
+                            vals = [vals]
+                        for v in vals:
+                            try:
+                                base = os.path.basename(str(v))
+                            except Exception:
+                                continue
+                            if base and base not in mapping:
+                                mapping[base] = mid
+                    if mapping:
+                        break
+    except Exception:
+        pass
+    return mapping
+
+def build_github_source_map():
+    mapping = {}
+    try:
+        import pandas as pd
+        map_paths = [
+            "data/processed/csv_to_readme_mapping.parquet",
+            "data/processed/processed_paths.parquet",
+            "data/processed/raw_csv_to_text_mapping.parquet",
+        ]
+        for mp in map_paths:
+            if not os.path.exists(mp):
+                continue
+            df_map = pd.read_parquet(mp)
+            cols = df_map.columns.tolist()
+            if "csv_paths" in cols and "readme_path" in cols:
+                for _, row in df_map.iterrows():
+                    rp = row.get("readme_path")
+                    if isinstance(rp, (list, tuple)):
+                        rp = next((x for x in rp if isinstance(x, str) and x), None)
+                    cps = row.get("csv_paths")
+                    if cps is None:
+                        continue
+                    if not isinstance(cps, (list, tuple)):
+                        cps = [cps]
+                    for pth in cps:
+                        try:
+                            base = os.path.basename(str(pth))
+                        except Exception:
+                            continue
+                        if base and base not in mapping and isinstance(rp, str):
+                            mapping[base] = rp
+            elif "csv_path" in cols and "readme_path" in cols:
+                for _, row in df_map.iterrows():
+                    cp = row.get("csv_path")
+                    rp = row.get("readme_path")
+                    if isinstance(rp, (list, tuple)):
+                        rp = next((x for x in rp if isinstance(x, str) and x), None)
+                    if not isinstance(cp, str) or not isinstance(rp, str):
+                        continue
+                    base = os.path.basename(cp)
+                    if base and base not in mapping:
+                        mapping[base] = rp
+            if len(mapping) > 0:
+                break
+    except Exception:
+        pass
+    return mapping
+
+def build_arxiv_source_map():
+    mapping = {}
+    try:
+        import pandas as pd
+        html_maps = [
+            "data/processed/html_table.parquet",
+            "data/processed/final_integration_with_paths.parquet",
+        ]
+        for hp in html_maps:
+            if not os.path.exists(hp):
+                continue
+            df_html = pd.read_parquet(hp)
+            cols = df_html.columns.tolist()
+            if "table_list" in cols and "html_path" in cols:
+                for _, row in df_html.iterrows():
+                    hpv = row.get("html_path")
+                    tl = row.get("table_list")
+                    if tl is None:
+                        continue
+                    if not isinstance(tl, (list, tuple)):
+                        tl = [tl]
+                    for pth in tl:
+                        try:
+                            base = os.path.basename(str(pth))
+                        except Exception:
+                            continue
+                        if base and base not in mapping and isinstance(hpv, str):
+                            mapping[base] = hpv
+            elif "html_table_list" in cols and "html_html_path" in cols:
+                for _, row in df_html.iterrows():
+                    hpv = row.get("html_html_path")
+                    tl = row.get("html_table_list")
+                    if tl is None:
+                        continue
+                    if not isinstance(tl, (list, tuple)):
+                        tl = [tl]
+                    for pth in tl:
+                        try:
+                            base = os.path.basename(str(pth))
+                        except Exception:
+                            continue
+                        if base and base not in mapping and isinstance(hpv, str):
+                            mapping[base] = hpv
+            if len(mapping) > 0:
+                break
+    except Exception:
+        pass
+    return mapping
+
+def print_overlap_summary(v1_file_map, v2_file_map, include_missing):
+    v1_bases = set(v1_file_map.keys())
+    v2_bases = set(v2_file_map.keys())
+    inter_bases = v1_bases & v2_bases
+    union_bases = v1_bases | v2_bases
+    only_v1 = v1_bases - v2_bases
+    only_v2 = v2_bases - v1_bases
+    print("=== qc_anomaly: Dataset summary ===")
+    print(f"V1 CSV basenames: {len(v1_bases)}")
+    print(f"V2 CSV basenames: {len(v2_bases)}")
+    print(f"Overlap (intersection): {len(inter_bases)}")
+    print(f"Only in V1: {len(only_v1)}")
+    print(f"Only in V2: {len(only_v2)}")
+    print(f"Union: {len(union_bases)}")
+    print(f"include_missing: {include_missing}")
+    if only_v1:
+        examples = list(sorted(only_v1))[:5]
+        print("Only V1 examples:", ", ".join(examples))
+    if only_v2:
+        examples = list(sorted(only_v2))[:5]
+        print("Only V2 examples:", ", ".join(examples))
+
+def process_basenames(basenames, v1_file_map, v2_file_map, workers, include_missing):
+    v1_orig, v1_trans, v2_orig, v2_trans = [], [], [], []
+    results_rows = []
+    csv_rows = []
     col_counter = count_columns_from_header_fast
-
-    # Process pairs in parallel
-    pairs = [(v1_path, v2_file_map.get(os.path.basename(v1_path))) for v1_path in v1_files]
-    pairs = [(p1, p2) for (p1, p2) in pairs if p2]
-    base_to_paths = {os.path.basename(p1): (p1, p2) for (p1, p2) in pairs}
-    results_rows = []  # (basename, v1_cols, v1_rows, v2_cols, v2_rows)
-    def _proc_pair(v1_path, v2_path):
-        v1_o = col_counter(v1_path)
-        v2_o = col_counter(v2_path)
-        v1_t = count_rows_fast(v1_path, head_flag=True)  # Include header for comparison
-        v2_t = count_rows_fast(v2_path, head_flag=True)  # Include header for comparison
-        return v1_o, v1_t, v2_o, v2_t, os.path.basename(v1_path)
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futures = {ex.submit(_proc_pair, p1, p2): (p1, p2) for (p1, p2) in pairs}
-        for fut in tqdm(as_completed(futures), total=len(futures), desc="Processing CSV pairs"):
+    def _proc_base(base):
+        p1 = v1_file_map.get(base)
+        p2 = v2_file_map.get(base)
+        v1_o = col_counter(p1) if p1 else None
+        v1_t = count_rows_fast(p1, head_flag=True) if p1 else None
+        v2_o = col_counter(p2) if p2 else None
+        v2_t = count_rows_fast(p2, head_flag=True) if p2 else None
+        return base, v1_o, v1_t, v2_o, v2_t
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(_proc_base, b): b for b in basenames}
+        for fut in tqdm(as_completed(futures), total=len(futures), desc="Processing CSV basenames"):
             try:
-                v1_o, v1_t, v2_o, v2_t, base = fut.result()
-                v1_orig.append(v1_o)
-                v1_trans.append(v1_t)
-                v2_orig.append(v2_o)
-                v2_trans.append(v2_t)
-                results_rows.append((base, v1_o, v1_t, v2_o, v2_t))
+                base, v1_o, v1_t, v2_o, v2_t = fut.result()
+                if v1_o is not None and v1_t is not None and v2_o is not None and v2_t is not None:
+                    v1_orig.append(v1_o)
+                    v1_trans.append(v1_t)
+                    v2_orig.append(v2_o)
+                    v2_trans.append(v2_t)
+                    results_rows.append((base, v1_o, v1_t, v2_o, v2_t))
+                if include_missing or (v1_o is not None and v2_o is not None):
+                    csv_rows.append((base, v1_o, v1_t, v2_o, v2_t))
             except Exception:
                 pass
+    return results_rows, csv_rows, v1_orig, v1_trans, v2_orig, v2_trans
 
-    # Compute x-limits separately for columns and rows for better resolution
+def plot_density_iqr(v1_orig, v2_orig, v1_trans, v2_trans, bins, png_out):
+    import numpy as np
     cols_combined = v1_orig + v2_orig
     rows_combined = v1_trans + v2_trans
     if not cols_combined and not rows_combined:
         print("No data to plot.")
         return
-    col_x_min = min(cols_combined) if cols_combined else 0
-    col_x_max = max(cols_combined) if cols_combined else 1
-    row_x_min = min(rows_combined) if rows_combined else 0
-    row_x_max = max(rows_combined) if rows_combined else 1
-
-    # Plot overlay figure (two subplots): columns and rows
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+    def make_log_bins(values, num_bins):
+        vals = [v for v in values if v is not None and v > 0]
+        if not vals:
+            return num_bins
+        vmin = max(1, min(vals))
+        vmax = max(vals)
+        if vmax <= vmin:
+            vmax = vmin + 1
+        return np.logspace(np.log10(vmin), np.log10(vmax), num_bins)
+    bins_cols = make_log_bins(cols_combined, bins)
+    bins_rows = make_log_bins(rows_combined, bins)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=False)
     axc, axr = axes
-    axc.hist(v1_orig, bins=args.bins, alpha=0.6, label='V1 columns', color='#1f77b4', edgecolor='black')
-    axc.hist(v2_orig, bins=args.bins, alpha=0.6, label='V2 columns', color='#2ca02c', edgecolor='black')
-    axc.set_xlabel("Count")
-    axc.set_ylabel("Frequency")
-    axc.set_title("Columns: V1 vs V2")
+    axc.hist(v1_orig, bins=bins_cols, density=True, histtype='step', linewidth=1.8, label='V1 columns', color='#1f77b4')
+    axc.hist(v2_orig, bins=bins_cols, density=True, histtype='step', linewidth=1.8, label='V2 columns', color='#2ca02c')
+    axc.set_xscale('log')
+    axc.set_ylabel("Density")
+    axc.set_xlabel("Columns (count)")
+    axc.set_title("Columns: density (log-x)")
     axc.legend()
-
-    axr.hist(v1_trans, bins=args.bins, alpha=0.6, label='V1 rows', color='#ff7f0e', edgecolor='black')
-    axr.hist(v2_trans, bins=args.bins, alpha=0.6, label='V2 rows', color='#9467bd', edgecolor='black')
-    axr.set_xlabel("Count")
-    axr.set_title("Rows: V1 vs V2")
+    axr.hist(v1_trans, bins=bins_rows, density=True, histtype='step', linewidth=1.8, label='V1 rows', color='#ff7f0e')
+    axr.hist(v2_trans, bins=bins_rows, density=True, histtype='step', linewidth=1.8, label='V2 rows', color='#9467bd')
+    axr.set_xscale('log')
+    axr.set_xlabel("Rows (count)")
+    axr.set_title("Rows: density (log-x)")
     axr.legend()
-
-    axc.set_yscale('log')
-    axr.set_yscale('log')
-
-    fig.suptitle("Overlay: Original Columns and Transposed Rows")
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-    os.makedirs(os.path.dirname(args.png_out), exist_ok=True)
-    fig.savefig(args.png_out, dpi=200)
+    def iqr_band(ax, data, color, label):
+        arr = np.array([v for v in data if v is not None and v > 0])
+        if arr.size == 0:
+            return
+        q1, q3 = np.percentile(arr, [25, 75])
+        ax.axvspan(q1, q3, color=color, alpha=0.10, lw=0, label=f"{label} IQR")
+    iqr_band(axc, v1_orig, '#1f77b4', 'V1')
+    iqr_band(axc, v2_orig, '#2ca02c', 'V2')
+    iqr_band(axr, v1_trans, '#ff7f0e', 'V1')
+    iqr_band(axr, v2_trans, '#9467bd', 'V2')
+    fig.suptitle("V1 vs V2: density with IQR bands (narrower bands => narrower distribution)")
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    os.makedirs(os.path.dirname(png_out), exist_ok=True)
+    fig.savefig(png_out.replace('.png', '_density_iqr.png'), dpi=220)
     plt.close(fig)
 
-    # Combined overlay histograms: Columns (V1 vs V2) and Rows (V1 vs V2)
+def plot_ecdf(v1_orig, v2_orig, v1_trans, v2_trans, out_path="data/analysis/combined_ecdf.png"):
+    import numpy as np
+    def ecdf(arr):
+        a = np.array([v for v in arr if v is not None and v > 0])
+        if a.size == 0:
+            return np.array([]), np.array([])
+        a = np.sort(a)
+        y = np.linspace(0, 1, a.size, endpoint=True)
+        return a, y
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    # Left: columns comparison
-    if v1_orig or v2_orig:
-        ax1.hist(v1_orig, bins=args.bins, alpha=0.6, label='V1 columns', color='#1f77b4', edgecolor='black')
-        ax1.hist(v2_orig, bins=args.bins, alpha=0.6, label='V2 columns', color='#2ca02c', edgecolor='black')
-        ax1.set_xlabel("Count")
-        ax1.set_ylabel("Frequency")
-        ax1.set_title("Columns: V1 vs V2")
-        ax1.set_yscale('log')
-        ax1.legend()
-    # Right: rows comparison
-    if v1_trans or v2_trans:
-        ax2.hist(v1_trans, bins=args.bins, alpha=0.6, label='V1 rows', color='#ff7f0e', edgecolor='black')
-        ax2.hist(v2_trans, bins=args.bins, alpha=0.6, label='V2 rows', color='#9467bd', edgecolor='black')
-        ax2.set_xlabel("Count")
-        ax2.set_ylabel("Frequency")
-        ax2.set_title("Rows: V1 vs V2")
-        ax2.set_yscale('log')
-        ax2.legend()
+    x1, y1 = ecdf(v1_orig); x2, y2 = ecdf(v2_orig)
+    if x1.size:
+        ax1.plot(x1, y1, color='#1f77b4', lw=1.8, label='V1')
+    if x2.size:
+        ax1.plot(x2, y2, color='#2ca02c', lw=1.8, label='V2')
+    ax1.set_xscale('log')
+    ax1.set_xlabel('Columns (count)')
+    ax1.set_ylabel('ECDF')
+    ax1.set_title('Columns: ECDF (log-x)')
+    ax1.grid(alpha=0.3, ls='--')
+    ax1.legend()
+    x1, y1 = ecdf(v1_trans); x2, y2 = ecdf(v2_trans)
+    if x1.size:
+        ax2.plot(x1, y1, color='#ff7f0e', lw=1.8, label='V1')
+    if x2.size:
+        ax2.plot(x2, y2, color='#9467bd', lw=1.8, label='V2')
+    ax2.set_xscale('log')
+    ax2.set_xlabel('Rows (count)')
+    ax2.set_ylabel('ECDF')
+    ax2.set_title('Rows: ECDF (log-x)')
+    ax2.grid(alpha=0.3, ls='--')
+    ax2.legend()
     fig.tight_layout()
-    combined_hist_path = "data/analysis/combined_hist.png"
-    os.makedirs(os.path.dirname(combined_hist_path), exist_ok=True)
-    fig.savefig(combined_hist_path, dpi=200)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig.savefig(out_path, dpi=220)
     plt.close(fig)
 
-    # Combined scatter plots: side-by-side V1 and V2 in one figure
-    if results_rows:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-        v1_x_rows, v1_y_cols = [], []
-        v2_x_rows, v2_y_cols = [], []
-        for base, v1_o, v1_t, v2_o, v2_t in results_rows:
-            if v1_o is not None and v1_t is not None:
-                v1_x_rows.append(v1_t)
-                v1_y_cols.append(v1_o)
-            if v2_o is not None and v2_t is not None:
-                v2_x_rows.append(v2_t)
-                v2_y_cols.append(v2_o)
-        # Filter non-positive values for log-scale compatibility
-        v1_pairs = [(x, y) for x, y in zip(v1_x_rows, v1_y_cols) if (x is not None and y is not None and x > 0 and y > 0)]
-        v2_pairs = [(x, y) for x, y in zip(v2_x_rows, v2_y_cols) if (x is not None and y is not None and x > 0 and y > 0)]
+def plot_change_maps(csv_rows, csv_to_modelid, out_prefix="data/analysis/change_maps"):
+    import numpy as np
+    # Build arrays (overlapping only)
+    cols_v1, cols_v2, rows_v1, rows_v2, bases = [], [], [], [], []
+    for base, v1_o, v1_t, v2_o, v2_t in csv_rows:
+        if v1_o is not None and v2_o is not None and v1_t is not None and v2_t is not None:
+            cols_v1.append(v1_o)
+            cols_v2.append(v2_o)
+            rows_v1.append(v1_t)
+            rows_v2.append(v2_t)
+            bases.append(base)
+    if not bases:
+        return
+    cols_v1 = np.array(cols_v1); cols_v2 = np.array(cols_v2)
+    rows_v1 = np.array(rows_v1); rows_v2 = np.array(rows_v2)
+    # Deltas
+    d_cols = cols_v2 - cols_v1
+    d_rows = rows_v2 - rows_v1
+    # Identify anomaly-like large shrink cases (heuristic): big negative diffs
+    k = min(50, len(bases))
+    idx_cols = np.argsort(d_cols)[:k]
+    idx_rows = np.argsort(d_rows)[:k]
 
-        if v1_pairs:
-            v1_x_plot, v1_y_plot = zip(*v1_pairs)
-        else:
-            v1_x_plot, v1_y_plot = [], []
-        if v2_pairs:
-            v2_x_plot, v2_y_plot = zip(*v2_pairs)
-        else:
-            v2_x_plot, v2_y_plot = [], []
+    # 2x2: scatter-hexbin cols/rows + diff hist cols/rows
+    import matplotlib.pyplot as plt
+    import os
+    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    ax1, ax2, ax3, ax4 = axes.ravel()
 
-        ax1.scatter(v1_x_plot, v1_y_plot, s=8, alpha=0.5, edgecolors='none', c='#1f77b4')
-        ax1.set_xlabel("Rows (count)")
-        ax1.set_ylabel("Columns (count)")
-        ax1.set_title("V1: Rows vs Columns")
-        ax1.set_xscale('log')
-        ax1.set_yscale('log')
-        ax1.grid(True, linestyle='--', alpha=0.3)
-        ax2.scatter(v2_x_plot, v2_y_plot, s=8, alpha=0.5, edgecolors='none', c='#2ca02c')
-        ax2.set_xlabel("Rows (count)")
-        ax2.set_ylabel("Columns (count)")
-        ax2.set_title("V2: Rows vs Columns")
-        ax2.set_xscale('log')
-        ax2.set_yscale('log')
-        ax2.grid(True, linestyle='--', alpha=0.3)
-        fig.suptitle("Combined Scatter Plots: V1 and V2")
-        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-        combined_scatter_path = "data/analysis/combined_scatter.png"
-        os.makedirs(os.path.dirname(combined_scatter_path), exist_ok=True)
-        fig.savefig(combined_scatter_path, dpi=200)
-        plt.close(fig)
+    # Cols hexbin with diagonal
+    hb1 = ax1.hexbin(cols_v1 + 1e-9, cols_v2 + 1e-9, gridsize=60, bins='log', cmap='Blues')
+    lim_c = [max(1, min(cols_v1.min(), cols_v2.min())), max(cols_v1.max(), cols_v2.max())]
+    ax1.plot(lim_c, lim_c, ls='--', c='#888', lw=1)
+    ax1.set_xscale('log'); ax1.set_yscale('log')
+    ax1.set_xlabel('V1 columns'); ax1.set_ylabel('V2 columns'); ax1.set_title('Columns: V1 vs V2 (hexbin)')
+    # Overlay top-k shrink points in red
+    ax1.scatter(cols_v1[idx_cols], cols_v2[idx_cols], s=10, c='crimson', alpha=0.9, label='top shrink')
+    ax1.legend()
+    fig.colorbar(hb1, ax=ax1, label='log10(count)')
 
-    # Optional TSV output with per-basename counts
-    if args.out:
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
-        with open(args.out, 'w', encoding='utf-8') as f:
-            f.write("basename\tv1_cols\tv1_rows\tv2_cols\tv2_rows\n")
-            for base, v1_o, v1_t, v2_o, v2_t in sorted(results_rows):
-                f.write(f"{base}\t{v1_o}\t{v1_t}\t{v2_o}\t{v2_t}\n")
+    # Rows hexbin with diagonal
+    hb2 = ax2.hexbin(rows_v1 + 1e-9, rows_v2 + 1e-9, gridsize=60, bins='log', cmap='Greens')
+    lim_r = [max(1, min(rows_v1.min(), rows_v2.min())), max(rows_v1.max(), rows_v2.max())]
+    ax2.plot(lim_r, lim_r, ls='--', c='#888', lw=1)
+    ax2.set_xscale('log'); ax2.set_yscale('log')
+    ax2.set_xlabel('V1 rows'); ax2.set_ylabel('V2 rows'); ax2.set_title('Rows: V1 vs V2 (hexbin)')
+    ax2.scatter(rows_v1[idx_rows], rows_v2[idx_rows], s=10, c='crimson', alpha=0.9, label='top shrink')
+    ax2.legend()
+    fig.colorbar(hb2, ax=ax2, label='log10(count)')
 
-    # Optional CSV output with paths and ratios
-    if args.csv_out:
-        os.makedirs(os.path.dirname(args.csv_out), exist_ok=True)
-        with open(args.csv_out, 'w', newline='', encoding='utf-8') as fcsv:
-            writer = csv.writer(fcsv)
-            writer.writerow([
-                'basename',
-                'v1_path', 'v1_cols', 'v1_rows', 'v1_rows_per_col',
-                'v2_path', 'v2_cols', 'v2_rows', 'v2_rows_per_col'
-            ])
-            for base, v1_o, v1_t, v2_o, v2_t in sorted(results_rows):
-                v1_path, v2_path = base_to_paths.get(base, (None, None))
-                v1_rpc = (v1_t / v1_o) if v1_o else None
-                v2_rpc = (v2_t / v2_o) if v2_o else None
-                writer.writerow([
-                    base,
-                    v1_path, v1_o, v1_t, f"{v1_rpc:.6f}" if v1_rpc is not None else '',
-                    v2_path, v2_o, v2_t, f"{v2_rpc:.6f}" if v2_rpc is not None else ''
-                ])
+    # Diff histograms with vertical zero line
+    ax3.hist(d_cols, bins=100, color='#1f77b4', alpha=0.8)
+    ax3.axvline(0, ls='--', c='#444')
+    ax3.set_title('Columns difference (V2 - V1)')
+    ax3.set_xlabel('Δ cols'); ax3.set_ylabel('Frequency')
 
-    # Optional anomalies CSV filtered by thresholds
-    if args.anomalies_csv_out:
-        os.makedirs(os.path.dirname(args.anomalies_csv_out), exist_ok=True)
-        with open(args.anomalies_csv_out, 'w', newline='', encoding='utf-8') as fcsv:
-            writer = csv.writer(fcsv)
-            writer.writerow(['version', 'basename', 'path', 'cols', 'rows', 'rows_per_col'])
-            for base, v1_o, v1_t, v2_o, v2_t in results_rows:
-                v1_path, v2_path = base_to_paths.get(base, (None, None))
-                if v1_o and v1_t and v1_t >= args.anomaly_min_rows and (v1_t / v1_o) >= args.anomaly_ratio:
-                    writer.writerow(['v1', base, v1_path, v1_o, v1_t, f"{(v1_t / v1_o):.6f}"])
-                if v2_o and v2_t and v2_t >= args.anomaly_min_rows and (v2_t / v2_o) >= args.anomaly_ratio:
-                    writer.writerow(['v2', base, v2_path, v2_o, v2_t, f"{(v2_t / v2_o):.6f}"])
+    ax4.hist(d_rows, bins=100, color='#ff7f0e', alpha=0.8)
+    ax4.axvline(0, ls='--', c='#444')
+    ax4.set_title('Rows difference (V2 - V1)')
+    ax4.set_xlabel('Δ rows'); ax4.set_ylabel('Frequency')
 
-    # Print top-N examples where rows are much larger than columns (per version)
-    if args.top and args.top > 0:
-        ratio_examples = []
-        for base, v1_o, v1_t, v2_o, v2_t in results_rows:
-            v1_path, v2_path = base_to_paths.get(base, (None, None))
-            if v1_o and v1_o > 0 and v1_t is not None:
-                ratio_examples.append((v1_t / max(1, v1_o), 'v1', base, v1_o, v1_t, v1_path))
-            if v2_o and v2_o > 0 and v2_t is not None:
-                ratio_examples.append((v2_t / max(1, v2_o), 'v2', base, v2_o, v2_t, v2_path))
-        ratio_examples.sort(key=lambda x: x[0], reverse=True)
-        print("Top examples (rows/cols ratio):")
-        print("ratio\tversion\tbasename\tcols\trows\tpath")
-        for ratio, ver, base, cols, rows, path in ratio_examples[:args.top]:
-            print(f"{ratio:.2f}\t{ver}\t{base}\t{cols}\t{rows}\t{path}")
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(out_prefix), exist_ok=True)
+    fig.savefig(out_prefix + '.png', dpi=220)
+    plt.close(fig)
+
+def plot_density_iqr_multi(density_data, bins, out_path):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    resources = list(density_data.keys())
+    n = len(resources)
+    if n == 0:
+        return
+    fig, axes = plt.subplots(2, n, figsize=(5*n, 8), sharey=False)
+    for idx, res in enumerate(resources):
+        v1_orig, v2_orig, v1_trans, v2_trans = density_data[res]
+        def make_log_bins(values, num_bins):
+            vals = [v for v in values if v is not None and v > 0]
+            if not vals:
+                return num_bins
+            vmin = max(1, min(vals))
+            vmax = max(vals)
+            if vmax <= vmin:
+                vmax = vmin + 1
+            return np.logspace(np.log10(vmin), np.log10(vmax), num_bins)
+        bins_cols = make_log_bins(v1_orig + v2_orig, bins)
+        bins_rows = make_log_bins(v1_trans + v2_trans, bins)
+        axc = axes[0, idx]
+        axr = axes[1, idx]
+        axc.hist(v1_orig, bins=bins_cols, density=True, histtype='step', linewidth=1.6, label='V1', color='#1f77b4')
+        axc.hist(v2_orig, bins=bins_cols, density=True, histtype='step', linewidth=1.6, label='V2', color='#2ca02c')
+        axc.set_xscale('log'); axc.set_title(f"{res} cols")
+        axc.legend(fontsize=8)
+        axr.hist(v1_trans, bins=bins_rows, density=True, histtype='step', linewidth=1.6, label='V1', color='#ff7f0e')
+        axr.hist(v2_trans, bins=bins_rows, density=True, histtype='step', linewidth=1.6, label='V2', color='#9467bd')
+        axr.set_xscale('log'); axr.set_title(f"{res} rows")
+        axr.legend(fontsize=8)
+        def iqr_band(ax, data, color):
+            arr = np.array([v for v in data if v is not None and v > 0])
+            if arr.size == 0:
+                return
+            q1, q3 = np.percentile(arr, [25, 75])
+            ax.axvspan(q1, q3, color=color, alpha=0.10, lw=0)
+        iqr_band(axc, v1_orig, '#1f77b4'); iqr_band(axc, v2_orig, '#2ca02c')
+        iqr_band(axr, v1_trans, '#ff7f0e'); iqr_band(axr, v2_trans, '#9467bd')
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig.savefig(out_path, dpi=220)
+    plt.close(fig)
+
+def plot_ecdf_multi(ecdf_data, out_path="data/analysis/combined_ecdf_multi.png"):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    resources = list(ecdf_data.keys())
+    n = len(resources)
+    if n == 0:
+        return
+    fig, axes = plt.subplots(1, n, figsize=(5*n, 4))
+    if n == 1:
+        axes = [axes]
+    def ecdf(arr):
+        a = np.array([v for v in arr if v is not None and v > 0])
+        if a.size == 0:
+            return np.array([]), np.array([])
+        a = np.sort(a)
+        y = np.linspace(0, 1, a.size, endpoint=True)
+        return a, y
+    for idx, res in enumerate(resources):
+        v1_orig, v2_orig, v1_trans, v2_trans = ecdf_data[res]
+        ax = axes[idx]
+        x1, y1 = ecdf(v1_orig); x2, y2 = ecdf(v2_orig)
+        if x1.size: ax.plot(x1, y1, color='#1f77b4', lw=1.6, label='V1')
+        if x2.size: ax.plot(x2, y2, color='#2ca02c', lw=1.6, label='V2')
+        ax.set_xscale('log'); ax.set_title(f"{res} cols ECDF"); ax.grid(alpha=0.3, ls='--'); ax.legend(fontsize=8)
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig.savefig(out_path, dpi=220)
+    plt.close(fig)
+
+def plot_scatter_grid_multi(scatter_data, out_path="data/analysis/scatter_grid_multi.png", top_k=200):
+    """Make a 2xN grid: top row V1 (rows vs cols), bottom row V2; columns are resources.
+    Axes share global limits to keep scales identical across subplots.
+    Highlights top shrink points (largest (v1/v2) ratio) in red on both rows.
+    scatter_data[res] = (v1_rows, v1_cols, v2_rows, v2_cols)
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    resources = list(scatter_data.keys())
+    n = len(resources)
+    if n == 0:
+        return
+    # Build global limits (log)
+    all_rows = []
+    all_cols = []
+    for res in resources:
+        v1_r, v1_c, v2_r, v2_c = scatter_data[res]
+        all_rows.extend([x for x in (list(v1_r)+list(v2_r)) if x is not None and x > 0])
+        all_cols.extend([y for y in (list(v1_c)+list(v2_c)) if y is not None and y > 0])
+    if not all_rows or not all_cols:
+        return
+    rmin, rmax = max(1, min(all_rows)), max(all_rows)
+    cmin, cmax = max(1, min(all_cols)), max(all_cols)
+
+    fig, axes = plt.subplots(2, n, figsize=(5*n, 8), sharex=False, sharey=False)
+    for j, res in enumerate(resources):
+        v1_r, v1_c, v2_r, v2_c = scatter_data[res]
+        # Compute top shrink based on cols and rows ratios separately, then union
+        v1_r_a = np.array([x for x in v1_r])
+        v1_c_a = np.array([y for y in v1_c])
+        v2_r_a = np.array([x for x in v2_r])
+        v2_c_a = np.array([y for y in v2_c])
+        valid = (v1_r_a > 0) & (v2_r_a > 0) & (v1_c_a > 0) & (v2_c_a > 0)
+        shrink_cols = np.log2((v1_c_a[valid]+1)/(v2_c_a[valid]+1))
+        shrink_rows = np.log2((v1_r_a[valid]+1)/(v2_r_a[valid]+1))
+        score = shrink_cols + shrink_rows
+        top_idx = np.argsort(-score)[:min(top_k, score.size)]  # highest shrink
+        # Top row: V1
+        ax1 = axes[0, j]
+        ax1.scatter(v1_r, v1_c, s=6, alpha=0.35, edgecolors='none', c='#1f77b4')
+        ax1.plot([rmin, rmax], [cmin, cmax], ls='--', c='#888', lw=1)
+        ax1.set_xscale('log'); ax1.set_yscale('log')
+        ax1.set_xlim(rmin, rmax); ax1.set_ylim(cmin, cmax)
+        ax1.set_title(f"{res} V1 rows vs cols")
+        # Bottom row: V2 (+ highlight top shrink in red)
+        ax2 = axes[1, j]
+        ax2.scatter(v2_r, v2_c, s=6, alpha=0.35, edgecolors='none', c='#2ca02c')
+        if top_idx.size > 0:
+            ax2.scatter(v2_r_a[valid][top_idx], v2_c_a[valid][top_idx], s=12, c='crimson', alpha=0.9, label='top shrink')
+            ax2.legend(fontsize=8)
+        ax2.plot([rmin, rmax], [cmin, cmax], ls='--', c='#888', lw=1)
+        ax2.set_xscale('log'); ax2.set_yscale('log')
+        ax2.set_xlim(rmin, rmax); ax2.set_ylim(cmin, cmax)
+        ax2.set_title(f"{res} V2 rows vs cols")
+        for ax in (ax1, ax2):
+            ax.grid(True, linestyle='--', alpha=0.25)
+            ax.set_xlabel('rows'); ax.set_ylabel('cols')
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig.savefig(out_path, dpi=220)
+    plt.close(fig)
+
+def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_ratio):
+    """Write only unequal rows using provided csv writer; return (kept, total)."""
+    total = 0
+    kept = 0
+    for base, v1_o, v1_t, v2_o, v2_t in sorted(csv_rows):
+        mode = 'both' if (v1_o is not None and v2_o is not None) else ('v1_only' if v1_o is not None else 'v2_only')
+        cols_equal = (v1_o == v2_o) if (v1_o is not None and v2_o is not None) else ''
+        rows_equal = (v1_t == v2_t) if (v1_t is not None and v2_t is not None) else ''
+        cols_diff = (v2_o - v1_o) if (v1_o is not None and v2_o is not None) else ''
+        rows_diff = (v2_t - v1_t) if (v1_t is not None and v2_t is not None) else ''
+        anomaly_v1 = (v1_o and v1_t and (v1_t >= anomaly_min_rows) and (v1_t / v1_o >= anomaly_ratio))
+        anomaly_v2 = (v2_o and v2_t and (v2_t >= anomaly_min_rows) and (v2_t / v2_o >= anomaly_ratio))
+        anomaly = True if (anomaly_v1 or anomaly_v2) else False if (mode == 'both') else ''
+        model_id = csv_to_modelid.get(base, '')
+        source_path = csv_to_sourcepath.get(base, '')
+        total += 1
+        is_rows_diff = (rows_equal not in ('', 'True', True))
+        is_cols_diff = (cols_equal not in ('', 'True', True))
+        if not (is_rows_diff or is_cols_diff):
+            continue
+        kept += 1
+        csv_writer.writerow([
+            resource,
+            base,
+            model_id,
+            source_path,
+            mode,
+            v1_o if v1_o is not None else '',
+            v2_o if v2_o is not None else '',
+            cols_equal,
+            cols_diff,
+            v1_t if v1_t is not None else '',
+            v2_t if v2_t is not None else '',
+            rows_equal,
+            rows_diff,
+            anomaly,
+        ])
+    return kept, total
+
+def write_overlay_csv(csv_out, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_ratio):
+    os.makedirs(os.path.dirname(csv_out), exist_ok=True)
+    with open(csv_out, 'w', newline='', encoding='utf-8') as fcsv:
+        writer = csv.writer(fcsv)
+        writer.writerow(['resource', 'basename', 'modelId', 'source_path', 'mode', 'v1_cols', 'v2_cols', 'cols_equal', 'cols_diff', 'v1_rows', 'v2_rows', 'rows_equal', 'rows_diff', 'anomaly'])
+        kept, total = write_overlay_rows(writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_ratio)
+
+    print(f"Saved unequal items to {csv_out} ({kept}/{total}).")
+### updated ###
+def main():
+    ap = argparse.ArgumentParser()
+    # Run all resources; no single-resource flag
+    ap.add_argument("--recursive", action="store_true", help="Recurse into subdirectories of the provided directories")
+    ap.add_argument("--png-out", default="data/analysis/v1v2_overlay.png", help="Path to save the overlay histogram PNG")
+    ap.add_argument("--bins", type=int, default=50, help="Number of bins for histograms")
+    ap.add_argument("--workers", type=int, default=min(32, (os.cpu_count() or 4) * 2), help="Max worker threads for parallel file processing")
+    ap.add_argument("--top", type=int, default=0, help="Print top-N examples where rows >> columns (by ratio)")
+    ap.add_argument("--csv-out", default="data/analysis/v1v2_overlay.csv", help="CSV with per-basename stats, equality diffs, and anomaly flag")
+    ap.add_argument("--anomaly-ratio", type=float, default=100.0, help="Rows/cols ratio threshold to flag anomalies")
+    ap.add_argument("--anomaly-min-rows", type=int, default=1000, help="Minimum rows to consider when flagging anomalies")
+    ap.add_argument("--include-missing", action="store_true", help="Include V1 basenames even if missing in V2 (do not skip)")
+    args = ap.parse_args()
+
+    # Run all resources and aggregate
+    resources = ["hugging", "github", "arxiv"]
+    os.makedirs(os.path.dirname(args.csv_out), exist_ok=True)
+    with open(args.csv_out, 'w', newline='', encoding='utf-8') as fcsv:
+        writer = csv.writer(fcsv)
+        writer.writerow(['resource', 'basename', 'modelId', 'source_path', 'mode', 'v1_cols', 'v2_cols', 'cols_equal', 'cols_diff', 'v1_rows', 'v2_rows', 'rows_equal', 'rows_diff', 'anomaly'])
+        density_data = {}
+        ecdf_data = {}
+        scatter_data = {}
+        per_summary = []
+        for res in resources:
+            v1_dir, v2_dir = resolve_resource_dirs(res)
+            v1_files, v2_file_map, v1_file_map, basenames = prepare_file_maps(v1_dir, v2_dir, args.recursive, args.include_missing)
+            if not basenames:
+                print(f"[WARN] No basenames for resource {res}; skipping")
+                continue
+            csv_to_modelid, csv_to_sourcepath = build_resource_mappings(res)
+            print(f"=== {res}: qc_anomaly summary ===")
+            print_overlap_summary(v1_file_map, v2_file_map, args.include_missing)
+            results_rows, csv_rows, v1_orig, v1_trans, v2_orig, v2_trans = process_basenames(
+                basenames, v1_file_map, v2_file_map, args.workers, args.include_missing
+            )
+            kept, total = write_overlay_rows(writer, res, csv_rows, csv_to_modelid, csv_to_sourcepath, args.anomaly_min_rows, args.anomaly_ratio)
+            print(f"Saved unequal items for {res} to {args.csv_out} ({kept}/{total}).")
+            per_summary.append((res, kept, total))
+            density_data[res] = (v1_orig, v2_orig, v1_trans, v2_trans)
+            ecdf_data[res] = (v1_orig, v2_orig, v1_trans, v2_trans)
+            scatter_data[res] = (v1_trans, v1_orig, v2_trans, v2_orig)
+        # Combined plots
+        plot_density_iqr_multi(density_data, args.bins, args.png_out.replace('.png', '_multi.png'))
+        plot_ecdf_multi(ecdf_data, out_path="data/analysis/combined_ecdf_multi.png")
+        plot_scatter_grid_multi(scatter_data, out_path="data/analysis/scatter_grid_multi.png", top_k=200)
+        # Print summary table
+        print("=== Unequal summary (kept/total) ===")
+        for res, kept, total in per_summary:
+            print(f"{res}: {kept}/{total}")
 
 if __name__ == "__main__":
     main()

@@ -350,6 +350,8 @@ python -m src.modelsearch.compare_baselines \
 ```
 
 ### 11. GPT Evaluation of Table Relatedness and Model Relatedness:
+
+#### Basic GPT Evaluation (Original)
 ```bash
 python -m src.gpt_evaluation.sample_pairs
 python -m src.gpt_evaluation.evaluate_pairs \
@@ -362,6 +364,54 @@ python -m src.gpt_evaluation.jsonl_to_markdown \
   --output output/llm_eval_tables.md \
   --show-prompt
 ```
+
+#### Improved Smart Sampling (Based on Ground Truth Construction)
+```bash
+# Generate smart samples based on actual ground truth matrices
+python -m src.gpt_evaluation.improved_smart_sampling \
+  --num-table-pairs 100 \
+  --num-model-pairs 50 \
+  --positive-ratio 0.5 \
+  --output output/improved_evaluation_pairs.jsonl
+
+# Evaluate table relatedness using smart samples
+python -m src.gpt_evaluation.evaluate_pairs \
+  --mode tables \
+  --pairs output/improved_evaluation_pairs.jsonl \
+  --output output/table_relatedness_evaluation.jsonl \
+  --llm gpt-3.5-turbo-0125
+
+# Evaluate model relatedness using modelcard_matrix.py logic
+python -m src.gpt_evaluation.model_relatedness_evaluation \
+  --num-pairs 50 \
+  --output output/model_relatedness_evaluation.jsonl \
+  --llm gpt-3.5-turbo-0125
+
+# Generate reports
+python -m src.gpt_evaluation.jsonl_to_markdown \
+  --input output/table_relatedness_evaluation.jsonl \
+  --output output/table_relatedness_report.md \
+  --show-prompt
+```
+
+#### Comprehensive Evaluation Pipeline
+```bash
+# Run complete evaluation pipeline
+python -m src.gpt_evaluation.comprehensive_evaluation \
+  --num-table-pairs 100 \
+  --num-model-pairs 50 \
+  --positive-ratio 0.5 \
+  --output-dir output/gpt_evaluation \
+  --llm gpt-3.5-turbo-0125
+```
+
+#### Key Features of Improved Evaluation:
+- **Ground Truth Based**: Uses actual ground truth matrices (direct, max_pr, model, dataset levels)
+- **Smart Filtering**: Applies same filtering conditions as ground truth construction (nonempty paper & csv lists)
+- **Model Relationships**: Based on modelcard_matrix.py logic (base model relationships, dataset relationships)
+- **Balanced Sampling**: Ensures positive/negative examples with sufficient information
+- **Multi-level Coverage**: Covers different relationship levels used in ground truth
+- **Quality Control**: Filters out empty or meaningless samples
 
 ### 12. Table Integration:
 ```bash
