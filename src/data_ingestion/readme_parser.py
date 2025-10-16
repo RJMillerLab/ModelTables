@@ -152,9 +152,27 @@ class MarkdownHandler:
             component = row[component_col]
             labels = row[labels_col]
             if pd.notna(labels):
-                # Convert comma-separated to semicolon-separated
-                label_list = [label.strip() for label in str(labels).split(',')]
-                result.append([component, ';'.join(label_list)])
+                labels_str = str(labels)
+                
+                # Handle both comma and pipe separators
+                # First split by comma, then by pipe within each comma-separated group
+                label_list = []
+                for comma_group in labels_str.split(','):
+                    comma_group = comma_group.strip()
+                    if comma_group:
+                        # Split by pipe and add each part as a separate label
+                        pipe_labels = [label.strip() for label in comma_group.split('|') if label.strip()]
+                        label_list.extend(pipe_labels)
+                
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_labels = []
+                for label in label_list:
+                    if label not in seen:
+                        seen.add(label)
+                        unique_labels.append(label)
+                
+                result.append([component, ';'.join(unique_labels)])
         return result
 
     @staticmethod
