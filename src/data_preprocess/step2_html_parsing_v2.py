@@ -15,17 +15,15 @@ import sqlite3
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from src.utils import to_parquet
+SOUP_PARSER = 'lxml'  # faster than the default html.parser
+VERBOSE = False
+PROFILE = False
 from src.utils import sanitize_table_separators
 from tqdm_joblib import tqdm_joblib
 
 
-def classify_page(html_path):
-    """Classify HTML page as metadata or fulltext based on content analysis."""
-    if not os.path.exists(html_path):
-        return None
-    with open(html_path, 'r', encoding='utf-8') as f:
-        html = f.read()
-    soup = BeautifulSoup(html, 'html.parser')
+def classify_page_from_soup(soup):
+    """Classify page as metadata or fulltext using an existing soup (no reparse)."""
     
     # Rule 1: Check for <meta> tags with the 'name' attribute starting with "citation_"
     meta_tags = soup.find_all('meta', attrs={'name': lambda x: x and x.lower().startswith('citation_')})
@@ -45,29 +43,35 @@ def classify_page(html_path):
     # Default to 'metadata' if none of the above rules are met
     return 'metadata'
 
+def load_soup_and_tables(html_path):
+    """Single-parse loader: returns (soup, figures) where figures are table figures."""
+    if not os.path.exists(html_path):
+        return None, []
+    with open(html_path, 'r', encoding='utf-8') as f:
+        html = f.read()
+    soup = BeautifulSoup(html, SOUP_PARSER)
+    figures = soup.select('figure.ltx_table')
+    return soup, figures
+
 
 def extract_math_text(cell):
     """Extract text from math elements and convert to readable format."""
-    # Find all math elements
+    # Fast path: avoid reparsing HTML strings; modify the Tag in-place for math alttext
     math_elements = cell.find_all('math')
-    if not math_elements:
-        text = cell.get_text(strip=True)
-    else:
-        # Replace math elements with their alttext or annotation
-        text = str(cell)
-        for math in math_elements:
-            alttext = math.get('alttext', '')
+    if math_elements:
+        for m in math_elements:
+            alttext = m.get('alttext')
+            repl = None
             if alttext:
-                text = text.replace(str(math), alttext)
+                repl = alttext
             else:
-                # Try to get annotation
-                annotation = math.find('annotation', encoding='application/x-tex')
+                annotation = m.find('annotation', encoding='application/x-tex')
                 if annotation:
-                    text = text.replace(str(math), annotation.get_text(strip=True))
-        
-        # Parse the modified HTML
-        soup = BeautifulSoup(text, 'html.parser')
-        text = soup.get_text(strip=True)
+                    repl = annotation.get_text(strip=True)
+            if repl is not None:
+                m.replace_with(repl)
+    # Single get_text with separator preserves spaces between inline parts
+    text = cell.get_text(separator=' ', strip=True)
     
     # Clean up math formatting like BERTbasebase{}_{\text{base}} to BERT_base
     import re
@@ -93,7 +97,8 @@ def parse_table_with_nested_structure(table, preserve_bold=True):
     
     if len(nested_tables) > 1:
         # This is a nested table structure, use the outermost table to preserve colspan info
-        print(f"  Found nested table structure with {len(nested_tables)} levels")
+        if VERBOSE:
+            print(f"  Found nested table structure with {len(nested_tables)} levels")
         # Use the first (outermost) table to preserve colspan information
         table = nested_tables[0]
     
@@ -187,22 +192,26 @@ def clean_final_dataframe(df):
     if df is None or df.empty:
         return df
     
-    # 1. Remove rows that are all numbers (like 0,1,2,3,4)
-    def is_number_row(row):
+    # 1. Optionally remove purely index-like rows (0..N or 1..N). Keep numeric data rows like "11 17".
+    def is_index_like_row(row):
+        vals = [str(val).strip() for val in row if str(val).strip() != '']
+        if len(vals) == 0:
+            return True  # empty -> drop later
+        # All ints?
         try:
-            # Check if all non-empty values are numbers
-            non_empty = [str(val).strip() for val in row if str(val).strip() != '']
-            if not non_empty:
-                return True
-            # Check if all non-empty values are numbers
-            for val in non_empty:
-                float(val)
-            return True
-        except (ValueError, TypeError):
+            ints = [int(v) for v in vals]
+        except ValueError:
             return False
-    
-    # Remove number-only rows
-    df = df[~df.apply(is_number_row, axis=1)]
+        if len(ints) < 2:
+            return False
+        # contiguous sequence starting at 0 or 1
+        start = ints[0]
+        if start not in (0, 1):
+            return False
+        expected = list(range(start, start + len(ints)))
+        return ints == expected
+
+    df = df[~df.apply(is_index_like_row, axis=1)]
     
     # 1.5. Remove first row if it's just column numbers (0,1,2,3,4...)
     if not df.empty and len(df) > 0:
@@ -210,11 +219,8 @@ def clean_final_dataframe(df):
         if all(str(val).strip().isdigit() for val in first_row if str(val).strip() != ''):
             df = df.iloc[1:].reset_index(drop=True)
     
-    # 2. Remove completely empty columns
-    df = df.dropna(axis=1, how='all')
-    
-    # 3. Remove columns that are all empty strings
-    df = df.loc[:, ~(df == '').all()]
+    # 2/3. Preserve column alignment: do NOT drop all-empty columns.
+    # Keeping structural empty columns is important for arXiv tables with spacing placeholders.
     
     # 4. Remove columns with unnamed headers (like "Unnamed: 0")
     df = df.loc[:, ~df.columns.astype(str).str.contains('Unnamed', na=False)]
@@ -246,13 +252,11 @@ def extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path='data/pro
     if not os.path.exists(html_path):
         return table_names
     
-    with open(html_path, 'r', encoding='utf-8') as f:
-        html_content = f.read()
-    
-    soup = BeautifulSoup(html_content, 'html.parser')
-    
-    # Find all table figures (tables with captions)
-    table_figures = soup.find_all('figure', class_='ltx_table')
+    soup, table_figures = load_soup_and_tables(html_path)
+    if soup is None:
+        return table_names
+    if not table_figures:
+        return table_names
     
     # Connect to DuckDB
     conn = duckdb.connect(duckdb_path)
@@ -260,32 +264,36 @@ def extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path='data/pro
     try:
         for fig_idx, figure in enumerate(table_figures):
             # Extract caption - only process tables with captions
-            caption_elem = figure.find('figcaption')
+            caption_elem = figure.select_one('figcaption')
             if not caption_elem:
-                print(f"Skipping table {fig_idx}: No caption found")
+                if VERBOSE:
+                    print(f"Skipping table {fig_idx}: No caption found")
                 continue
                 
             caption = caption_elem.get_text(strip=True)
             # print(f"Processing table {fig_idx}: {caption[:50]}...")  # Commented for speed
             
             # Find the actual table within the figure
-            table = figure.find('table')
+            table = figure.select_one('table')
             if not table:
-                print(f"Skipping table {fig_idx}: No table element found")
+                if VERBOSE:
+                    print(f"Skipping table {fig_idx}: No table element found")
                 continue
             
             # Parse the table structure with proper colspan/rowspan handling
             table_data = parse_table_with_nested_structure(table, preserve_bold)
             
             if not table_data or len(table_data) < 2:
-                print(f"Skipping table {fig_idx}: Insufficient data")
+                if VERBOSE:
+                    print(f"Skipping table {fig_idx}: Insufficient data")
                 continue
             
             # Create DataFrame with proper structure
             df = create_structured_dataframe(table_data)
             
             if df is None or df.empty:
-                print(f"Skipping table {fig_idx}: Empty DataFrame")
+                if VERBOSE:
+                    print(f"Skipping table {fig_idx}: Empty DataFrame")
                 continue
             
             # Clean the DataFrame according to requirements
@@ -294,7 +302,8 @@ def extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path='data/pro
             df = sanitize_table_separators(df)
             
             if df.empty:
-                print(f"Skipping table {fig_idx}: Empty DataFrame after cleaning")
+                if VERBOSE:
+                    print(f"Skipping table {fig_idx}: Empty DataFrame after cleaning")
                 continue
             
             # Create table name using paper_id and table index (replace dots with underscores and add prefix for DuckDB compatibility)
@@ -305,7 +314,8 @@ def extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path='data/pro
             conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM df")
             
             table_names.append(table_name)
-            print(f"Saved table to DuckDB: {table_name}")
+            if VERBOSE:
+                print(f"Saved table to DuckDB: {table_name}")
     
     finally:
         conn.close()
@@ -331,13 +341,11 @@ def extract_tables_and_save_to_sqlite(html_path, paper_id, sqlite_path='data/pro
     if not os.path.exists(html_path):
         return table_names
     
-    with open(html_path, 'r', encoding='utf-8') as f:
-        html_content = f.read()
-    
-    soup = BeautifulSoup(html_content, 'html.parser')
-    
-    # Find all table figures (tables with captions)
-    table_figures = soup.find_all('figure', class_='ltx_table')
+    soup, table_figures = load_soup_and_tables(html_path)
+    if soup is None:
+        return table_names
+    if not table_figures:
+        return table_names
     
     # Connect to SQLite
     conn = sqlite3.connect(sqlite_path)
@@ -345,7 +353,7 @@ def extract_tables_and_save_to_sqlite(html_path, paper_id, sqlite_path='data/pro
     try:
         for fig_idx, figure in enumerate(table_figures):
             # Extract caption - only process tables with captions
-            caption_elem = figure.find('figcaption')
+            caption_elem = figure.select_one('figcaption')
             if not caption_elem:
                 print(f"Skipping table {fig_idx}: No caption found")
                 continue
@@ -354,7 +362,7 @@ def extract_tables_and_save_to_sqlite(html_path, paper_id, sqlite_path='data/pro
             # print(f"Processing table {fig_idx}: {caption[:50]}...")  # Commented for speed
             
             # Find the actual table within the figure
-            table = figure.find('table')
+            table = figure.select_one('table')
             if not table:
                 print(f"Skipping table {fig_idx}: No table element found")
                 continue
@@ -408,14 +416,8 @@ def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tabl
     if not os.path.exists(html_path):
         return table_paths
 
-    with open(html_path, 'r', encoding='utf-8') as f:
-        html = f.read()
-    soup = BeautifulSoup(html, 'html.parser')
-    
-    # Find all table figures (tables with captions) - same as DB version
-    table_figures = soup.find_all('figure', class_='ltx_table')
-    
-    if not table_figures:
+    soup, table_figures = load_soup_and_tables(html_path)
+    if soup is None or not table_figures:
         return table_paths
     
     # Create output directory if it doesn't exist
@@ -423,18 +425,20 @@ def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tabl
     
     for fig_idx, figure in enumerate(table_figures):
         # Extract caption - only process tables with captions
-        caption_elem = figure.find('figcaption')
+        caption_elem = figure.select_one('figcaption')
         if not caption_elem:
-            print(f"Skipping table {fig_idx}: No caption found")
+            if VERBOSE:
+                print(f"Skipping table {fig_idx}: No caption found")
             continue
             
         caption = caption_elem.get_text(strip=True)
         # print(f"Processing table {fig_idx}: {caption[:50]}...")  # Commented for speed
         
         # Find the actual table within the figure
-        table = figure.find('table')
+        table = figure.select_one('table')
         if not table:
-            print(f"Skipping table {fig_idx}: No table element found")
+            if VERBOSE:
+                print(f"Skipping table {fig_idx}: No table element found")
             continue
         
         # Parse using the same robust parser used for DB outputs
@@ -476,25 +480,37 @@ def process_single_html(html_path, paper_id, output_dir='data/processed/tables_o
         'error': None
     }
     
+    import time
+    stage_times = {}
+    t0 = time.perf_counter()
     try:
-        # Classify page type
-        result['page_type'] = classify_page(html_path)
+        # Single-parse classification to avoid reparse
+        soup, _ = load_soup_and_tables(html_path)
+        t_load = time.perf_counter()
+        result['page_type'] = classify_page_from_soup(soup) if soup else None
+        t_class = time.perf_counter()
         
-        # Extract tables based on save_mode
-        if save_mode in ['csv', 'both']:
+        # Extract tables based on save_mode (csv and duckdb must be run in separate passes)
+        if save_mode == 'csv':
             result['csv_paths'] = extract_tables_and_save(html_path, paper_id, output_dir, preserve_bold)
-        
-        if save_mode in ['duckdb', 'both']:
+        elif save_mode == 'duckdb':
             result['db_tables'] = extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path, preserve_bold)
-        
-        if save_mode == 'sqlite':
+        elif save_mode == 'sqlite':
             # TODO: Implement SQLite support
             result['db_tables'] = extract_tables_and_save_to_sqlite(html_path, paper_id, duckdb_path, preserve_bold)
+        t_save = time.perf_counter()
+        stage_times = {
+            'load_soup': t_load - t0,
+            'classify': t_class - t_load,
+            'extract_save': t_save - t_class,
+        }
         
     except Exception as e:
         result['error'] = str(e)
         print(f"Error processing {html_path}: {e}")
     
+    if PROFILE:
+        result['profile'] = stage_times
     return result
 
 
@@ -507,11 +523,18 @@ def main():
     parser.add_argument('--output_dir', default='data/processed/tables_output_v2', help='Output directory for CSV files')
     parser.add_argument('--db_path', default='data/processed/tables_output.db', help='Path to database file')
     parser.add_argument('--preserve_bold', action='store_true', default=False, help='Preserve bold formatting')
-    parser.add_argument('--save_mode', default='csv', choices=['csv', 'duckdb', 'sqlite', 'both'], help='Save mode: csv, duckdb, sqlite, or both')
-    parser.add_argument('--n_jobs', type=int, default=4, help='Number of parallel jobs')
+    parser.add_argument('--save_mode', default='csv', choices=['csv', 'duckdb', 'sqlite'], help='Save mode: choose one (csv or duckdb or sqlite). Run separately if you need both.')
+    parser.add_argument('--n_jobs', type=int, default=4, help='Number of parallel jobs (set 1 for sequential)')
+    parser.add_argument('--sequential', action='store_true', help='Force sequential processing (disables joblib Parallel)')
+    parser.add_argument('--verbose', action='store_true', help='Print per-table logs (skips, saves)')
+    parser.add_argument('--profile', action='store_true', help='Collect coarse timing per stage and report mean/P95')
     
     args = parser.parse_args()
     
+    global VERBOSE, PROFILE
+    VERBOSE = bool(args.verbose)
+    PROFILE = bool(args.profile)
+
     # Get list of HTML files
     html_files = []
     for filename in os.listdir(args.input_dir):
@@ -521,16 +544,22 @@ def main():
             html_files.append((html_path, paper_id))
     
     print(f"Found {len(html_files)} HTML files to process")
-    print(f"Save mode: {args.save_mode}")
-    print(f"Preserve bold: {args.preserve_bold}")
+    if VERBOSE:
+        print(f"Save mode: {args.save_mode}")
+        print(f"Preserve bold: {args.preserve_bold}")
     
-    # Process files in parallel with proper progress tracking
-    with tqdm_joblib(tqdm(total=len(html_files), desc="Processing HTML files")):
-        results = Parallel(n_jobs=args.n_jobs)(
-            delayed(process_single_html)(
-                html_path, paper_id, args.output_dir, args.db_path, args.preserve_bold, args.save_mode
-            ) for html_path, paper_id in html_files
-        )
+    # Process files (sequential or parallel)
+    results = []
+    if args.sequential or args.n_jobs <= 1:
+        for html_path, paper_id in tqdm(html_files, desc="Processing HTML files (seq)"):
+            results.append(process_single_html(html_path, paper_id, args.output_dir, args.db_path, args.preserve_bold, args.save_mode))
+    else:
+        with tqdm_joblib(tqdm(total=len(html_files), desc="Processing HTML files")):
+            results = Parallel(n_jobs=args.n_jobs)(
+                delayed(process_single_html)(
+                    html_path, paper_id, args.output_dir, args.db_path, args.preserve_bold, args.save_mode
+                ) for html_path, paper_id in html_files
+            )
     
     # Save results to parquet
     results_df = pd.DataFrame(results)
@@ -545,21 +574,35 @@ def main():
     print(f"Successful: {len(successful)}")
     print(f"Failed: {len(failed)}")
     
-    if len(failed) > 0:
+    if len(failed) > 0 and VERBOSE:
         print(f"\nFailed files:")
         for _, row in failed.iterrows():
             print(f"  {row['paper_id']}: {row['error']}")
+
+    # Profile report
+    if PROFILE and 'profile' in results_df.columns:
+        prof = results_df['profile'].dropna().tolist()
+        if prof:
+            import numpy as np
+            keys = ['load_soup', 'classify', 'extract_save']
+            print("\nTiming (seconds): mean | p95")
+            for k in keys:
+                vals = np.array([p.get(k, 0.0) for p in prof], dtype=float)
+                if vals.size:
+                    mean = float(vals.mean())
+                    p95 = float(np.percentile(vals, 95))
+                    print(f"  {k:12s}: {mean:.4f} | {p95:.4f}")
     
     # Print database summary
-    if args.save_mode in ['duckdb', 'both']:
+    if args.save_mode == 'duckdb':
         total_tables = sum(len(r['db_tables']) for r in results if r['db_tables'])
         print(f"\nTotal tables saved to DuckDB: {total_tables}")
     
-    if args.save_mode in ['sqlite', 'both']:
+    if args.save_mode == 'sqlite':
         total_tables = sum(len(r['db_tables']) for r in results if r['db_tables'])
         print(f"\nTotal tables saved to SQLite: {total_tables}")
     
-    if args.save_mode in ['csv', 'both']:
+    if args.save_mode == 'csv':
         total_csvs = sum(len(r['csv_paths']) for r in results if r['csv_paths'])
         print(f"\nTotal CSV files created: {total_csvs}")
 
