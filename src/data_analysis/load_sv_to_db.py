@@ -49,11 +49,23 @@ def read_csv_with_fallback(path: str, sep: str | None):
 
     # If user forced a separator, trust it first
     if sep is not None:
-        return pd.read_csv(path, sep=sep, low_memory=False)
+        df = pd.read_csv(path, sep=sep, low_memory=False)
+        # Normalize whitespace-only cells and drop fully empty rows on read
+        try:
+            df = df.replace(r'^\s*$', pd.NA, regex=True).dropna(axis=0, how='all')
+        except Exception:
+            pass
+        return df
 
     # Try auto-detect first using python engine (no low_memory)
     try:
-        return pd.read_csv(path, sep=None, engine="python")
+        df = pd.read_csv(path, sep=None, engine="python")
+        # Normalize whitespace-only cells and drop fully empty rows on read
+        try:
+            df = df.replace(r'^\s*$', pd.NA, regex=True).dropna(axis=0, how='all')
+        except Exception:
+            pass
+        return df
     except Exception as e_auto:
         last_exc = e_auto
 
@@ -63,7 +75,13 @@ def read_csv_with_fallback(path: str, sep: str | None):
     for enc in encodings:
         for s in common_seps:
             try:
-                return pd.read_csv(path, sep=s, encoding=enc, low_memory=False)
+                df = pd.read_csv(path, sep=s, encoding=enc, low_memory=False)
+                # Normalize whitespace-only cells and drop fully empty rows on read
+                try:
+                    df = df.replace(r'^\s*$', pd.NA, regex=True).dropna(axis=0, how='all')
+                except Exception:
+                    pass
+                return df
             except Exception as e:
                 last_exc = e
 

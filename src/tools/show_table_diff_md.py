@@ -76,6 +76,11 @@ def safe_head_markdown(path: str, n: int = 5) -> str:
         return "(missing)"
     try:
         df = pd.read_csv(path, nrows=n)
+        # Drop fully-empty rows to avoid inflated blanks in preview
+        try:
+            df = df.replace(r'^\s*$', pd.NA, regex=True).dropna(axis=0, how='all')
+        except Exception:
+            pass
         return df.to_markdown(index=False)
     except Exception:
         # Very robust fallback: parse CSV manually and format as markdown table

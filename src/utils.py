@@ -584,3 +584,76 @@ def sanitize_table_separators(obj):
     # Default: return unchanged
     return obj
 
+
+def clean_dataframe_for_analysis(df, drop_empty_rows=True, drop_empty_cols=True, preserve_empty_cells=True):
+    """
+    清理DataFrame用于分析，可选择性地删除空行/列，同时保留空cell用于视觉布局。
+    
+    Args:
+        df: pandas DataFrame
+        drop_empty_rows: 是否删除完全空行
+        drop_empty_cols: 是否删除完全空列  
+        preserve_empty_cells: 是否保留空cell（空字符串），False会转换为NA
+    
+    Returns:
+        清理后的DataFrame
+    """
+    if df is None or df.empty:
+        return df
+    
+    result_df = df.copy()
+    
+    # 处理空cell
+    if not preserve_empty_cells:
+        result_df = result_df.replace(r'^\s*$', pd.NA, regex=True)
+    
+    # 删除空行
+    if drop_empty_rows:
+        if preserve_empty_cells:
+            # 保留空cell时，使用更精确的空行检测（strip后为空字符串的行）
+            mask = result_df.apply(lambda row: all(str(val).strip() == '' for val in row), axis=1)
+            result_df = result_df[~mask]
+        else:
+            # 转换为NA后，使用pandas的dropna
+            result_df = result_df.dropna(axis=0, how='all')
+    
+    # 删除空列
+    if drop_empty_cols:
+        if preserve_empty_cells:
+            # 保留空cell时，使用更精确的空列检测（strip后为空字符串的列）
+            mask = result_df.apply(lambda col: all(str(val).strip() == '' for val in col), axis=0)
+            result_df = result_df.loc[:, ~mask]
+        else:
+            # 转换为NA后，使用pandas的dropna
+            result_df = result_df.dropna(axis=1, how='all')
+    
+    # 如果保留空cell，将只包含空格的cell标准化为空字符串
+    if preserve_empty_cells:
+        result_df = result_df.map(lambda x: '' if str(x).strip() == '' else x)
+    
+    return result_df.reset_index(drop=True)
+
+
+def read_csv_for_analysis(csv_path, **kwargs):
+    """
+    读取CSV文件并清理用于分析。
+    默认删除空行和空列，但保留空cell。
+    """
+    # 确保不把空字符串转换为NaN
+    if 'keep_default_na' not in kwargs:
+        kwargs['keep_default_na'] = False
+    df = pd.read_csv(csv_path, **kwargs)
+    return clean_dataframe_for_analysis(df, drop_empty_rows=True, drop_empty_cols=True, preserve_empty_cells=True)
+
+
+def read_csv_for_display(csv_path, **kwargs):
+    """
+    读取CSV文件用于显示，保留所有视觉布局。
+    不删除空行/列，保留空cell。
+    """
+    # 确保不把空字符串转换为NaN
+    if 'keep_default_na' not in kwargs:
+        kwargs['keep_default_na'] = False
+    df = pd.read_csv(csv_path, **kwargs)
+    return clean_dataframe_for_analysis(df, drop_empty_rows=False, drop_empty_cols=False, preserve_empty_cells=True)
+

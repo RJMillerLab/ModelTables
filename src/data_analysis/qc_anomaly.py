@@ -6,13 +6,15 @@ Last Edited: 2025-10-15
 Description: Compare two folders of CSVs: histogram of per-table columns and rows (by basename).
 
 Usage example:
-python -m src.data_analysis.qc_anomaly --recursive --include-missing
+python -m src.data_analysis.qc_anomaly --recursive --anomaly-min-cols 500 --anomaly-min-rows 1000 --anomaly-ratio 2.0
 """
 import argparse
 import os
 import csv
 import matplotlib.pyplot as plt
 import pandas as pd
+import sqlite3
+from threading import Lock
 try:
     from batch_process_tables import build_modelid_sql_query
 except Exception:
@@ -41,6 +43,57 @@ def list_csv_files(paths, recursive=False):
                     if fname.lower().endswith('.csv'):
                         files.append(os.path.join(path, fname))
     return files
+
+
+CACHE_DB_PATH = os.path.join("data", "cache", "qc_counts.sqlite")
+
+
+def _ensure_cache_db():
+    os.makedirs(os.path.dirname(CACHE_DB_PATH), exist_ok=True)
+    con = sqlite3.connect(CACHE_DB_PATH)
+    try:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS counts(
+                path TEXT PRIMARY KEY,
+                mtime REAL NOT NULL,
+                size INTEGER NOT NULL,
+                rows_with_header INTEGER NOT NULL,
+                cols INTEGER NOT NULL
+            )
+            """
+        )
+        con.execute("CREATE INDEX IF NOT EXISTS idx_counts_mtime ON counts(mtime)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_counts_size ON counts(size)")
+        con.commit()
+    finally:
+        con.close()
+
+
+def _load_cache_map():
+    """Load entire cache table into memory as a dict[path] -> (mtime, size, rows, cols)."""
+    _ensure_cache_db()
+    con = sqlite3.connect(CACHE_DB_PATH)
+    try:
+        cur = con.execute("SELECT path, mtime, size, rows_with_header, cols FROM counts")
+        return {row[0]: (row[1], row[2], row[3], row[4]) for row in cur.fetchall()}
+    finally:
+        con.close()
+
+
+def _write_cache_updates(updates_items):
+    if not updates_items:
+        return
+    _ensure_cache_db()
+    con = sqlite3.connect(CACHE_DB_PATH)
+    try:
+        con.executemany(
+            "INSERT OR REPLACE INTO counts(path, mtime, size, rows_with_header, cols) VALUES(?,?,?,?,?)",
+            updates_items,
+        )
+        con.commit()
+    finally:
+        con.close()
 
 
 def index_csv_basenames(directory, recursive=False):
@@ -90,18 +143,13 @@ def resolve_resource_dirs(resource):
         return "data/processed/deduped_github_csvs", "data/processed/deduped_github_csvs_v2"
     return "data/processed/tables_output", "data/processed/tables_output_v2"
 
-def prepare_file_maps(v1_dir, v2_dir, recursive, include_missing):
+def prepare_file_maps(v1_dir, v2_dir, recursive):
     v1_files = list_csv_files([v1_dir], recursive=recursive)
     if not v1_files:
         print("No CSV files found in v1_dir.")
         return [], {}, {}, []
-    v2_basenames = index_csv_basenames(v2_dir, recursive=recursive)
-    # If not including missing, filter to intersection; else we'll take union later
-    if not include_missing:
-        v1_files = [p for p in v1_files if os.path.basename(p) in v2_basenames]
-        if not v1_files:
-            print("No overlapping CSV basenames between v1_dir and v2_dir.")
-            return [], {}, {}, []
+    
+    # Build v2_file_map first
     v2_file_map = {}
     if recursive:
         for root, _, fnames in os.walk(v2_dir):
@@ -112,11 +160,12 @@ def prepare_file_maps(v1_dir, v2_dir, recursive, include_missing):
         for fname in os.listdir(v2_dir):
             if fname.lower().endswith('.csv'):
                 v2_file_map[fname] = os.path.join(v2_dir, fname)
+    
     v1_file_map = {os.path.basename(p): p for p in v1_files}
-    if include_missing:
-        basenames = sorted(set(v1_file_map.keys()) | set(v2_file_map.keys()))
-    else:
-        basenames = sorted(set(v1_file_map.keys()) & set(v2_file_map.keys()))
+    
+    # Always include all files (union of v1 and v2)
+    basenames = sorted(set(v1_file_map.keys()) | set(v2_file_map.keys()))
+    
     return v1_files, v2_file_map, v1_file_map, basenames
 
 def build_resource_mappings(resource):
@@ -273,7 +322,7 @@ def build_arxiv_source_map():
         pass
     return mapping
 
-def print_overlap_summary(v1_file_map, v2_file_map, include_missing):
+def print_overlap_summary(v1_file_map, v2_file_map):
     v1_bases = set(v1_file_map.keys())
     v2_bases = set(v2_file_map.keys())
     inter_bases = v1_bases & v2_bases
@@ -287,7 +336,6 @@ def print_overlap_summary(v1_file_map, v2_file_map, include_missing):
     print(f"Only in V1: {len(only_v1)}")
     print(f"Only in V2: {len(only_v2)}")
     print(f"Union: {len(union_bases)}")
-    print(f"include_missing: {include_missing}")
     if only_v1:
         examples = list(sorted(only_v1))[:5]
         print("Only V1 examples:", ", ".join(examples))
@@ -295,18 +343,48 @@ def print_overlap_summary(v1_file_map, v2_file_map, include_missing):
         examples = list(sorted(only_v2))[:5]
         print("Only V2 examples:", ", ".join(examples))
 
-def process_basenames(basenames, v1_file_map, v2_file_map, workers, include_missing):
+def process_basenames(basenames, v1_file_map, v2_file_map, workers):
     v1_orig, v1_trans, v2_orig, v2_trans = [], [], [], []
     results_rows = []
     csv_rows = []
     col_counter = count_columns_from_header_fast
+
+    # Load cache into memory once; collect updates from threads safely
+    cache_map = _load_cache_map()
+    updates = []  # list of tuples (path, mtime, size, rows_with_header, cols)
+    updates_lock = Lock()
+
+    def _get_stats(path):
+        if not path:
+            return None, None
+        ap = os.path.abspath(path)
+        try:
+            st = os.stat(ap)
+        except Exception:
+            return None, None
+        mtime = st.st_mtime
+        size = st.st_size
+        cached = cache_map.get(ap)
+        if cached and cached[0] == mtime and cached[1] == size:
+            # rows_with_header, cols from cache
+            return cached[2], cached[3]
+        # compute fresh
+        cols = col_counter(ap)
+        rows_with_header = count_rows_fast(ap, head_flag=True)
+        with updates_lock:
+            updates.append((ap, mtime, size, rows_with_header, cols))
+            cache_map[ap] = (mtime, size, rows_with_header, cols)
+        return rows_with_header, cols
+
     def _proc_base(base):
         p1 = v1_file_map.get(base)
         p2 = v2_file_map.get(base)
-        v1_o = col_counter(p1) if p1 else None
-        v1_t = count_rows_fast(p1, head_flag=True) if p1 else None
-        v2_o = col_counter(p2) if p2 else None
-        v2_t = count_rows_fast(p2, head_flag=True) if p2 else None
+        v1_t, v1_o = (None, None)
+        v2_t, v2_o = (None, None)
+        if p1:
+            v1_t, v1_o = _get_stats(p1)
+        if p2:
+            v2_t, v2_o = _get_stats(p2)
         return base, v1_o, v1_t, v2_o, v2_t
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {ex.submit(_proc_base, b): b for b in basenames}
@@ -319,10 +397,12 @@ def process_basenames(basenames, v1_file_map, v2_file_map, workers, include_miss
                     v2_orig.append(v2_o)
                     v2_trans.append(v2_t)
                     results_rows.append((base, v1_o, v1_t, v2_o, v2_t))
-                if include_missing or (v1_o is not None and v2_o is not None):
-                    csv_rows.append((base, v1_o, v1_t, v2_o, v2_t))
+                # Always include all rows (both, v1_only, v2_only)
+                csv_rows.append((base, v1_o, v1_t, v2_o, v2_t))
             except Exception:
                 pass
+    # persist cache updates in one batch
+    _write_cache_updates(updates)
     return results_rows, csv_rows, v1_orig, v1_trans, v2_orig, v2_trans
 
 def plot_density_iqr(v1_orig, v2_orig, v1_trans, v2_trans, bins, png_out):
@@ -624,7 +704,7 @@ def _print_aligned_table(headers, rows):
     for r in rows:
         print(fmt(r))
 
-def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_ratio):
+def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols, anomaly_ratio):
     """Write only unequal rows using provided csv writer; return (kept, total)."""
     total = 0
     kept = 0
@@ -634,9 +714,18 @@ def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_so
         rows_equal = (v1_t == v2_t) if (v1_t is not None and v2_t is not None) else ''
         cols_diff = (v2_o - v1_o) if (v1_o is not None and v2_o is not None) else ''
         rows_diff = (v2_t - v1_t) if (v1_t is not None and v2_t is not None) else ''
-        anomaly_v1 = (v1_o and v1_t and (v1_t >= anomaly_min_rows) and (v1_t / v1_o >= anomaly_ratio))
-        anomaly_v2 = (v2_o and v2_t and (v2_t >= anomaly_min_rows) and (v2_t / v2_o >= anomaly_ratio))
-        anomaly = True if (anomaly_v1 or anomaly_v2) else False if (mode == 'both') else ''
+        # Anomaly detection: v2 has high rows/cols ratio OR v2 has many cols OR v2 has many rows
+        anomaly_v2 = False
+        if v2_o and v2_t:
+            # High rows/cols ratio
+            ratio_anomaly = (v2_t >= anomaly_min_rows) and (v2_t / v2_o >= anomaly_ratio)
+            # Many columns
+            cols_anomaly = (v2_o >= anomaly_min_cols)
+            # Many rows  
+            rows_anomaly = (v2_t >= anomaly_min_rows)
+            anomaly_v2 = ratio_anomaly or cols_anomaly or rows_anomaly
+        
+        anomaly = True if anomaly_v2 else False if (mode == 'both') else ''
         model_id = csv_to_modelid.get(base, '')
         source_path = csv_to_sourcepath.get(base, '')
         total += 1
@@ -664,12 +753,12 @@ def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_so
         ])
     return kept, total
 
-def write_overlay_csv(csv_out, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_ratio):
+def write_overlay_csv(csv_out, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols, anomaly_ratio):
     os.makedirs(os.path.dirname(csv_out), exist_ok=True)
     with open(csv_out, 'w', newline='', encoding='utf-8') as fcsv:
         writer = csv.writer(fcsv)
         writer.writerow(['resource', 'basename', 'modelId', 'source_path', 'mode', 'v1_cols', 'v2_cols', 'cols_equal', 'cols_diff', 'v1_rows', 'v2_rows', 'rows_equal', 'rows_diff', 'anomaly'])
-        kept, total = write_overlay_rows(writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_ratio)
+        kept, total = write_overlay_rows(writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols, anomaly_ratio)
 
     print(f"Saved unequal items to {csv_out} ({kept}/{total}).")
 ### updated ###
@@ -682,9 +771,9 @@ def main():
     ap.add_argument("--workers", type=int, default=min(32, (os.cpu_count() or 4) * 2), help="Max worker threads for parallel file processing")
     ap.add_argument("--top", type=int, default=0, help="Print top-N examples where rows >> columns (by ratio)")
     ap.add_argument("--csv-out", default="data/analysis/v1v2_overlay.csv", help="CSV with per-basename stats, equality diffs, and anomaly flag")
-    ap.add_argument("--anomaly-ratio", type=float, default=100.0, help="Rows/cols ratio threshold to flag anomalies")
+    ap.add_argument("--anomaly-ratio", type=float, default=2.0, help="Rows/cols ratio threshold to flag anomalies")
     ap.add_argument("--anomaly-min-rows", type=int, default=1000, help="Minimum rows to consider when flagging anomalies")
-    ap.add_argument("--include-missing", action="store_true", help="Include V1 basenames even if missing in V2 (do not skip)")
+    ap.add_argument("--anomaly-min-cols", type=int, default=500, help="Minimum columns to consider when flagging anomalies")
     args = ap.parse_args()
 
     # Run all resources and aggregate
@@ -699,17 +788,17 @@ def main():
         per_summary = []
         for res in resources:
             v1_dir, v2_dir = resolve_resource_dirs(res)
-            v1_files, v2_file_map, v1_file_map, basenames = prepare_file_maps(v1_dir, v2_dir, args.recursive, args.include_missing)
+            v1_files, v2_file_map, v1_file_map, basenames = prepare_file_maps(v1_dir, v2_dir, args.recursive)
             if not basenames:
                 print(f"[WARN] No basenames for resource {res}; skipping")
                 continue
             csv_to_modelid, csv_to_sourcepath = build_resource_mappings(res)
             print(f"=== {res}: qc_anomaly summary ===")
-            print_overlap_summary(v1_file_map, v2_file_map, args.include_missing)
+            print_overlap_summary(v1_file_map, v2_file_map)
             results_rows, csv_rows, v1_orig, v1_trans, v2_orig, v2_trans = process_basenames(
-                basenames, v1_file_map, v2_file_map, args.workers, args.include_missing
+                basenames, v1_file_map, v2_file_map, args.workers
             )
-            kept, total = write_overlay_rows(writer, res, csv_rows, csv_to_modelid, csv_to_sourcepath, args.anomaly_min_rows, args.anomaly_ratio)
+            kept, total = write_overlay_rows(writer, res, csv_rows, csv_to_modelid, csv_to_sourcepath, args.anomaly_min_rows, args.anomaly_min_cols, args.anomaly_ratio)
             # Count mode categories and equal/changed
             mode_counts = {"both": 0, "v1_only": 0, "v2_only": 0}
             changed = 0

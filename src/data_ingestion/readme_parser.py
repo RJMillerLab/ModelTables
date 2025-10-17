@@ -183,7 +183,7 @@ class MarkdownHandler:
         
         try:
             # Parse the markdown table first
-            df = pd.read_csv(StringIO(standardized_markdown), sep="|", engine='python')
+            df = pd.read_csv(StringIO(standardized_markdown), sep="|", engine='python', keep_default_na=False, na_filter=False)
             
             # Check if this is a Label Scheme table (Component + Labels columns)
             is_label_scheme = False
@@ -234,10 +234,15 @@ class MarkdownHandler:
                 # Process as performance table (keep as-is)
                 result_df = df
             
-            # Optionally remove empty columns
-            if not preserve_empty_cols:
-                result_df = result_df.dropna(axis=1, how="all")
-            
+            # Use our new cleaning logic for consistency
+            from src.utils import clean_dataframe_for_analysis
+            result_df = clean_dataframe_for_analysis(
+                result_df, 
+                drop_empty_rows=True, 
+                drop_empty_cols=not preserve_empty_cols, 
+                preserve_empty_cells=True
+            )
+
             # Check if the DataFrame is empty or has no data rows (only headers)
             if result_df.empty or len(result_df) == 0:
                 if verbose:
@@ -245,7 +250,7 @@ class MarkdownHandler:
                 return None
             
             # Save the processed data
-            result_df.to_csv(output_path, index=False, encoding="utf-8")
+            result_df.to_csv(output_path, index=False, encoding="utf-8", na_rep='')
             return output_path
             
         except Exception as e:

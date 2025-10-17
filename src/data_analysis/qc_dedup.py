@@ -156,6 +156,11 @@ def qc_csv_file(file_path, resource, allow_one_row=True, use_v2=False):
         # Use v2 version if requested and available
         actual_csv_file = find_v2_csv_path(file_path) if use_v2 else file_path
         df = pd.read_csv(actual_csv_file, dtype=str, keep_default_na=False)
+        # Normalize whitespace-only cells and drop fully empty rows on read
+        try:
+            df = df.replace(r'^\s*$', pd.NA, regex=True).dropna(axis=0, how='all')
+        except Exception:
+            pass
     except Exception as e:
         print(f"[QC] Error reading {file_path}: {e}")
         backup_and_remove(file_path, resource)

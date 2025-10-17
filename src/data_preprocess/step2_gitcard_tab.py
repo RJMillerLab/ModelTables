@@ -48,13 +48,15 @@ def detect_and_extract_markdown_tables(content: str):
     if not isinstance(content, str):
         return (False, [])
     
-    # Enhanced pattern that handles indentation and various table formats
+    # Enhanced pattern that handles indentation and various table formats (GitHub-Flavored Markdown)
     lines = content.split('\n')
     tables = []
     current_table = []
     in_table = False
+    seen_non_sep_row = False  # ensure we have at least one non-separator row to avoid header-only captures
     
     for line in lines:
+        raw_line = line
         line = line.strip()
         if not line:
             if in_table and current_table:
@@ -62,12 +64,20 @@ def detect_and_extract_markdown_tables(content: str):
                 tables.append('\n'.join(current_table))
                 current_table = []
                 in_table = False
+                seen_non_sep_row = False
             continue
             
-        # Check if line looks like a table row (starts and ends with |)
-        if line.startswith('|') and line.endswith('|'):
+        # Consider lines that either:
+        # - start and end with '|'
+        # - contain '|' and we can normalize by adding missing leading/trailing pipes
+        is_pipe_row = ('|' in line)
+        starts_with_pipe = line.startswith('|')
+        ends_with_pipe = line.endswith('|')
+
+        if starts_with_pipe and ends_with_pipe:
             if not in_table:
                 in_table = True
+                seen_non_sep_row = False
             
             # Handle lines with double pipes (||) - split them into separate rows
             if '||' in line:
@@ -88,6 +98,32 @@ def detect_and_extract_markdown_tables(content: str):
                         current_table.append('|' + part + '|')
             else:
                 current_table.append(line)
+                # Track if this is a non-separator data row
+                inner = line[1:-1]
+                cells = [c.strip() for c in inner.split('|')]
+                if not re.fullmatch(r'[\s:\-\|]*', ''.join(cells)):
+                    seen_non_sep_row = True
+        elif is_pipe_row:
+            # Normalize rows that have pipes but missing borders
+            normalized = line
+            if not starts_with_pipe:
+                normalized = '|' + normalized
+            if not normalized.endswith('|'):
+                normalized = normalized + '|'
+
+            if not in_table:
+                in_table = True
+                seen_non_sep_row = False
+
+            # Accept the normalized row
+            current_table.append(normalized)
+
+            # Mark if non-separator
+            inner = normalized[1:-1]
+            cells = [c.strip() for c in inner.split('|')]
+            if not re.fullmatch(r'[\s:\-\|]*', ''.join(cells)):
+                seen_non_sep_row = True
+
         elif in_table:
             # Check if this is a separator line (contains |, -, :, spaces only)
             if re.match(r'^[\|\-\s:]+$', line):
@@ -95,16 +131,32 @@ def detect_and_extract_markdown_tables(content: str):
             else:
                 # End of table
                 if current_table:
-                    tables.append('\n'.join(current_table))
+                    # Only keep if at least one non-separator row exists
+                    if seen_non_sep_row:
+                        tables.append('\n'.join(current_table))
                 current_table = []
                 in_table = False
+                seen_non_sep_row = False
     
     # Don't forget the last table if content ends with a table
     if in_table and current_table:
-        tables.append('\n'.join(current_table))
+        if seen_non_sep_row:
+            tables.append('\n'.join(current_table))
     
-    # Filter out tables that are too short (less than 2 rows)
-    valid_tables = [table for table in tables if len([line for line in table.split('\n') if line.strip()]) >= 2]
+    # Filter out tables that are too short (less than header + one data row)
+    valid_tables = []
+    for table in tables:
+        non_empty_lines = [ln for ln in table.split('\n') if ln.strip()]
+        if len(non_empty_lines) < 2:
+            continue
+        # Require presence of a separator row OR at least one data row with multiple cells
+        has_sep = any(re.fullmatch(r'^\|?\s*[:\-\| ]+\|?\s*$', ln.strip()) for ln in non_empty_lines)
+        if not has_sep:
+            # Fallback: treat as table if every line contains at least one pipe (>=2 cells expected)
+            multi_cell = sum(1 for ln in non_empty_lines if ln.count('|') >= 2)
+            if multi_cell < 2:
+                continue
+        valid_tables.append(table)
     
     return (len(valid_tables) > 0, valid_tables)
 ########
