@@ -1,3 +1,5 @@
+pyserini_demo/
+output/
 config.yaml
 depre/
 results/

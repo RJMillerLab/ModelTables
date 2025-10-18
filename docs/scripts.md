@@ -499,3 +499,18 @@ python -m src.data_analysis.hf_models_analysis # get statistics of models in Hug
 ```
 
 
+
+```bash
+# GPT Evaluation
+# 1. Test single prompt
+python -m src.gpt_evaluation.test_single_prompt --mode tables --pairs output/table_pairs_with_content.jsonl --index 0
+python -m src.gpt_evaluation.test_single_prompt --mode models --model-ids google-bert/bert-base-uncased,FacebookAI/roberta-base
+
+# 2. Batch evaluation
+python -m src.gpt_evaluation.batch_evaluation_local --mode tables --pairs output/table_pairs.jsonl --output output/table_results.jsonl
+python -m src.gpt_evaluation.batch_evaluation_local --mode models --pairs output/model_pairs.jsonl --output output/model_results.jsonl
+
+# 3. Analyze results
+python -m src.gpt_evaluation.analyze_results --results output/table_results.jsonl --output output/analysis_tables
+python -m src.gpt_evaluation.analyze_results --results output/model_results.jsonl --output output/analysis_models
+```
