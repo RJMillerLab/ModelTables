@@ -495,6 +495,9 @@ python -m src.data_analysis.get_from --target modelId --source hugging_table_lis
 # step by step filtering img
 python -m src.data_analysis.card_statistics # get statistics of model cards
 python -m src.data_analysis.hf_models_analysis # get statistics of models in Hugging Face
+# after carefully examining
+python -m src.data_analysis.filtered_gt_visualization
+python -m src.data_analysis.quick_visualization_final
 # TODO: top-10!
 ```
 

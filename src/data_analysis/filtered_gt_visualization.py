@@ -214,11 +214,11 @@ def create_step_by_step_visualization(filtered_gt_tables):
     # Create visualization
     categories = [
         'All Models',
-        'Non-empty\\nCards', 
-        'Models with\\nHugging Tables',
-        'Models with Hugging\\n+ Paper Citations',
-        'Models with Hugging+Enhanced\\n+ Paper Citations\\n(GT Tables Only)',
-        'Models Contributing\\nto GT (Filtered)'
+        'Non-empty Model Cards', 
+        'With Hugging Tables',
+        'Hugging Tables + Papers',
+        'All Tables + Papers (GT Only)',
+        'Contributing to GT'
     ]
     
     counts = [
@@ -230,16 +230,16 @@ def create_step_by_step_visualization(filtered_gt_tables):
         gt_contributing
     ]
     
-    # Deep to light blue color scheme
-    colors = ['#1e3a8a', '#1e40af', '#2563eb', '#3b82f6', '#60a5fa', '#dbeafe']
+    # Deep purple to light purple color scheme
+    colors = ['#4a148c', '#6a1b9a', '#8e24aa', '#ab47bc', '#ce93d8', '#e1bee7']
     
     fig, ax = plt.subplots(1, 1, figsize=(14, 8))
     
     bars = ax.bar(range(len(categories)), counts, color=colors, alpha=0.8)
-    ax.set_title('Step-by-Step Model Filtering Process\\n(Raw Data + Step3 Dedup Matching)', fontsize=16, fontweight='bold')
-    ax.set_ylabel('Number of Models', fontsize=14)
+    ax.set_title('Model Filtering Process for Ground Truth Contribution', fontsize=16, fontweight='bold', pad=20)
+    ax.set_ylabel('Number of Models (Log Scale)', fontsize=14, fontweight='bold')
     ax.set_xticks(range(len(categories)))
-    ax.set_xticklabels(categories, rotation=45, ha='right')
+    ax.set_xticklabels(categories, rotation=0, ha='center')  # No rotation!
     ax.set_yscale('log')
     
     # Add value labels on bars
@@ -258,7 +258,7 @@ def create_step_by_step_visualization(filtered_gt_tables):
     print("• step_by_step_filtering_filtered.png")
 
 def create_table_frequency_distribution(filtered_gt_table_frequency):
-    """Create table frequency distribution with average line."""
+    """Create table frequency distribution with rank on X-axis and frequency on Y-axis."""
     print("\nCreating table frequency distribution...")
     
     all_frequencies = list(filtered_gt_table_frequency.values())
@@ -276,34 +276,46 @@ def create_table_frequency_distribution(filtered_gt_table_frequency):
     for i, (table, freq) in enumerate(top10_tables):
         print(f"{i+1:2d}. {table} - {freq:,} times")
     
-    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+    # Create visualization
+    fig, ax = plt.subplots(1, 1, figsize=(14, 8))
     
-    # Create histogram-like bars for all frequencies
-    bars = ax.bar(range(len(all_frequencies)), all_frequencies, color='lightcoral', alpha=0.7)
-    ax.set_title('GT Table Frequency Distribution\\n(Filtered, All Tables)', fontsize=16, fontweight='bold')
-    ax.set_ylabel('Frequency (Log Scale)', fontsize=14)
-    ax.set_xlabel('Table Rank', fontsize=14)
+    # Create bars with light orange color
+    bars = ax.bar(range(len(all_frequencies)), all_frequencies, color='#ffb74d', alpha=0.8, edgecolor='none')
+    
+    # Set Y-axis to log scale, X-axis linear
     ax.set_yscale('log')
+    
+    # Labels and title
+    ax.set_xlabel('Table Rank', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Frequency (Log Scale)', fontsize=14, fontweight='bold')
+    ax.set_title('Table Frequency Distribution (Filtered GT Tables)', fontsize=16, fontweight='bold')
     
     # Add average line
     ax.axhline(y=avg_frequency, color='red', linestyle='--', linewidth=2, alpha=0.8)
-    ax.text(len(all_frequencies)*0.7, avg_frequency*1.5, f'Average: {avg_frequency:.1f}', 
+    ax.text(len(all_frequencies)*0.6, avg_frequency*2, f'Average: {avg_frequency:.1f}', 
              fontsize=12, color='red', fontweight='bold',
-             bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+             bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.9))
     
     # Add statistics text
-    ax.text(0.02, 0.98, f'Total Tables: {len(all_frequencies):,}\\nMax Frequency: {max(all_frequencies):,}\\nMin Frequency: {min(all_frequencies):,}', 
+    stats_text = f'Total Tables: {len(all_frequencies):,}\\nMax Frequency: {max(all_frequencies):,}\\nMin Frequency: {min(all_frequencies):,}'
+    ax.text(0.02, 0.98, stats_text, 
              transform=ax.transAxes, fontsize=10, verticalalignment='top',
-             bbox=dict(boxstyle='round,pad=0.3', facecolor='lightblue', alpha=0.8))
+             bbox=dict(boxstyle='round,pad=0.3', facecolor='lightblue', alpha=0.9))
+    
+    # Add grid
+    ax.grid(True, alpha=0.3)
+    ax.set_facecolor('#f8f9fa')
     
     plt.tight_layout()
-    plt.savefig('table_frequency_distribution_filtered.pdf', dpi=300, bbox_inches='tight')
-    plt.savefig('table_frequency_distribution_filtered.png', dpi=300, bbox_inches='tight')
+    plt.savefig('table_frequency_distribution_final.pdf', dpi=300, bbox_inches='tight')
+    plt.savefig('table_frequency_distribution_final.png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    print("Table frequency distribution saved:")
-    print("• table_frequency_distribution_filtered.pdf")
-    print("• table_frequency_distribution_filtered.png")
+    print("Final table frequency distribution saved:")
+    print("• table_frequency_distribution_final.pdf")
+    print("• table_frequency_distribution_final.png")
+    
+    return all_frequencies, avg_frequency
 
 def main():
     """Main function to run the filtered GT analysis and visualization."""
@@ -317,7 +329,35 @@ def main():
     
     # Create visualizations
     create_step_by_step_visualization(filtered_gt_tables)
-    create_table_frequency_distribution(filtered_gt_table_frequency)
+    all_frequencies, avg_frequency = create_table_frequency_distribution(filtered_gt_table_frequency)
+    
+    # Save data for quick visualization
+    print("\nSaving data for quick visualization...")
+    
+    # Save step-by-step data
+    step_data = {
+        'categories': ['All Models', 'Non-empty Model Cards', 'With Hugging Tables', 
+                      'Hugging Tables + Papers', 'All Tables + Papers (GT Only)', 'Contributing to GT'],
+        'counts': [1108759, 749188, 130948, 34163, 67332, 67332],
+        'colors': ['#4a148c', '#6a1b9a', '#8e24aa', '#ab47bc', '#ce93d8', '#e1bee7']
+    }
+    
+    with open('step_by_step_data.json', 'w') as f:
+        json.dump(step_data, f, indent=2)
+    
+    # Save table frequency data
+    freq_data = {
+        'all_frequencies': all_frequencies,
+        'avg_frequency': avg_frequency,
+        'total_tables': len(all_frequencies),
+        'max_frequency': max(all_frequencies),
+        'min_frequency': min(all_frequencies),
+        'filtered_gt_tables_count': len(filtered_gt_tables),
+        'models_with_gt_tables': len(models_with_filtered_gt_tables)
+    }
+    
+    with open('table_frequency_data.json', 'w') as f:
+        json.dump(freq_data, f, indent=2)
     
     # Print summary statistics
     print(f"\n=== Summary Statistics ===")
@@ -325,8 +365,12 @@ def main():
     print(f"Generic tables removed: 12")
     print(f"Average tables per model: {sum(filtered_gt_table_frequency.values()) / len(models_with_filtered_gt_tables):.1f}")
     
+    print(f"\n=== Data Saved ===")
+    print("• step_by_step_data.json")
+    print("• table_frequency_data.json")
+    
     print(f"\n=== Analysis Complete ===")
-    print("All visualizations have been saved successfully!")
+    print("All visualizations and data have been saved successfully!")
 
 if __name__ == "__main__":
     main()
