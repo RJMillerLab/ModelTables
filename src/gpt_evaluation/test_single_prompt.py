@@ -39,7 +39,7 @@ def build_table_prompt(table_a_raw: str, table_b_raw: str) -> str:
 Your task is to determine whether two tables are related, together with picking relatedness types and reasons from multiple choices.
 
 You will be given two tables (A and B) in raw CSV format.
-Please evaluate their relationship and answer the following questions:
+Please evaluate their relationship from both structural and semantic perspectives and answer the following questions:
 
 **Question 1 (Single Selection):** Are these two tables related? Choose ONE:
 - YES, they are related
@@ -106,10 +106,16 @@ Based on your answer above, please provide additional details:
 {table_b_raw}
 
 **Instructions for response:**
-- For closeness and confidence, return the **bolded keyword** (e.g., "Loosely Related", "Very Confident")
-- For multiple choice questions, return the exact keywords (e.g., ["JOINABLE", "KEYWORDS"])
-- If you select "Other", provide the specific reason in the other_reason field
-- Use YAML format for your response
+- Use standard YAML format: keyword: value
+- For lists, use: keyword: [item1, item2] or keyword: [] for empty
+- For single values, use: keyword: value (no quotes unless needed)
+- Return EXACT KEYWORDS ONLY for all selections
+- For closeness and confidence, return the exact keyword without **bold** markers
+- If you select "Other", provide the specific reason in other_reasons field
+- Always include ALL fields in YAML
+- YAML only; no extra text or markdown formatting
+
+**CRITICAL: Use clean YAML format with keyword: value pairs, no **bold** or special formatting.**
 
 **Please respond with a YAML format containing your answers:**
 related: [YES/NO/UNSURE]
@@ -131,7 +137,7 @@ def build_model_prompt(card_a_raw: str, card_b_raw: str) -> str:
 Your task is to determine whether two model cards (A and B) describe related models. Make a decision and then select relation types at three levels (Model / Paper / Dataset). Use exact tokens and cite concrete evidence.
 
 You will be given two model cards in raw text format.
-Please evaluate their relationship and answer the following questions:
+Please evaluate their relationship from both structural and semantic perspectives and answer the following questions:
 
 **Question 1 (Single Selection):** Are these two models related? Choose ONE:
 - YES, they are related
@@ -191,11 +197,16 @@ Based on your answer above, please provide additional details:
 {card_b_raw}
 
 **Instructions for response:**
-- Return exact tokens for all selections (e.g., ["SAME_ARCH_FAMILY", "OTHER"]).
-- For closeness and confidence, return the **bolded keyword** (e.g., "Closely Related", "Very Confident").
-- If you select "OTHER" in any list, provide the specific reason in other_reasons.
-- Always include ALL fields in YAML, even if empty lists [].
-- YAML only; no extra text.
+- Use standard YAML format: keyword: value
+- For lists, use: keyword: [item1, item2] or keyword: [] for empty
+- For single values, use: keyword: value (no quotes unless needed)
+- Return EXACT KEYWORDS ONLY for all selections
+- For closeness and confidence, return the exact keyword without **bold** markers
+- If you select "OTHER" in any list, provide the specific reason in other_reasons
+- Always include ALL fields in YAML
+- YAML only; no extra text or markdown formatting
+
+**CRITICAL: Use clean YAML format with keyword: value pairs, no **bold** or special formatting.**
 
 **Please respond with a YAML format containing your answers:**
 related: [YES/NO/UNSURE]
@@ -258,6 +269,22 @@ def test_single_table_pair(pairs_file: str, pair_index: int = 0, llm_model: str 
 		response, _ = LLM_response(prompt, llm_model=llm_model, history=[], kwargs={}, max_tokens=1000)
 		print(f"Raw response: {response}")
 		yaml_response = parse_llm_yaml(response)
+		
+		# Save to logs directory
+		try:
+			os.makedirs("logs", exist_ok=True)
+			log_name = f"logs/table_single_{pair['csv_a'].replace('/', '_')}__{pair['csv_b'].replace('/', '_')}.yaml"
+			with open(log_name, 'w', encoding='utf-8') as f:
+				try:
+					import yaml as _yaml
+					f.write(_yaml.dump(yaml_response, default_flow_style=False))
+				except Exception:
+					f.write(str(yaml_response))
+			print(f"Saved parsed output to {log_name}")
+		except Exception as e:
+			print(f"Failed to write logs: {e}")
+		
+		# Print parsed
 		try:
 			import yaml as _yaml
 			print(f"\n=== PARSED YAML RESPONSE ===")
