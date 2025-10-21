@@ -22,6 +22,11 @@ INTEGRATION_FILE = "data/processed/final_integration_with_paths.parquet"
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 VALID_TITLE_PARQUET = "data/processed/all_title_list_valid.parquet"
+# ====== Skip generic CSV sets ======
+GENERIC_TABLE_PATTERNS = [
+    "1910.09700_table",
+    "204823751_table"
+]
 
 # V2 mode configuration
 V2_MODE = False  # Set to True to use v2 versions of CSV files
@@ -33,7 +38,8 @@ benchmark_data = [
     ["TUS Small", 1530, 14810, 4466, 1.00],
     ["TUS Large", 5043, 54923, 1915, 1.50],
     ["SANTOS Large", 11090, 123477, 7675, 11.00],
-    ["WDC", 50000000, 250000000, 14, 500.00]
+    ["WDC", 50000000, 250000000, 14, 500.00],
+    #["GitTable", 1000000, 12, 142, 10.00]
 ]
 
 RESOURCES = {
@@ -176,6 +182,14 @@ def compute_resource_stats(df, resource):
     col = RESOURCES[resource][0]
     paths = df[col].explode()
     valid_paths = paths[paths.apply(lambda x: isinstance(x, str) and os.path.exists(x))]
+    # Filter out generic / too-general tables
+    def is_generic_table(path):
+        filename = os.path.basename(path)
+        return any(pattern in filename for pattern in GENERIC_TABLE_PATTERNS)
+    
+    valid_paths = valid_paths[~valid_paths.apply(is_generic_table)]
+    print(f"Filtered generic tables for {resource}: removed {len(paths) - len(valid_paths)} files.")
+    
     unique_paths = valid_paths.unique().tolist()
 
     dup_results = Parallel(n_jobs=-1)(
