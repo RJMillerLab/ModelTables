@@ -156,7 +156,44 @@ def detect_and_extract_markdown_tables(content: str):
             multi_cell = sum(1 for ln in non_empty_lines if ln.count('|') >= 2)
             if multi_cell < 2:
                 continue
-        valid_tables.append(table)
+        
+        # Filter out badge/decoration tables (common in READMEs)
+        # Characteristics: empty or minimal headers, mostly badges/links, very few data rows
+        is_badge_table = False
+        
+        # Identify separator lines more precisely (must contain at least one dash)
+        separator_lines = [ln for ln in non_empty_lines if re.search(r'-', ln) and re.fullmatch(r'^\|?\s*[:|\-\s]+\|?\s*$', ln.strip())]
+        data_lines = [ln for ln in non_empty_lines if ln not in separator_lines]
+        
+        if len(data_lines) <= 2:  # Only 1-2 data rows (including header)
+            # Check if first row (header) is mostly empty
+            if data_lines:
+                header = data_lines[0]
+                # Parse cells properly (split by | and remove leading/trailing empty strings)
+                header_parts = header.split('|')
+                # Remove leading/trailing empty parts from pipe-delimited format
+                if len(header_parts) > 0 and not header_parts[0].strip():
+                    header_parts = header_parts[1:]
+                if len(header_parts) > 0 and not header_parts[-1].strip():
+                    header_parts = header_parts[:-1]
+                header_cells = [c.strip() for c in header_parts]
+                
+                # Calculate empty ratio
+                if len(header_cells) > 0:
+                    empty_count = sum(1 for c in header_cells if not c or c == '')
+                    empty_header_ratio = empty_count / len(header_cells)
+                    
+                    # Check if content is mostly badges/images
+                    all_text = ' '.join(data_lines)
+                    badge_indicators = all_text.count('img.shields.io') + all_text.count('![') + all_text.count('badge')
+                    has_many_badges = badge_indicators >= 3  # At least 3 badge indicators
+                    
+                    # Mark as badge table if header is mostly empty AND has many badges
+                    if empty_header_ratio > 0.5 and has_many_badges:
+                        is_badge_table = True
+        
+        if not is_badge_table:
+            valid_tables.append(table)
     
     return (len(valid_tables) > 0, valid_tables)
 ########
@@ -337,14 +374,28 @@ def main():
         if not tables:
             hash_to_csv_map[hval] = []
             continue
+        # Use sequential numbering (only count successfully saved tables)
+        # This ensures consistency with v1 and avoids gaps in table numbers
+        table_counter = 0
         for j, table_content in enumerate(tables, start=1):
-            out_csv_path = generate_csv_path_for_dedup(hval, j, dedup_folder_hugging)  ########
-            if os.path.lexists(out_csv_path):
-                os.remove(out_csv_path)
             table_content = sanitize_markdown_table_separators(table_content)
-            tmp_csv_path = MarkdownHandler.markdown_to_csv(table_content, out_csv_path)
+            # Try to convert to CSV first (using temporary path with original index j)
+            temp_out_path = generate_csv_path_for_dedup(hval, j, dedup_folder_hugging)
+            tmp_csv_path = MarkdownHandler.markdown_to_csv(table_content, temp_out_path)
             if tmp_csv_path:
-                csv_list.append(os.path.abspath(out_csv_path))  ########
+                # Conversion succeeded, now assign sequential number
+                table_counter += 1
+                final_out_path = generate_csv_path_for_dedup(hval, table_counter, dedup_folder_hugging)
+                # Rename if needed (when original index j != sequential counter)
+                if temp_out_path != final_out_path:
+                    if os.path.lexists(final_out_path):
+                        os.remove(final_out_path)
+                    os.rename(temp_out_path, final_out_path)
+                csv_list.append(os.path.abspath(final_out_path))
+            else:
+                # Conversion failed (empty table), clean up if temp file was created
+                if os.path.lexists(temp_out_path):
+                    os.remove(temp_out_path)
         hash_to_csv_map[hval] = csv_list
     hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping_v2.json")  ########
     with open(hugging_map_json_path, 'w', encoding='utf-8') as jf:

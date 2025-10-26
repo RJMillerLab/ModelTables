@@ -39,7 +39,22 @@ def load_soup_and_tables(html_path):
     with open(html_path, 'r', encoding='utf-8') as f:
         html = f.read()
     soup = BeautifulSoup(html, SOUP_PARSER)
-    figures = soup.select('figure.ltx_table')
+    
+    # Find both figure.ltx_table (newer format) and figure.ltx_figure (older format) with tables
+    figures = []
+    
+    # Try newer format first
+    ltx_table_figures = soup.select('figure.ltx_table')
+    if ltx_table_figures:
+        figures.extend(ltx_table_figures)
+    
+    # Also check ltx_figure (older arxiv format)
+    ltx_figure_elements = soup.select('figure.ltx_figure')
+    for fig in ltx_figure_elements:
+        # Only include if it contains a table (and not already added)
+        if fig.find('table') and fig not in figures:
+            figures.append(fig)
+    
     return soup, figures
 
 
@@ -193,6 +208,12 @@ def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tabl
         table = figure.select_one('table')
         if not table:
             continue
+        
+        # Skip equation tables (these are math formulas, not data tables)
+        table_classes = table.get('class', [])
+        if 'ltx_equation' in table_classes or 'ltx_eqn_table' in table_classes:
+            continue
+        
         table_data = parse_table_with_nested_structure(table, preserve_bold)
         df = create_structured_dataframe(table_data)
         df = clean_final_dataframe(df)
