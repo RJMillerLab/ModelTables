@@ -221,6 +221,31 @@ def build_hugging_modelid_map():
                                 mapping[base] = mid
                     if mapping:
                         break
+        
+        # Also load v2 mapping (for v2_only files)
+        import pandas as pd
+        import json
+        v2_mapping_json = "data/processed/hugging_deduped_mapping_v2.json"
+        step2_parquet = "data/processed/modelcard_step2.parquet"
+        
+        if os.path.exists(v2_mapping_json) and os.path.exists(step2_parquet):
+            # Load hash -> csv_paths mapping
+            with open(v2_mapping_json, 'r') as f:
+                hash_to_csvs = json.load(f)
+            
+            # Load modelId -> readme_hash mapping
+            df_step2 = pd.read_parquet(step2_parquet, columns=['modelId', 'readme_hash'])
+            hash_to_modelid = dict(zip(df_step2['readme_hash'], df_step2['modelId']))
+            
+            # Build csv -> modelId mapping
+            for readme_hash, csv_list in hash_to_csvs.items():
+                model_id = hash_to_modelid.get(readme_hash)
+                if model_id and csv_list:
+                    for csv_path in csv_list:
+                        base = os.path.basename(str(csv_path))
+                        if base and base not in mapping:  # Don't overwrite v1 mapping
+                            mapping[base] = model_id
+            
     except Exception:
         pass
     return mapping
@@ -229,6 +254,7 @@ def build_github_source_map():
     mapping = {}
     try:
         import pandas as pd
+        import json
         map_paths = [
             "data/processed/csv_to_readme_mapping.parquet",
             "data/processed/processed_paths.parquet",
@@ -269,6 +295,23 @@ def build_github_source_map():
                         mapping[base] = rp
             if len(mapping) > 0:
                 break
+        
+        # Also load v2 mapping (md_to_csv_mapping.json in deduped_github_csvs_v2)
+        v2_mapping_json = "data/processed/deduped_github_csvs_v2/md_to_csv_mapping.json"
+        if os.path.exists(v2_mapping_json):
+            with open(v2_mapping_json, 'r') as f:
+                md_to_csv = json.load(f)
+            # md_to_csv maps: md_basename -> [list of csv_basenames]
+            # We reverse it to csv_basename -> md_basename
+            for md_file, csv_list in md_to_csv.items():
+                if not csv_list or csv_list is None:
+                    continue
+                readme_path = f"data/downloaded_github_readmes/{md_file}.md"
+                if isinstance(csv_list, list):
+                    for csv_basename in csv_list:
+                        if csv_basename and csv_basename not in mapping:
+                            mapping[csv_basename] = readme_path
+        
     except Exception:
         pass
     return mapping
@@ -318,6 +361,27 @@ def build_arxiv_source_map():
                             mapping[base] = hpv
             if len(mapping) > 0:
                 break
+        
+        # Also load v2 mapping (html_parsing_results_v2.parquet)
+        v2_parquet = "data/processed/html_parsing_results_v2.parquet"
+        if os.path.exists(v2_parquet):
+            df_v2 = pd.read_parquet(v2_parquet)
+            if "csv_paths" in df_v2.columns and "html_path" in df_v2.columns:
+                for _, row in df_v2.iterrows():
+                    html_path = row.get("html_path")
+                    csv_paths = row.get("csv_paths")
+                    if csv_paths is None or not isinstance(html_path, str):
+                        continue
+                    if not isinstance(csv_paths, (list, tuple)):
+                        csv_paths = [csv_paths]
+                    for csv_path in csv_paths:
+                        try:
+                            base = os.path.basename(str(csv_path))
+                        except Exception:
+                            continue
+                        if base and base not in mapping:  # Don't overwrite v1 mapping
+                            mapping[base] = html_path
+        
     except Exception:
         pass
     return mapping

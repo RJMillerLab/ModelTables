@@ -15,10 +15,31 @@ from tqdm import tqdm
 import numpy as np
 from shutil import copytree
 import shutil
+from bs4 import BeautifulSoup
 from src.data_ingestion.readme_parser import MarkdownHandler
 from src.utils import load_config, to_parquet
 
 tqdm.pandas()
+
+# Compile regex patterns once for performance
+SEPARATOR_PATTERN = re.compile(r'^\|?\s*[:\-\| ]+\|?\s*$')
+PIPE_SEP_PATTERN = re.compile(r'^[\|\-\s:]+$')
+BADGE_INDICATOR_PATTERN = re.compile(r'img\.shields\.io|!\[|badge', re.IGNORECASE)
+PIPE_NORMALIZE_PATTERN = re.compile(r'\s*\|\s*')
+SPACE_NORMALIZE_PATTERN = re.compile(r'\s+')
+
+def normalize_table_for_dedup(table_str):
+    """Normalize table content for duplicate detection (optimized version)."""
+    lines = [ln.strip() for ln in table_str.split('\n') if ln.strip()]
+    # Remove separators (use precompiled pattern)
+    data = [ln for ln in lines if not SEPARATOR_PATTERN.fullmatch(ln.strip())]
+    # Normalize pipes and spaces
+    normalized = []
+    for ln in data:
+        ln = PIPE_NORMALIZE_PATTERN.sub('|', ln)
+        ln = SPACE_NORMALIZE_PATTERN.sub(' ', ln)
+        normalized.append(ln.strip())
+    return '||'.join(normalized)
 
 def compute_file_hash(file_path):
     """
@@ -42,15 +63,71 @@ def setup_logging(log_filename):
 def detect_and_extract_markdown_tables(content: str):
     """
     Detect and extract all Markdown tables (supporting multi-line) from the given text.
+    Also extracts HTML tables and converts them to markdown format.
     Returns a tuple (bool, list), where the boolean indicates whether at least one table was found,
     and the list contains all matched table strings; if no match is found, returns (False, []).
     """
     if not isinstance(content, str):
         return (False, [])
     
+    # Step 1: Extract and convert HTML tables first, then remove them from content
+    # This prevents markdown extraction from picking up partial HTML content
+    html_tables_extracted = []
+    content_without_html_tables = content
+    
+    # Quick pre-check: only parse HTML if '<table' exists (significant speedup)
+    if '<table' not in content:
+        # No HTML tables, skip BeautifulSoup parsing
+        pass
+    else:
+        try:
+            # Use lxml parser for faster parsing (fallback to html.parser if lxml not available)
+            try:
+                soup = BeautifulSoup(content, 'lxml')
+            except:
+                soup = BeautifulSoup(content, 'html.parser')
+            html_table_elements = soup.find_all('table')
+            
+            for html_table in html_table_elements:
+                # Parse HTML table to markdown format
+                rows = html_table.find_all('tr')
+                if not rows or len(rows) < 2:  # Need at least header + 1 data row
+                    continue
+                
+                markdown_rows = []
+                for row in rows:
+                    cells = row.find_all(['td', 'th'])
+                    # Get text from each cell
+                    cell_texts = []
+                    for cell in cells:
+                        text = cell.get_text(strip=True)
+                        # Handle rowspan/colspan by repeating text
+                        colspan = int(cell.get('colspan', 1))
+                        cell_texts.extend([text] * colspan)
+                    
+                    # Convert to markdown row format
+                    if cell_texts:
+                        markdown_row = '| ' + ' | '.join(cell_texts) + ' |'
+                        markdown_rows.append(markdown_row)
+                
+                # Add separator after header (first row)
+                if len(markdown_rows) >= 2:
+                    separator = '|' + '|'.join(['---'] * len(markdown_rows[0].split('|')[1:-1])) + '|'
+                    markdown_table = markdown_rows[0] + '\n' + separator + '\n' + '\n'.join(markdown_rows[1:])
+                    html_tables_extracted.append(markdown_table)
+                
+                # Remove this HTML table from content to avoid confusion in markdown extraction
+                html_str = str(html_table)
+                content_without_html_tables = content_without_html_tables.replace(html_str, '')
+        except Exception:
+            # If HTML parsing fails, just use original content
+            pass
+    
+    # Step 2: Extract markdown tables from the cleaned content (without HTML tables)
+    
     # Enhanced pattern that handles indentation and various table formats (GitHub-Flavored Markdown)
-    lines = content.split('\n')
-    tables = []
+    lines = content_without_html_tables.split('\n')
+    markdown_tables = []
     current_table = []
     in_table = False
     seen_non_sep_row = False  # ensure we have at least one non-separator row to avoid header-only captures
@@ -61,7 +138,7 @@ def detect_and_extract_markdown_tables(content: str):
         if not line:
             if in_table and current_table:
                 # End of table
-                tables.append('\n'.join(current_table))
+                markdown_tables.append('\n'.join(current_table))
                 current_table = []
                 in_table = False
                 seen_non_sep_row = False
@@ -126,14 +203,14 @@ def detect_and_extract_markdown_tables(content: str):
 
         elif in_table:
             # Check if this is a separator line (contains |, -, :, spaces only)
-            if re.match(r'^[\|\-\s:]+$', line):
+            if PIPE_SEP_PATTERN.match(line):
                 current_table.append(line)
             else:
                 # End of table
                 if current_table:
                     # Only keep if at least one non-separator row exists
                     if seen_non_sep_row:
-                        tables.append('\n'.join(current_table))
+                        markdown_tables.append('\n'.join(current_table))
                 current_table = []
                 in_table = False
                 seen_non_sep_row = False
@@ -141,16 +218,20 @@ def detect_and_extract_markdown_tables(content: str):
     # Don't forget the last table if content ends with a table
     if in_table and current_table:
         if seen_non_sep_row:
-            tables.append('\n'.join(current_table))
+            markdown_tables.append('\n'.join(current_table))
+    
+    # Step 3: Combine HTML tables and markdown tables, then filter
+    # HTML tables go first (they were extracted first)
+    all_tables = html_tables_extracted + markdown_tables
     
     # Filter out tables that are too short (less than header + one data row)
     valid_tables = []
-    for table in tables:
+    for table in all_tables:
         non_empty_lines = [ln for ln in table.split('\n') if ln.strip()]
         if len(non_empty_lines) < 2:
             continue
         # Require presence of a separator row OR at least one data row with multiple cells
-        has_sep = any(re.fullmatch(r'^\|?\s*[:\-\| ]+\|?\s*$', ln.strip()) for ln in non_empty_lines)
+        has_sep = any(SEPARATOR_PATTERN.fullmatch(ln.strip()) for ln in non_empty_lines)
         if not has_sep:
             # Fallback: treat as table if every line contains at least one pipe (>=2 cells expected)
             multi_cell = sum(1 for ln in non_empty_lines if ln.count('|') >= 2)
@@ -162,7 +243,7 @@ def detect_and_extract_markdown_tables(content: str):
         is_badge_table = False
         
         # Identify separator lines more precisely (must contain at least one dash)
-        separator_lines = [ln for ln in non_empty_lines if re.search(r'-', ln) and re.fullmatch(r'^\|?\s*[:|\-\s]+\|?\s*$', ln.strip())]
+        separator_lines = [ln for ln in non_empty_lines if '-' in ln and SEPARATOR_PATTERN.fullmatch(ln.strip())]
         data_lines = [ln for ln in non_empty_lines if ln not in separator_lines]
         
         if len(data_lines) <= 2:  # Only 1-2 data rows (including header)
@@ -183,9 +264,9 @@ def detect_and_extract_markdown_tables(content: str):
                     empty_count = sum(1 for c in header_cells if not c or c == '')
                     empty_header_ratio = empty_count / len(header_cells)
                     
-                    # Check if content is mostly badges/images
+                    # Check if content is mostly badges/images (use precompiled regex)
                     all_text = ' '.join(data_lines)
-                    badge_indicators = all_text.count('img.shields.io') + all_text.count('![') + all_text.count('badge')
+                    badge_indicators = len(BADGE_INDICATOR_PATTERN.findall(all_text))
                     has_many_badges = badge_indicators >= 3  # At least 3 badge indicators
                     
                     # Mark as badge table if header is mostly empty AND has many badges
@@ -366,37 +447,81 @@ def main():
     print('Start creating dictionary for {readme_path: list_of_tables}...')
     dedup_folder_hugging = os.path.join(processed_base_path, "deduped_hugging_csvs_v2")  ########
     os.makedirs(dedup_folder_hugging, exist_ok=True)  ########
-    hash_to_csv_map = {}  # readme_hash -> [list_of_csv_paths (absolute paths)]  ########
-    for idx, row in tqdm(df_unique.iterrows(), total=len(df_unique), desc="Storing deduped CSVs"):
-        hval = row['readme_hash']
-        tables = row['extracted_tables_modelcard']
+    
+    # Define processing function for parallel execution at hash level
+    def process_and_save_tables_for_hash(row_tuple, output_folder):
+        """Process tables for one readme_hash and save CSVs. Returns (hash, csv_list)."""
+        idx, row_series = row_tuple
+        hval = row_series['readme_hash']
+        tables = row_series['extracted_tables_modelcard']
         csv_list = []
+        
         if not tables:
-            hash_to_csv_map[hval] = []
-            continue
-        # Use sequential numbering (only count successfully saved tables)
-        # This ensures consistency with v1 and avoids gaps in table numbers
-        table_counter = 0
-        for j, table_content in enumerate(tables, start=1):
-            table_content = sanitize_markdown_table_separators(table_content)
-            # Try to convert to CSV first (using temporary path with original index j)
+            return (hval, [])
+        
+        # Additional deduplication before saving: remove duplicate tables within same readme
+        # Use the optimized global function
+        seen_signatures = set()
+        unique_tables = []
+        for table_content in tables:
+            sig = normalize_table_for_dedup(table_content)
+            if sig not in seen_signatures:
+                unique_tables.append(table_content)
+                seen_signatures.add(sig)
+        
+        # Step 1: Sanitize all tables first
+        sanitized_tables = [sanitize_markdown_table_separators(t) for t in unique_tables]
+        
+        # Step 2: Try converting all tables and track success/failure
+        conversion_results = []
+        for j, table_content in enumerate(sanitized_tables, start=1):
             temp_out_path = generate_csv_path_for_dedup(hval, j, dedup_folder_hugging)
-            tmp_csv_path = MarkdownHandler.markdown_to_csv(table_content, temp_out_path)
-            if tmp_csv_path:
-                # Conversion succeeded, now assign sequential number
+            tmp_csv_path = MarkdownHandler.markdown_to_csv(table_content, temp_out_path, verbose=False)
+            conversion_results.append({
+                'original_index': j,
+                'success': tmp_csv_path is not None,
+                'temp_path': temp_out_path if tmp_csv_path else None
+            })
+        
+        # Step 3: Assign sequential numbers to successful conversions
+        table_counter = 0
+        for result in conversion_results:
+            if result['success']:
                 table_counter += 1
-                final_out_path = generate_csv_path_for_dedup(hval, table_counter, dedup_folder_hugging)
-                # Rename if needed (when original index j != sequential counter)
-                if temp_out_path != final_out_path:
+                result['final_index'] = table_counter
+        
+        # Step 4: Rename files to sequential numbers and collect paths
+        for result in conversion_results:
+            if result['success']:
+                temp_path = result['temp_path']
+                final_index = result['final_index']
+                final_out_path = generate_csv_path_for_dedup(hval, final_index, output_folder)
+                
+                # Rename if needed
+                if temp_path != final_out_path:
                     if os.path.lexists(final_out_path):
                         os.remove(final_out_path)
-                    os.rename(temp_out_path, final_out_path)
+                    os.rename(temp_path, final_out_path)
+                
                 csv_list.append(os.path.abspath(final_out_path))
             else:
-                # Conversion failed (empty table), clean up if temp file was created
-                if os.path.lexists(temp_out_path):
-                    os.remove(temp_out_path)
-        hash_to_csv_map[hval] = csv_list
+                # Clean up failed conversion temp file
+                temp_path = generate_csv_path_for_dedup(hval, result['original_index'], output_folder)
+                if os.path.lexists(temp_path):
+                    os.remove(temp_path)
+        
+        return (hval, csv_list)
+    
+    # Parallel processing at hash level (each hash's tables processed independently)
+    print(f"Processing {len(df_unique)} unique readme hashes in parallel...")
+    results = Parallel(n_jobs=-1)(
+        delayed(process_and_save_tables_for_hash)(row, dedup_folder_hugging)
+        for row in tqdm(df_unique.iterrows(), total=len(df_unique), desc="Storing deduped CSVs")
+    )
+    
+    # Build the hash_to_csv_map from results
+    hash_to_csv_map = {hval: csv_list for hval, csv_list in results}
+    
     hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping_v2.json")  ########
     with open(hugging_map_json_path, 'w', encoding='utf-8') as jf:
         json.dump(hash_to_csv_map, jf, indent=2)
