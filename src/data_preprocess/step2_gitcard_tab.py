@@ -89,25 +89,63 @@ def detect_and_extract_markdown_tables(content: str):
             html_table_elements = soup.find_all('table')
             
             for html_table in html_table_elements:
-                # Parse HTML table to markdown format
+                # Parse HTML table to markdown format with proper rowspan/colspan handling
                 rows = html_table.find_all('tr')
                 if not rows or len(rows) < 2:  # Need at least header + 1 data row
                     continue
                 
-                markdown_rows = []
+                # Calculate column count
+                max_cols = 0
                 for row in rows:
                     cells = row.find_all(['td', 'th'])
-                    # Get text from each cell
-                    cell_texts = []
+                    col_count = 0
                     for cell in cells:
-                        text = cell.get_text(strip=True)
-                        # Handle rowspan/colspan by repeating text
                         colspan = int(cell.get('colspan', 1))
-                        cell_texts.extend([text] * colspan)
+                        col_count += colspan
+                    max_cols = max(max_cols, col_count)
+                
+                # Convert HTML table to a 2D grid to handle rowspan/colspan
+                # Initialize grid with None (unfilled) cells
+                grid = [[None] * max_cols for _ in range(len(rows))]
+                
+                # Fill the grid with cell contents
+                for row_idx, row in enumerate(rows):
+                    cells = row.find_all(['td', 'th'])
+                    col_idx = 0
                     
-                    # Convert to markdown row format
-                    if cell_texts:
-                        markdown_row = '| ' + ' | '.join(cell_texts) + ' |'
+                    for cell in cells:
+                        # Skip cells that are already filled by rowspan
+                        while col_idx < max_cols and grid[row_idx][col_idx] is not None:
+                            col_idx += 1
+                        
+                        if col_idx >= max_cols:
+                            break
+                        
+                        text = cell.get_text(strip=True)
+                        colspan = int(cell.get('colspan', 1))
+                        rowspan = int(cell.get('rowspan', 1))
+                        
+                        # Fill ALL cells in rowspan/colspan area with the text (like ArXiv processing)
+                        # This replicates the cell content across all spanned rows and columns
+                        for r in range(row_idx, row_idx + rowspan):
+                            for c in range(colspan):
+                                if r < len(rows) and col_idx + c < max_cols:
+                                    grid[r][col_idx + c] = text
+                        
+                        col_idx += colspan
+                
+                # Replace None with empty string (keep empty cells as empty)
+                for row_idx in range(len(grid)):
+                    for col_idx in range(len(grid[row_idx])):
+                        if grid[row_idx][col_idx] is None:
+                            grid[row_idx][col_idx] = ''
+                
+                # Convert grid to markdown rows
+                markdown_rows = []
+                for row in grid:
+                    # Only add row if it has non-empty cells
+                    if any(cell.strip() for cell in row):
+                        markdown_row = '| ' + ' | '.join(row) + ' |'
                         markdown_rows.append(markdown_row)
                 
                 # Add separator after header (first row)
@@ -156,30 +194,17 @@ def detect_and_extract_markdown_tables(content: str):
                 in_table = True
                 seen_non_sep_row = False
             
-            # Handle lines with double pipes (||) - split them into separate rows
-            if '||' in line:
-                # Split by || and process each part
-                parts = line.split('||')
-                for i, part in enumerate(parts):
-                    part = part.strip()
-                    if part.startswith('|') and part.endswith('|'):
-                        current_table.append(part)
-                    elif part.startswith('|') and not part.endswith('|'):
-                        # Add missing closing |
-                        current_table.append(part + '|')
-                    elif not part.startswith('|') and part.endswith('|'):
-                        # Add missing opening |
-                        current_table.append('|' + part)
-                    elif part and not part.startswith('|') and not part.endswith('|'):
-                        # Add both missing |
-                        current_table.append('|' + part + '|')
-            else:
-                current_table.append(line)
-                # Track if this is a non-separator data row
-                inner = line[1:-1]
-                cells = [c.strip() for c in inner.split('|')]
-                if not re.fullmatch(r'[\s:\-\|]*', ''.join(cells)):
-                    seen_non_sep_row = True
+            # Handle lines with double pipes (||) - these create empty cells
+            # Example: |||A|B| means 2 empty cells, then A, then B
+            # We should NOT split by || as that breaks empty cell preservation
+            # Instead, just append the line as-is to preserve all empty cells
+            current_table.append(line)
+            
+            # Track if this is a non-separator data row
+            inner = line[1:-1]
+            cells = [c.strip() for c in inner.split('|')]
+            if not re.fullmatch(r'[\s:\-\|]*', ''.join(cells)):
+                seen_non_sep_row = True
         elif is_pipe_row:
             # Normalize rows that have pipes but missing borders
             normalized = line
