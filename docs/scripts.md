@@ -2,6 +2,60 @@
 
 This section outlines the workflow for processing data, building the ground truth, and running evaluations.
 
+---
+
+## GPT Evaluation Scripts
+
+### 1. Table Relatedness Sampling
+
+**Script**: `src/gpt_evaluation/step1_table_sampling.py`
+
+**Purpose**: Sample balanced table pairs for GPT evaluation across three ground truth levels (Paper, ModelCard, Dataset).
+
+**Key Features**:
+- **Multi-level balanced sampling**: Each GT level maintains 50/50 positive/negative ratio
+- **8-way combination analysis**: Analyzes all 8 possible label combinations (2³)
+- **Efficient batch querying**: Uses sparse matrix indexing for O(log deg) queries
+- **Large pool sampling**: Samples from 100k+ pool, then filters for balance
+
+**Usage**:
+```bash
+python src/gpt_evaluation/step1_table_sampling.py \
+    --n-samples-pool 100000 \
+    --target-positive 150 \
+    --target-negative 150 \
+    --seed 42
+```
+
+**Arguments**:
+- `--n-samples-pool`: Size of random pairs pool (default: 100000)
+- `--target-positive`: Positive pairs per level (default: 150)
+- `--target-negative`: Negative pairs per level (default: 150)
+- `--seed`: Random seed (default: 42)
+- `--gt-dir`: Ground truth directory (default: data/gt)
+- `--output-dir`: Output directory (default: output/gpt_evaluation)
+
+**Output**: 900 balanced pairs (300 per level) with 8-way combination statistics
+
+**Performance**: ~40 seconds
+
+---
+
+### 2. Model Relatedness Sampling
+
+**Script**: `src/gpt_evaluation/step1_model_sampling.py`
+
+**Purpose**: Sample model pairs for model relatedness evaluation.
+
+**Usage**:
+```bash
+python src/gpt_evaluation/step1_model_sampling.py --n-samples 200 --seed 42
+```
+
+---
+
+## Data Processing Workflow
+
 ### 1\. Parse Initial Elements
 
 This step extracts key metadata from model cards and associated links.
