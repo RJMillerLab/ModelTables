@@ -19,11 +19,13 @@ from tqdm.asyncio import tqdm
 
 # OpenRouter configuration
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Trying GPT-4o-mini as 5th model (different from GPT-3.5)
 MODELS = [
     "anthropic/claude-3.5-sonnet",
     "deepseek/deepseek-chat",
     "meta-llama/llama-3-70b-instruct",
     "openai/gpt-3.5-turbo",
+    "openai/gpt-4o-mini",  # Adding Gemini Pro
 ]
 
 load_dotenv()

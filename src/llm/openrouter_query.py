@@ -17,6 +17,7 @@ MODELS = [
     "deepseek/deepseek-chat",
     "meta-llama/llama-3-70b-instruct",
     "openai/gpt-3.5-turbo",  # Reliable fallback
+    "openai/gpt-4o-mini",
 ]
 
 load_dotenv()

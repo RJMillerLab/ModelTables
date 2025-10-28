@@ -378,34 +378,36 @@ python src/gpt_evaluation/step1_table_sampling.py \
 
 **Output**: 500 unique pairs with 8-way combination statistics
 ```bash
-8-Way Combinations:
-  - Paper only: 375 pairs (75.00%)
-  - None: 104 pairs (20.80%)
-  - Paper + Dataset: 11 pairs (2.20%)
-  - All three: 4 pairs (0.80%)
-  - Paper + ModelCard: 2 pairs (0.40%)
-  - Dataset only: 2 pairs (0.40%)
-  - ModelCard only: 2 pairs (0.40%)
+[5/5] Post-selection statistics:
+  8-Way (selected):
+    (0, 0, 0): None                 -   21 (10.61%)
+    (0, 0, 1): Dataset only         -   11 ( 5.56%)
+    (0, 1, 0): ModelCard only       -   21 (10.61%)
+    (0, 1, 1): ModelCard + Dataset  -   12 ( 6.06%)
+    (1, 0, 0): Paper only           -   35 (17.68%)
+    (1, 0, 1): Paper + Dataset      -   24 (12.12%)
+    (1, 1, 0): Paper + ModelCard    -   24 (12.12%)
+    (1, 1, 1): All three            -   50 (25.25%)
 
-Per-Level Distribution (natural, reflects data distribution):
-  - Paper: 392 pos (78.4%) / 108 neg (21.6%)
-  - ModelCard: 8 pos (1.6%) / 492 neg (98.4%)
-  - Dataset: 17 pos (3.4%) / 483 neg (96.6%)
+  Per-level (selected):
+    Paper     :  133 pos (67.17%) /   65 neg (32.83%)
+    Modelcard :  107 pos (54.04%) /   91 neg (45.96%)
+    Dataset   :   97 pos (48.99%) /  101 neg (51.01%)
 ```
 
-**Note**: Each unique pair appears only once in the output (not 900 lines like before).
+**Visualization**: Generate heatmap visualization for paper figures
+```bash
+python src/gpt_evaluation/visualize_sampling_2x4_horizontal.py
+```
 
 #### Step2: Query OpenRouter for table relatedness evaluation.
 ```bash
-python -m src.gpt_evaluation.step2_query_openrouter \
-    --input output/gpt_evaluation/table_final_all_levels_pairs.jsonl \
-    --output output/gpt_evaluation/step2_openrouter_results_full.jsonl \
-    --limit 0
+python -m src.gpt_evaluation.step2_query_openrouter --input output/gpt_evaluation/table_1M_fix_unique_pairs.jsonl --output output/gpt_evaluation/step2_full_198.jsonl 2>&1 | tee step2_full.log &
 
 # retry
-python -m src.gpt_evaluation.step2_retry_failed \
-    --input output/gpt_evaluation/step2_openrouter_results_full.jsonl \
-    --output output/gpt_evaluation/step2_openrouter_results_retried.jsonl
+# python -m src.gpt_evaluation.step2_retry_failed \
+#     --input output/gpt_evaluation/step2_openrouter_results_full.jsonl \
+#     --output output/gpt_evaluation/step2_openrouter_results_retried.jsonl
 ```
 
 ---

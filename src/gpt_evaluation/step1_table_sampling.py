@@ -206,10 +206,14 @@ class TableSamplerV2:
             print(f"    {lvl.title():10s}: {pos:4d} pos ({ppos:5.2f}%) / {neg:4d} neg ({pneg:5.2f}%)")
         # Build outputs
         samples = {"all": selected}
+        
+        # Compute selected combination counts for visualization
+        sel_combo_counts = Counter(tuple(p["combination"]) for p in selected)
+        
         cross_stats = {
             "pool_size": len(all_pairs),
             "final_unique_pairs": len(selected),
-            "combination_counts": {str(k): len(v) for k, v in by_combo.items()}
+            "combination_counts": {str(k): cnt for k, cnt in sel_combo_counts.items()}
         }
         return samples, cross_stats
     def save_samples(self, samples, prefix):
@@ -233,8 +237,14 @@ def main():
 
     sampler = TableSamplerV2(args.gt_dir, args.output_dir, args.seed)
     sampler.load_all_levels()
-    samples, _ = sampler.sample_all_levels_unified(args.n_samples_pool, args.total_target)
+    samples, cross_stats = sampler.sample_all_levels_unified(args.n_samples_pool, args.total_target)
     sampler.save_samples(samples, args.prefix)
+    
+    # Save statistics for visualization
+    stats_path = os.path.join(args.output_dir, f"{args.prefix}_stats.json")
+    with open(stats_path, "w") as f:
+        json.dump(cross_stats, f, indent=2)
+    print(f"✓ Saved statistics to {stats_path}")
 
 
 if __name__ == "__main__":
