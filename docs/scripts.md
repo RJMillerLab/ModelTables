@@ -4,56 +4,6 @@ This section outlines the workflow for processing data, building the ground trut
 
 ---
 
-## GPT Evaluation Scripts
-
-### 1. Table Relatedness Sampling
-
-**Script**: `src/gpt_evaluation/step1_table_sampling.py`
-
-**Purpose**: Sample balanced table pairs for GPT evaluation across three ground truth levels (Paper, ModelCard, Dataset).
-
-**Key Features**:
-- **Multi-level balanced sampling**: Each GT level maintains 50/50 positive/negative ratio
-- **8-way combination analysis**: Analyzes all 8 possible label combinations (2³)
-- **Efficient batch querying**: Uses sparse matrix indexing for O(log deg) queries
-- **Large pool sampling**: Samples from 100k+ pool, then filters for balance
-
-**Usage**:
-```bash
-python src/gpt_evaluation/step1_table_sampling.py \
-    --n-samples-pool 100000 \
-    --target-positive 150 \
-    --target-negative 150 \
-    --seed 42
-```
-
-**Arguments**:
-- `--n-samples-pool`: Size of random pairs pool (default: 100000)
-- `--target-positive`: Positive pairs per level (default: 150)
-- `--target-negative`: Negative pairs per level (default: 150)
-- `--seed`: Random seed (default: 42)
-- `--gt-dir`: Ground truth directory (default: data/gt)
-- `--output-dir`: Output directory (default: output/gpt_evaluation)
-
-**Output**: 900 balanced pairs (300 per level) with 8-way combination statistics
-
-**Performance**: ~40 seconds
-
----
-
-### 2. Model Relatedness Sampling
-
-**Script**: `src/gpt_evaluation/step1_model_sampling.py`
-
-**Purpose**: Sample model pairs for model relatedness evaluation.
-
-**Usage**:
-```bash
-python src/gpt_evaluation/step1_model_sampling.py --n-samples 200 --seed 42
-```
-
----
-
 ## Data Processing Workflow
 
 ### 1\. Parse Initial Elements
@@ -406,67 +356,71 @@ python -m src.modelsearch.compare_baselines \
 
 ### 11. GPT Evaluation of Table Relatedness and Model Relatedness:
 
-#### Basic GPT Evaluation (Original)
+---
+
+**Script**: `src/gpt_evaluation/step1_table_sampling.py`
+**Purpose**: Sample balanced table pairs for GPT evaluation across three ground truth levels (Paper, ModelCard, Dataset).
+**Key Features**:
+- **Multi-level balanced sampling**: Each GT level maintains 50/50 positive/negative ratio
+- **8-way combination analysis**: Analyzes all 8 possible label combinations (2³)
+- **Efficient batch querying**: Uses sparse matrix indexing for O(log deg) queries
+- **Large pool sampling**: Samples from 100k+ pool, then filters for balance
+**Usage**:
 ```bash
-python -m src.gpt_evaluation.sample_pairs
-python -m src.gpt_evaluation.evaluate_pairs \
-  --mode tables \
-  --pairs output/_tmp_table_pairs.jsonl \
-  --output output/llm_eval_tables.jsonl \
-  --llm gpt-3.5-turbo-0125
-python -m src.gpt_evaluation.jsonl_to_markdown \
-  --input output/llm_eval_tables.jsonl \
-  --output output/llm_eval_tables.md \
-  --show-prompt
+python src/gpt_evaluation/step1_table_sampling.py \
+    --total-target 200 \
+    --seed 42
+```
+**Notes**:
+- `--total-target`: Number of unique pairs to output (default: 500)
+- Pool size is auto-set to `max(6x target, 10000)` for better diversity
+- No need to specify `--n-samples-pool` anymore
+
+**Output**: 500 unique pairs with 8-way combination statistics
+```bash
+8-Way Combinations:
+  - Paper only: 375 pairs (75.00%)
+  - None: 104 pairs (20.80%)
+  - Paper + Dataset: 11 pairs (2.20%)
+  - All three: 4 pairs (0.80%)
+  - Paper + ModelCard: 2 pairs (0.40%)
+  - Dataset only: 2 pairs (0.40%)
+  - ModelCard only: 2 pairs (0.40%)
+
+Per-Level Distribution (natural, reflects data distribution):
+  - Paper: 392 pos (78.4%) / 108 neg (21.6%)
+  - ModelCard: 8 pos (1.6%) / 492 neg (98.4%)
+  - Dataset: 17 pos (3.4%) / 483 neg (96.6%)
 ```
 
-#### Improved Smart Sampling (Based on Ground Truth Construction)
+**Note**: Each unique pair appears only once in the output (not 900 lines like before).
+
+#### Step2: Query OpenRouter for table relatedness evaluation.
 ```bash
-# Generate smart samples based on actual ground truth matrices
-python -m src.gpt_evaluation.improved_smart_sampling \
-  --num-table-pairs 100 \
-  --num-model-pairs 50 \
-  --positive-ratio 0.5 \
-  --output output/improved_evaluation_pairs.jsonl
+python -m src.gpt_evaluation.step2_query_openrouter \
+    --input output/gpt_evaluation/table_final_all_levels_pairs.jsonl \
+    --output output/gpt_evaluation/step2_openrouter_results_full.jsonl \
+    --limit 0
 
-# Evaluate table relatedness using smart samples
-python -m src.gpt_evaluation.evaluate_pairs \
-  --mode tables \
-  --pairs output/improved_evaluation_pairs.jsonl \
-  --output output/table_relatedness_evaluation.jsonl \
-  --llm gpt-3.5-turbo-0125
-
-# Evaluate model relatedness using modelcard_matrix.py logic
-python -m src.gpt_evaluation.model_relatedness_evaluation \
-  --num-pairs 50 \
-  --output output/model_relatedness_evaluation.jsonl \
-  --llm gpt-3.5-turbo-0125
-
-# Generate reports
-python -m src.gpt_evaluation.jsonl_to_markdown \
-  --input output/table_relatedness_evaluation.jsonl \
-  --output output/table_relatedness_report.md \
-  --show-prompt
+# retry
+python -m src.gpt_evaluation.step2_retry_failed \
+    --input output/gpt_evaluation/step2_openrouter_results_full.jsonl \
+    --output output/gpt_evaluation/step2_openrouter_results_retried.jsonl
 ```
 
-#### Comprehensive Evaluation Pipeline
+---
+
+### 2. Model Relatedness Sampling
+
+**Script**: `src/gpt_evaluation/step1_model_sampling.py`
+
+**Purpose**: Sample model pairs for model relatedness evaluation.
+
+**Usage**:
 ```bash
-# Run complete evaluation pipeline
-python -m src.gpt_evaluation.comprehensive_evaluation \
-  --num-table-pairs 100 \
-  --num-model-pairs 50 \
-  --positive-ratio 0.5 \
-  --output-dir output/gpt_evaluation \
-  --llm gpt-3.5-turbo-0125
+python src/gpt_evaluation/step1_model_sampling.py --n-samples 200 --seed 42
 ```
 
-#### Key Features of Improved Evaluation:
-- **Ground Truth Based**: Uses actual ground truth matrices (direct, max_pr, model, dataset levels)
-- **Smart Filtering**: Applies same filtering conditions as ground truth construction (nonempty paper & csv lists)
-- **Model Relationships**: Based on modelcard_matrix.py logic (base model relationships, dataset relationships)
-- **Balanced Sampling**: Ensures positive/negative examples with sufficient information
-- **Multi-level Coverage**: Covers different relationship levels used in ground truth
-- **Quality Control**: Filters out empty or meaningless samples
 
 ### 12. Table Integration:
 ```bash
@@ -553,21 +507,4 @@ python -m src.data_analysis.hf_models_analysis # get statistics of models in Hug
 python -m src.data_analysis.filtered_gt_visualization
 python -m src.data_analysis.quick_visualization_final
 # TODO: top-10!
-```
-
-
-
-```bash
-# GPT Evaluation
-# 1. Test single prompt
-python -m src.gpt_evaluation.test_single_prompt --mode tables --pairs output/table_pairs_with_content.jsonl --index 0
-python -m src.gpt_evaluation.test_single_prompt --mode models --model-ids google-bert/bert-base-uncased,FacebookAI/roberta-base
-
-# 2. Batch evaluation
-python -m src.gpt_evaluation.batch_evaluation_local --mode tables --pairs output/table_pairs.jsonl --output output/table_results.jsonl
-python -m src.gpt_evaluation.batch_evaluation_local --mode models --pairs output/model_pairs.jsonl --output output/model_results.jsonl
-
-# 3. Analyze results
-python -m src.gpt_evaluation.analyze_results --results output/table_results.jsonl --output output/analysis_tables
-python -m src.gpt_evaluation.analyze_results --results output/model_results.jsonl --output output/analysis_models
 ```

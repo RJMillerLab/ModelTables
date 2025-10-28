@@ -34,14 +34,42 @@ def csv_to_raw_text(csv_path: str) -> str:
 		return f"Error reading {os.path.basename(csv_path)}: {str(e)}"
 
 def build_table_prompt(table_a_raw: str, table_b_raw: str) -> str:
-	"""Build the single-sample prompt for table relatedness."""
+	"""Build the single-sample prompt for table relatedness with structural and level signals."""
 	return f"""
-Your task is to determine whether two tables are related, together with picking relatedness types and reasons from multiple choices.
+You are evaluating whether two data tables are semantically related.
 
-You will be given two tables (A and B) in raw CSV format.
-Please evaluate their relationship from both structural and semantic perspectives and answer the following questions:
+Table A:
+{table_a_raw}
 
-**Question 1 (Single Selection):** Are these two tables related? Choose ONE:
+Table B:
+{table_b_raw}
+
+Task: Determine if Tables A and B are related (YES/NO/UNSURE) and identify specific signals.
+
+Consider STRUCTURAL signals (select ALL that apply):
+- JOINABLE: share common column names that could be used to join the tables
+- UNIONABLE: have similar schema/structure that could be combined vertically
+- KEYWORD_OVERLAP: share common keywords or domain-specific terms
+- SEMANTICALLY_SIMILAR: have related meaning or serve similar purposes
+
+Consider LEVEL signals (select ALL that apply):
+- PAPER_LEVEL: related because they are from the same research paper
+- MODEL_LEVEL: related because they are about the same model(s) or training configuration
+- DATASET_LEVEL: related because they use the same dataset(s) or evaluation data
+
+Respond in YAML format (no markdown code fences):
+related: [YES/NO/UNSURE]
+structural_signals:
+  joinable: [true/false]
+  unionable: [true/false]
+  keyword_overlap: [true/false]
+  semantically_similar: [true/false]
+level_signals:
+  paper_level: [true/false]
+  model_level: [true/false]
+  dataset_level: [true/false]
+rationale: "[1-2 sentences explaining your judgment with specific evidence]"
+"""
 - YES, they are related
 - NO, they are not related  
 - UNSURE, I cannot tell
