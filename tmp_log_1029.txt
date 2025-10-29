@@ -1,0 +1,928 @@
+esult.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_max_pr_methodology_or_result.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92957 active nodes
+[INFO] Dropping 18 all-zero rows/cols
+[INFO] Found 18242 files for huggingface
+[INFO] Found 1046 files for github
+[INFO] Found 41905 files for html
+[INFO] Using 61193 files after resource type filtering
+[INFO] Original shape: (61193, 61193), keeping 61136 active nodes
+[INFO] Dropping 57 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61130 files after filelist filtering
+[INFO] Original shape: (61130, 61130), keeping 61130 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61130
+Total queries: 92975
+Filtered out queries (not in resource type): 31845
+Queries with empty candidates in original results: 0
+Queries with empty candidates after filtering: 620
+Remaining valid queries: 60510
+[WARN] 620 queries have GT but no result. (Skipped in metrics)
+       e.g. ['1a5f1fb18f_table1.csv', '0a2b1bc8e3_table1.csv', '7d9984d694_table1.csv', '01289b1acd_table1.csv', '6df8dc90ba_table1.csv'] …
+[WARN] 620 GT queries missing in result_idx: ['1a5f1fb18f_table1.csv', '0a2b1bc8e3_table1.csv', '7d9984d694_table1.csv', '01289b1acd_table1.csv', '6df8dc90ba_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_max_pr_methodology_or_result.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_max_pr_methodology_or_result.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_max_pr_methodology_or_result.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.5683     0.0014     0.5683     0.0028
+2    0.5310     0.0021     0.5496     0.0042
+3    0.5071     0.0026     0.5355     0.0051
+4    0.4815     0.0029     0.5220     0.0057
+5    0.4578     0.0031     0.5091     0.0061
+6    0.4333     0.0032     0.4965     0.0064
+7    0.4070     0.0033     0.4837     0.0066
+8    0.3827     0.0034     0.4711     0.0068
+9    0.3584     0.0035     0.4586     0.0069
+10   0.3226     0.0035     0.4450     0.0069
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_max_pr_methodology_or_result.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=max_pr_methodology_or_result_influential | Aug=shuffle_row
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_row_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_max_pr_methodology_or_result_influential.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_max_pr_methodology_or_result_influential.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92930 active nodes
+[INFO] Dropping 45 all-zero rows/cols
+[INFO] Found 18238 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41892 files for html
+[INFO] Using 61175 files after resource type filtering
+[INFO] Original shape: (61175, 61175), keeping 61044 active nodes
+[INFO] Dropping 131 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61038 files after filelist filtering
+[INFO] Original shape: (61038, 61038), keeping 61038 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61038
+Total queries: 92975
+Filtered out queries (not in resource type): 31937
+Queries with empty candidates in original results: 0
+Queries with empty candidates after filtering: 615
+Remaining valid queries: 60423
+[WARN] 615 queries have GT but no result. (Skipped in metrics)
+       e.g. ['1a5f1fb18f_table1.csv', '0a2b1bc8e3_table1.csv', '7d9984d694_table1.csv', '01289b1acd_table1.csv', '6df8dc90ba_table1.csv'] …
+[WARN] 615 GT queries missing in result_idx: ['1a5f1fb18f_table1.csv', '0a2b1bc8e3_table1.csv', '7d9984d694_table1.csv', '01289b1acd_table1.csv', '6df8dc90ba_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_max_pr_methodology_or_result_influential.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_max_pr_methodology_or_result_influential.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_max_pr_methodology_or_result_influential.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.4336     0.0038     0.4336     0.0075
+2    0.3889     0.0057     0.4113     0.0112
+3    0.3622     0.0069     0.3949     0.0135
+4    0.3371     0.0076     0.3805     0.0149
+5    0.3139     0.0081     0.3672     0.0159
+6    0.2914     0.0085     0.3545     0.0165
+7    0.2688     0.0088     0.3423     0.0170
+8    0.2486     0.0090     0.3306     0.0173
+9    0.2297     0.0091     0.3194     0.0175
+10   0.2067     0.0091     0.3081     0.0175
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_max_pr_methodology_or_result_influential.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=model | Aug=shuffle_row
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_row_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/scilake_gt_modellink_model_adj_processed.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/scilake_gt_modellink_model_adj_csv_list_processed.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92874, 92874), keeping 92874 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+[INFO] Found 18203 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41884 files for html
+[INFO] Using 61132 files after resource type filtering
+[INFO] Original shape: (61132, 61132), keeping 60658 active nodes
+[INFO] Dropping 474 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 60652 files after filelist filtering
+[INFO] Original shape: (60652, 60652), keeping 59660 active nodes
+[INFO] Dropping 992 all-zero rows/cols
+valid_files:  59660
+Total queries: 92975
+Filtered out queries (not in resource type): 33315
+Queries with empty candidates in original results: 0
+Queries with empty candidates after filtering: 626
+Remaining valid queries: 59034
+[WARN] 626 queries have GT but no result. (Skipped in metrics)
+       e.g. ['000ee48fb9_table1.csv', '00212563e8_table1.csv', '0078606fda_table1.csv', '0078606fda_table2.csv', '0079f03f65_table6.csv'] …
+[WARN] 626 GT queries missing in result_idx: ['000ee48fb9_table1.csv', '00212563e8_table1.csv', '0078606fda_table1.csv', '0078606fda_table2.csv', '0079f03f65_table6.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_model.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_model.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_model.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.2031     0.0084     0.2031     0.0162
+2    0.1611     0.0124     0.1821     0.0230
+3    0.1362     0.0147     0.1668     0.0266
+4    0.1164     0.0162     0.1542     0.0284
+5    0.1013     0.0172     0.1436     0.0294
+6    0.0891     0.0179     0.1345     0.0298
+7    0.0792     0.0184     0.1266     0.0299
+8    0.0711     0.0189     0.1197     0.0298
+9    0.0644     0.0192     0.1135     0.0295
+10   0.0579     0.0192     0.1080     0.0288
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_model.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=dataset | Aug=shuffle_row
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_row_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/scilake_gt_modellink_dataset_adj_processed.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/scilake_gt_modellink_dataset_adj_csv_list_processed.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92856, 92856), keeping 92856 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+[INFO] Found 18192 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41880 files for html
+[INFO] Using 61117 files after resource type filtering
+[INFO] Original shape: (61117, 61117), keeping 60552 active nodes
+[INFO] Dropping 565 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 60546 files after filelist filtering
+[INFO] Original shape: (60546, 60546), keeping 59533 active nodes
+[INFO] Dropping 1013 all-zero rows/cols
+valid_files:  59533
+Total queries: 92975
+Filtered out queries (not in resource type): 33442
+Queries with empty candidates in original results: 0
+Queries with empty candidates after filtering: 621
+Remaining valid queries: 58912
+[WARN] 621 queries have GT but no result. (Skipped in metrics)
+       e.g. ['000ee48fb9_table1.csv', '00212563e8_table1.csv', '0078606fda_table1.csv', '0078606fda_table2.csv', '0079f03f65_table6.csv'] …
+[WARN] 621 GT queries missing in result_idx: ['000ee48fb9_table1.csv', '00212563e8_table1.csv', '0078606fda_table1.csv', '0078606fda_table2.csv', '0079f03f65_table6.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_dataset.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_dataset.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_dataset.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.1979     0.0090     0.1979     0.0172
+2    0.1564     0.0132     0.1771     0.0243
+3    0.1318     0.0158     0.1620     0.0282
+4    0.1126     0.0174     0.1497     0.0302
+5    0.0983     0.0185     0.1394     0.0311
+6    0.0868     0.0192     0.1306     0.0315
+7    0.0775     0.0198     0.1230     0.0316
+8    0.0700     0.0203     0.1164     0.0314
+9    0.0635     0.0206     0.1105     0.0311
+10   0.0572     0.0206     0.1052     0.0303
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_dataset.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=union | Aug=shuffle_row
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_row_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_union_direct_processed.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_union_direct_processed_csv_list.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92964, 92964), keeping 92964 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+[INFO] Found 18244 files for huggingface
+[INFO] Found 1046 files for github
+[INFO] Found 41911 files for html
+[INFO] Using 61201 files after resource type filtering
+[INFO] Original shape: (61201, 61201), keeping 61201 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61195 files after filelist filtering
+[INFO] Original shape: (61195, 61195), keeping 61195 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61195
+Total queries: 92975
+Filtered out queries (not in resource type): 31780
+Queries with empty candidates in original results: 0
+Queries with empty candidates after filtering: 620
+Remaining valid queries: 60575
+[WARN] 620 queries have GT but no result. (Skipped in metrics)
+       e.g. ['1a5f1fb18f_table1.csv', '0a2b1bc8e3_table1.csv', '7d9984d694_table1.csv', '01289b1acd_table1.csv', '6df8dc90ba_table1.csv'] …
+[WARN] 620 GT queries missing in result_idx: ['1a5f1fb18f_table1.csv', '0a2b1bc8e3_table1.csv', '7d9984d694_table1.csv', '01289b1acd_table1.csv', '6df8dc90ba_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_union.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_union.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_union.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.4436     0.0010     0.4436     0.0020
+2    0.3999     0.0015     0.4218     0.0030
+3    0.3723     0.0018     0.4053     0.0036
+4    0.3468     0.0020     0.3907     0.0040
+5    0.3235     0.0022     0.3772     0.0043
+6    0.3000     0.0023     0.3644     0.0045
+7    0.2769     0.0024     0.3519     0.0047
+8    0.2561     0.0024     0.3399     0.0048
+9    0.2367     0.0025     0.3284     0.0049
+10   0.2131     0.0025     0.3169     0.0049
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_row_tfidf_entity_union.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+=== Augment_op: shuffle_col ===
+→ Task=scilake_final | Level=direct | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_direct_label.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_direct_label.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92959 active nodes
+[INFO] Dropping 16 all-zero rows/cols
+[INFO] Found 18244 files for huggingface
+[INFO] Found 1046 files for github
+[INFO] Found 41906 files for html
+[INFO] Using 61196 files after resource type filtering
+[INFO] Original shape: (61196, 61196), keeping 61160 active nodes
+[INFO] Dropping 36 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61154 files after filelist filtering
+[INFO] Original shape: (61154, 61154), keeping 61154 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61154
+Total queries: 92975
+Filtered out queries (not in resource type): 31821
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 303
+Remaining valid queries: 60798
+[WARN] 356 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 356 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.5465     0.0017     0.5465     0.0034
+2    0.4900     0.0026     0.5182     0.0052
+3    0.4530     0.0032     0.4965     0.0064
+4    0.4144     0.0035     0.4760     0.0070
+5    0.3806     0.0038     0.4569     0.0074
+6    0.3491     0.0039     0.4389     0.0077
+7    0.3185     0.0040     0.4217     0.0079
+8    0.2909     0.0041     0.4054     0.0081
+9    0.2652     0.0041     0.3898     0.0082
+10   0.2386     0.0041     0.3747     0.0081
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=direct_influential | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_direct_label_influential.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_direct_label_influential.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92936 active nodes
+[INFO] Dropping 39 all-zero rows/cols
+[INFO] Found 18238 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41897 files for html
+[INFO] Using 61180 files after resource type filtering
+[INFO] Original shape: (61180, 61180), keeping 61050 active nodes
+[INFO] Dropping 130 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61044 files after filelist filtering
+[INFO] Original shape: (61044, 61044), keeping 61044 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61044
+Total queries: 92975
+Filtered out queries (not in resource type): 31931
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 307
+Remaining valid queries: 60684
+[WARN] 360 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 360 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_influential.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_influential.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_influential.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.5097     0.0064     0.5097     0.0127
+2    0.4489     0.0098     0.4793     0.0191
+3    0.4103     0.0120     0.4563     0.0233
+4    0.3706     0.0132     0.4349     0.0256
+5    0.3368     0.0141     0.4153     0.0271
+6    0.3062     0.0147     0.3971     0.0281
+7    0.2777     0.0151     0.3800     0.0286
+8    0.2524     0.0154     0.3641     0.0290
+9    0.2295     0.0155     0.3491     0.0291
+10   0.2066     0.0155     0.3349     0.0288
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_influential.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=direct_methodology_or_result | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_direct_label_methodology_or_result.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_direct_label_methodology_or_result.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92951 active nodes
+[INFO] Dropping 24 all-zero rows/cols
+[INFO] Found 18240 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41903 files for html
+[INFO] Using 61188 files after resource type filtering
+[INFO] Original shape: (61188, 61188), keeping 61116 active nodes
+[INFO] Dropping 72 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61110 files after filelist filtering
+[INFO] Original shape: (61110, 61110), keeping 61110 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61110
+Total queries: 92975
+Filtered out queries (not in resource type): 31865
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 304
+Remaining valid queries: 60753
+[WARN] 357 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 357 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_methodology_or_result.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_methodology_or_result.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_methodology_or_result.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.5278     0.0035     0.5278     0.0070
+2    0.4688     0.0054     0.4983     0.0106
+3    0.4307     0.0066     0.4758     0.0131
+4    0.3910     0.0073     0.4546     0.0144
+5    0.3571     0.0078     0.4351     0.0153
+6    0.3258     0.0081     0.4169     0.0159
+7    0.2962     0.0083     0.3996     0.0162
+8    0.2697     0.0085     0.3834     0.0164
+9    0.2454     0.0086     0.3681     0.0166
+10   0.2209     0.0086     0.3533     0.0165
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_methodology_or_result.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=direct_methodology_or_result_influential | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_direct_label_methodology_or_result_influential.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_direct_label_methodology_or_result_influential.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92935 active nodes
+[INFO] Dropping 40 all-zero rows/cols
+[INFO] Found 18238 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41897 files for html
+[INFO] Using 61180 files after resource type filtering
+[INFO] Original shape: (61180, 61180), keeping 61042 active nodes
+[INFO] Dropping 138 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61036 files after filelist filtering
+[INFO] Original shape: (61036, 61036), keeping 61036 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61036
+Total queries: 92975
+Filtered out queries (not in resource type): 31939
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 308
+Remaining valid queries: 60675
+[WARN] 361 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 361 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_methodology_or_result_influential.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_methodology_or_result_influential.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_methodology_or_result_influential.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.5064     0.0073     0.5064     0.0143
+2    0.4452     0.0111     0.4758     0.0216
+3    0.4066     0.0136     0.4527     0.0264
+4    0.3669     0.0150     0.4313     0.0289
+5    0.3332     0.0161     0.4117     0.0306
+6    0.3027     0.0167     0.3935     0.0317
+7    0.2744     0.0172     0.3765     0.0324
+8    0.2493     0.0175     0.3606     0.0327
+9    0.2266     0.0176     0.3457     0.0327
+10   0.2040     0.0176     0.3315     0.0325
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_direct_methodology_or_result_influential.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=max_pr | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_max_pr.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_max_pr.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92967 active nodes
+[INFO] Dropping 8 all-zero rows/cols
+[INFO] Found 18245 files for huggingface
+[INFO] Found 1046 files for github
+[INFO] Found 41911 files for html
+[INFO] Using 61202 files after resource type filtering
+[INFO] Original shape: (61202, 61202), keeping 61183 active nodes
+[INFO] Dropping 19 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61177 files after filelist filtering
+[INFO] Original shape: (61177, 61177), keeping 61177 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61177
+Total queries: 92975
+Filtered out queries (not in resource type): 31798
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 302
+Remaining valid queries: 60822
+[WARN] 355 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 355 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.7487     0.0009     0.7487     0.0018
+2    0.7133     0.0013     0.7310     0.0027
+3    0.6877     0.0016     0.7165     0.0033
+4    0.6529     0.0018     0.7006     0.0036
+5    0.6179     0.0019     0.6841     0.0038
+6    0.5801     0.0020     0.6668     0.0039
+7    0.5383     0.0020     0.6484     0.0040
+8    0.4967     0.0021     0.6294     0.0041
+9    0.4547     0.0021     0.6100     0.0042
+10   0.4093     0.0021     0.5900     0.0042
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=max_pr_influential | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_max_pr_influential.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_max_pr_influential.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92932 active nodes
+[INFO] Dropping 43 all-zero rows/cols
+[INFO] Found 18238 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41893 files for html
+[INFO] Using 61176 files after resource type filtering
+[INFO] Original shape: (61176, 61176), keeping 61061 active nodes
+[INFO] Dropping 115 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61055 files after filelist filtering
+[INFO] Original shape: (61055, 61055), keeping 61055 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61055
+Total queries: 92975
+Filtered out queries (not in resource type): 31920
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 306
+Remaining valid queries: 60696
+[WARN] 359 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 359 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_influential.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_influential.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_influential.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.5533     0.0052     0.5533     0.0103
+2    0.4968     0.0078     0.5250     0.0154
+3    0.4603     0.0096     0.5035     0.0188
+4    0.4214     0.0105     0.4829     0.0206
+5    0.3868     0.0112     0.4637     0.0218
+6    0.3553     0.0117     0.4457     0.0226
+7    0.3246     0.0120     0.4284     0.0231
+8    0.2964     0.0122     0.4119     0.0234
+9    0.2701     0.0123     0.3961     0.0235
+10   0.2431     0.0123     0.3808     0.0234
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_influential.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=max_pr_methodology_or_result | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_max_pr_methodology_or_result.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_max_pr_methodology_or_result.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92957 active nodes
+[INFO] Dropping 18 all-zero rows/cols
+[INFO] Found 18242 files for huggingface
+[INFO] Found 1046 files for github
+[INFO] Found 41905 files for html
+[INFO] Using 61193 files after resource type filtering
+[INFO] Original shape: (61193, 61193), keeping 61136 active nodes
+[INFO] Dropping 57 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61130 files after filelist filtering
+[INFO] Original shape: (61130, 61130), keeping 61130 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61130
+Total queries: 92975
+Filtered out queries (not in resource type): 31845
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 303
+Remaining valid queries: 60774
+[WARN] 356 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 356 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_methodology_or_result.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_methodology_or_result.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_methodology_or_result.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.6471     0.0024     0.6471     0.0047
+2    0.6022     0.0035     0.6246     0.0070
+3    0.5710     0.0044     0.6068     0.0086
+4    0.5339     0.0048     0.5885     0.0095
+5    0.4989     0.0051     0.5706     0.0101
+6    0.4641     0.0053     0.5528     0.0105
+7    0.4278     0.0054     0.5350     0.0107
+8    0.3932     0.0055     0.5173     0.0108
+9    0.3594     0.0056     0.4997     0.0109
+10   0.3234     0.0056     0.4821     0.0109
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_methodology_or_result.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=max_pr_methodology_or_result_influential | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_max_pr_methodology_or_result_influential.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_max_pr_methodology_or_result_influential.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92930 active nodes
+[INFO] Dropping 45 all-zero rows/cols
+[INFO] Found 18238 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41892 files for html
+[INFO] Using 61175 files after resource type filtering
+[INFO] Original shape: (61175, 61175), keeping 61044 active nodes
+[INFO] Dropping 131 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61038 files after filelist filtering
+[INFO] Original shape: (61038, 61038), keeping 61038 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61038
+Total queries: 92975
+Filtered out queries (not in resource type): 31937
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 307
+Remaining valid queries: 60678
+[WARN] 360 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 360 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_methodology_or_result_influential.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_methodology_or_result_influential.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_methodology_or_result_influential.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.5382     0.0063     0.5382     0.0125
+2    0.4801     0.0096     0.5091     0.0188
+3    0.4431     0.0117     0.4871     0.0229
+4    0.4039     0.0129     0.4663     0.0250
+5    0.3697     0.0138     0.4470     0.0266
+6    0.3386     0.0144     0.4289     0.0276
+7    0.3086     0.0148     0.4117     0.0282
+8    0.2815     0.0150     0.3955     0.0285
+9    0.2564     0.0151     0.3800     0.0286
+10   0.2308     0.0151     0.3651     0.0284
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_max_pr_methodology_or_result_influential.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=model | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/scilake_gt_modellink_model_adj_processed.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/scilake_gt_modellink_model_adj_csv_list_processed.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92874, 92874), keeping 92874 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+[INFO] Found 18203 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41884 files for html
+[INFO] Using 61132 files after resource type filtering
+[INFO] Original shape: (61132, 61132), keeping 60658 active nodes
+[INFO] Dropping 474 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 60652 files after filelist filtering
+[INFO] Original shape: (60652, 60652), keeping 59660 active nodes
+[INFO] Dropping 992 all-zero rows/cols
+valid_files:  59660
+Total queries: 92975
+Filtered out queries (not in resource type): 33315
+Queries with empty candidates in original results: 52
+Queries with empty candidates after filtering: 315
+Remaining valid queries: 59293
+[WARN] 367 queries have GT but no result. (Skipped in metrics)
+       e.g. ['00e7f2784f_table1.csv', '017379b0aa_table8.csv', '01bd852399_table1.csv', '01ee9197af_table2.csv', '02189803a9_table1.csv'] …
+[WARN] 367 GT queries missing in result_idx: ['00e7f2784f_table1.csv', '017379b0aa_table8.csv', '01bd852399_table1.csv', '01ee9197af_table2.csv', '02189803a9_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_model.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_model.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_model.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.3133     0.0148     0.3133     0.0283
+2    0.2546     0.0225     0.2839     0.0413
+3    0.2175     0.0273     0.2618     0.0486
+4    0.1845     0.0300     0.2424     0.0516
+5    0.1595     0.0320     0.2259     0.0533
+6    0.1397     0.0333     0.2115     0.0538
+7    0.1236     0.0343     0.1989     0.0536
+8    0.1102     0.0348     0.1878     0.0529
+9    0.0990     0.0351     0.1780     0.0519
+10   0.0891     0.0351     0.1691     0.0504
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_model.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=dataset | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/scilake_gt_modellink_dataset_adj_processed.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/scilake_gt_modellink_dataset_adj_csv_list_processed.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92856, 92856), keeping 92856 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+[INFO] Found 18192 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41880 files for html
+[INFO] Using 61117 files after resource type filtering
+[INFO] Original shape: (61117, 61117), keeping 60552 active nodes
+[INFO] Dropping 565 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 60546 files after filelist filtering
+[INFO] Original shape: (60546, 60546), keeping 59533 active nodes
+[INFO] Dropping 1013 all-zero rows/cols
+valid_files:  59533
+Total queries: 92975
+Filtered out queries (not in resource type): 33442
+Queries with empty candidates in original results: 52
+Queries with empty candidates after filtering: 322
+Remaining valid queries: 59159
+[WARN] 374 queries have GT but no result. (Skipped in metrics)
+       e.g. ['00e7f2784f_table1.csv', '01544052f3_table2.csv', '017379b0aa_table8.csv', '01bd852399_table1.csv', '01bd852399_table2.csv'] …
+[WARN] 374 GT queries missing in result_idx: ['00e7f2784f_table1.csv', '01544052f3_table2.csv', '017379b0aa_table8.csv', '01bd852399_table1.csv', '01bd852399_table2.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_dataset.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_dataset.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_dataset.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.3068     0.0160     0.3068     0.0303
+2    0.2500     0.0241     0.2784     0.0440
+3    0.2141     0.0295     0.2570     0.0518
+4    0.1826     0.0325     0.2384     0.0552
+5    0.1589     0.0347     0.2225     0.0569
+6    0.1398     0.0362     0.2087     0.0575
+7    0.1240     0.0371     0.1966     0.0572
+8    0.1108     0.0378     0.1859     0.0563
+9    0.0996     0.0381     0.1763     0.0551
+10   0.0896     0.0381     0.1676     0.0535
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_dataset.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=union | Aug=shuffle_col
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_union_direct_processed.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_union_direct_processed_csv_list.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92964, 92964), keeping 92964 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+[INFO] Found 18244 files for huggingface
+[INFO] Found 1046 files for github
+[INFO] Found 41911 files for html
+[INFO] Using 61201 files after resource type filtering
+[INFO] Original shape: (61201, 61201), keeping 61201 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61195 files after filelist filtering
+[INFO] Original shape: (61195, 61195), keeping 61195 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61195
+Total queries: 92975
+Filtered out queries (not in resource type): 31780
+Queries with empty candidates in original results: 53
+Queries with empty candidates after filtering: 302
+Remaining valid queries: 60840
+[WARN] 355 queries have GT but no result. (Skipped in metrics)
+       e.g. ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv'] …
+[WARN] 355 GT queries missing in result_idx: ['0d29dde813_table1.csv', '15ec9f2de7_table1.csv', '6df8dc90ba_table1.csv', '0fb79b9e59_table1.csv', '27b0f9ea6b_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_union.json
+✅  JSON created: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_union.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_union.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.5487     0.0015     0.5487     0.0030
+2    0.4922     0.0023     0.5204     0.0046
+3    0.4552     0.0028     0.4987     0.0056
+4    0.4164     0.0031     0.4781     0.0062
+5    0.3825     0.0033     0.4590     0.0066
+6    0.3508     0.0035     0.4410     0.0069
+7    0.3202     0.0036     0.4237     0.0070
+8    0.2924     0.0037     0.4073     0.0072
+9    0.2666     0.0037     0.3917     0.0073
+10   0.2399     0.0037     0.3765     0.0073
+Metrics plot saved to: metrics/metrics_scilake_final_shuffle_col_tfidf_entity_union.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+=== Augment_op: none ===
+→ Task=scilake_final | Level=direct | Aug=none
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_none_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_direct_label.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_direct_label.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92959 active nodes
+[INFO] Dropping 16 all-zero rows/cols
+[INFO] Found 18244 files for huggingface
+[INFO] Found 1046 files for github
+[INFO] Found 41906 files for html
+[INFO] Using 61196 files after resource type filtering
+[INFO] Original shape: (61196, 61196), keeping 61160 active nodes
+[INFO] Dropping 36 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61154 files after filelist filtering
+[INFO] Original shape: (61154, 61154), keeping 61154 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61154
+Total queries: 92975
+Filtered out queries (not in resource type): 31821
+Queries with empty candidates in original results: 3
+Queries with empty candidates after filtering: 382
+Remaining valid queries: 60769
+[WARN] 385 queries have GT but no result. (Skipped in metrics)
+       e.g. ['dc66448b98_table1.csv', '0e51a4e98c_table1.csv', '0d29dde813_table1.csv', '1e6ed7dd15_table4.csv', '6df8dc90ba_table1.csv'] …
+[WARN] 385 GT queries missing in result_idx: ['dc66448b98_table1.csv', '0e51a4e98c_table1.csv', '0d29dde813_table1.csv', '1e6ed7dd15_table4.csv', '6df8dc90ba_table1.csv']...
+✅ Metrics computed and saved to: metrics/metrics_scilake_final_none_tfidf_entity_direct.json
+✅  JSON created: metrics/metrics_scilake_final_none_tfidf_entity_direct.json
+⚙️  Plotting metrics to image...
+Loading metrics from: metrics/metrics_scilake_final_none_tfidf_entity_direct.json
+Loaded metrics!
+Plotting metrics...
+Length of ks: 10
+Length of precision: 10
+Length of recall: 10
+Length of map_scores: 10
+Length of f1: 10
+K    Precision  Recall     MAP        F1
+1    0.4119     0.0010     0.4119     0.0020
+2    0.3719     0.0015     0.3919     0.0031
+3    0.3492     0.0019     0.3777     0.0038
+4    0.3276     0.0022     0.3652     0.0044
+5    0.3082     0.0024     0.3538     0.0048
+6    0.2877     0.0025     0.3428     0.0050
+7    0.2657     0.0027     0.3318     0.0053
+8    0.2454     0.0027     0.3210     0.0054
+9    0.2257     0.0028     0.3104     0.0055
+10   0.2031     0.0028     0.2996     0.0055
+Metrics plot saved to: metrics/metrics_scilake_final_none_tfidf_entity_direct.png
+✅  Plot saved (check default output dir)
+⏩  Skipping metrics print for newly generated JSON
+
+→ Task=scilake_final | Level=direct_influential | Aug=none
+⚙️  Generating metrics JSON...
+🔍 Result JSON: /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_none_tfidf_entity_full.json
+🎯 GT matrix : /u1/z6dong/Repo/CitationLake/data/gt/csv_pair_matrix_direct_label_influential.npz
+🎯 GT list   : /u1/z6dong/Repo/CitationLake/data/gt/csv_list_direct_label_influential.pkl
+[INFO] Using resources: huggingface, github, html
+[INFO] Original shape: (92975, 92975), keeping 92936 active nodes
+[INFO] Dropping 39 all-zero rows/cols
+[INFO] Found 18238 files for huggingface
+[INFO] Found 1045 files for github
+[INFO] Found 41897 files for html
+[INFO] Using 61180 files after resource type filtering
+[INFO] Original shape: (61180, 61180), keeping 61050 active nodes
+[INFO] Dropping 130 all-zero rows/cols
+[INFO] Filelist loaded: 92961 entries
+[INFO] Kept 61044 files after filelist filtering
+[INFO] Original shape: (61044, 61044), keeping 61044 active nodes
+[INFO] Dropping 0 all-zero rows/cols
+valid_files:  61044
+Total queries: 92975
+Filtered out queries (not in resource type): 31931
+Queries with empty candidates in original results: 3
+Queries with empty candidates after filtering: 382
+Remaining valid queries: 60659
+[WARN] 385 queries have GT but no result. (Skipped in metrics)
+       e.g. ['dc66448b98_table1.csv', '0e51a4e98c_table1.csv', '0d29dde813_table1.csv', '1e6ed7dd15_table4.csv', '6df8dc90ba_table1.csv'] …
+[WARN] 385 GT queries missing in result_idx: ['dc66448b98_table1.csv', '0e51a4e98c_table1.csv', '0d29dde813_table1.csv', '1e6ed7dd15_table4.csv', '6df8dc90ba_table1.csv']...
+

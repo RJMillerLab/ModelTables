@@ -456,7 +456,7 @@ def main():
     df_unique = df_merged.drop_duplicates(subset=['readme_hash'], keep='first').copy()
     df_unique = df_unique[df_unique['readme_hash'].notnull()]
     print(f"...Found {len(df_unique)} unique readme content out of {len(df_merged)} rows.")
-    output_file = os.path.join(processed_base_path, f"{data_type}_step2.parquet")
+    output_file = os.path.join(processed_base_path, f"{data_type}_step2_v2.parquet")
     df_merged.drop(columns=['card_readme', 'github_link'], inplace=True, errors='ignore')
     to_parquet(df_merged, output_file)
     print(f"✅ Results saved to: {output_file}")

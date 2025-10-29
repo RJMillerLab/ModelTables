@@ -38,6 +38,12 @@ INPUT_DIR = "data/processed"
 INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_merged.parquet")
 OUTPUT_DIR = "data/deduped"
 FIG_DIR = "data/analysis"
+
+# ====== Skip generic CSV sets ======
+GENERIC_TABLE_PATTERNS = [
+    "1910.09700_table",
+    "204823751_table"
+]
 # Ensure the output directory exists.
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_dedup.parquet")
@@ -67,6 +73,11 @@ for resource in RESOURCE_PRIORITY.keys():
 def is_placeholder(cell):
     s = str(cell).strip().lower()
     return s == "" or s == "nan" or all(ch in " :-" for ch in s)
+
+def is_generic_table(path):
+    """Check if file should be filtered as generic/too-general table."""
+    filename = os.path.basename(path)
+    return any(pattern in filename for pattern in GENERIC_TABLE_PATTERNS)
 
 def get_linked_set_from_parquet(df, cols):
     linked_set = []
@@ -505,22 +516,30 @@ def main():
     # --- Step 2: QC and sha256 hash ---
     # we don't care what's stats before qc. However, we retain all the csv in data/qc_backup for future reference.
     files_info = valid_filelist_with_qc_from_local(DIRS)
-    # Filter local files that unlinked to modelcard
+    # Filter local files that unlinked to modelcard and generic tables
     resource_totals = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     resource_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
+    resource_generic_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     filtered_files_info = []
     for fi in tqdm(files_info, desc="Filtering files"):
         res = fi["resource"]
         resource_totals[res] += 1
+        
+        # Filter 1: Must be in linked_set
+        # Filter 2: Must not be a generic table
         if fi["file_path"] in linked_set:
-            resource_filtered[res] += 1
-            filtered_files_info.append(fi)
+            if not is_generic_table(fi["file_path"]):
+                resource_filtered[res] += 1
+                filtered_files_info.append(fi)
+            else:
+                resource_generic_filtered[res] += 1
     
     for res in RESOURCE_PRIORITY.keys():
         total = resource_totals[res]
         kept = resource_filtered[res]
-        filtered_out = total - kept
-        print(f"Resource {res}: total {total}, kept {kept}, filtered out {filtered_out}")
+        generic_removed = resource_generic_filtered[res]
+        filtered_out = total - kept - generic_removed
+        print(f"Resource {res}: total {total}, kept {kept}, generic removed {generic_removed}, filtered out {filtered_out}")
 
     # check duplicate stats
     dup_matrix, stats, hash_groups = compute_dup_matrix_from_sha(filtered_files_info)

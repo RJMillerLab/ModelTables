@@ -491,6 +491,25 @@ def main():
     
     to_parquet(results_df, results_path)
     print(f"\nSaved results to {results_path}")
+    
+    # Concatenate per-resource valid-title lists into a global list
+    try:
+        combined_paths = set()
+        for resource in RESOURCES:
+            valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid.txt")
+            if os.path.exists(valid_title_valid_file):
+                with open(valid_title_valid_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            combined_paths.add(line)
+        all_valid_title_valid_file = os.path.join(OUTPUT_DIR, "all_valid_title_valid.txt")
+        with open(all_valid_title_valid_file, 'w') as f:
+            for path in sorted(combined_paths):
+                f.write(path + "\n")
+        print(f"Saved concatenated valid-title list to {all_valid_title_valid_file} ({len(combined_paths)})")
+    except Exception as e:
+        print(f"Warning: failed to generate all_valid_title_valid.txt: {e}")
 
 if __name__ == "__main__":
     main()

@@ -71,7 +71,7 @@ This step extracts tabular data from various sources and processes it.
 ```bash
 # Extract tables from GitHub READMEs and Model Cards. Saves CSVs to local folder.
 # Input: data/processed/modelcard_step1.parquet, github_readmes_info.parquet, downloaded_github_readmes/
-# Output: modelcard_step2.parquet, deduped_hugging_csvs/, hugging_deduped_mapping.json, deduped_github_csvs/, md_to_csv_mapping.json
+# Output: data/processed/modelcard_step2.parquet, data/processed/deduped_hugging_csvs_v2/, data/processed/hugging_deduped_mapping_v2.json, data/processed/deduped_github_csvs_v2/, data/processed/deduped_github_csvs_v2/md_to_csv_mapping.json
 python -m src.data_preprocess.step2_gitcard_tab
 
 # Process downloaded GitHub HTML files to Markdown.
@@ -182,12 +182,12 @@ Ensure data quality and consistency before generating final ground truth.
 # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM.
 # Input: modelcard_step3_merged
 # Output: modelcard_step3_dedup
-python -m src.data_analysis.qc_dedup > logs/qc_dedup_0516.log
+python -m src.data_analysis.qc_dedup > logs/qc_dedup_$(date +%Y%m%d).log
 python -m src.data_analysis.qc_dedup_fig
 # Print table #rows #cols
 # Input: modelcard_step3_dedup
 # Output: benchmark_results
-python -m src.data_analysis.qc_stats > logs/qc_stats_0516.log
+python -m src.data_analysis.qc_stats > logs/qc_stats_$(date +%Y%m%d).log
 python -m src.data_analysis.qc_stats_fig
 # (if compare 2 version's stats) 
 python -m src.data_analysis.qc_anomaly --recursive
@@ -212,6 +212,11 @@ python -m src.data_gt.step3_create_symlinks
 
 # Build ground truth (paper-level, model-level, dataset-level).
 bash src/data_gt/step3_gt.sh
+
+python -m src.tools.check_gt_coverage \
+  --csv-name 1910.09700_table0.csv \
+  --levels direct \
+  --mode both
 
 # Debug NPZ ground truth files to ensure valid conditions.
 python -m src.data_gt.debug_npz --gt-dir data/gt/
