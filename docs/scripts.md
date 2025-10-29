@@ -408,6 +408,13 @@ python -m src.gpt_evaluation.step2_query_openrouter --input output/gpt_evaluatio
 # python -m src.gpt_evaluation.step2_retry_failed \
 #     --input output/gpt_evaluation/step2_openrouter_results_full.jsonl \
 #     --output output/gpt_evaluation/step2_openrouter_results_retried.jsonl
+
+# add merge please
+python -m src.gpt_evaluation.step2_merge_results --main output/gpt_evaluation/step2_full_198.jsonl --additional output/gpt_evaluation/step2_gpt4mini_full.jsonl --output output/gpt_evaluation/step2_all_5models.jsonl
+
+# crowdsourcing metrics analysis
+python -m src.gpt_evaluation.visualize_crowdsourcing_metrics # generate figures for subset
+python -m src.gpt_evaluation.visualize_crowdsourcing_metrics_full # generate figures for full dataset
 ```
 
 ---
