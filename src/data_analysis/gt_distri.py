@@ -15,6 +15,7 @@ import numpy as np
 from scipy.stats import gaussian_kde
 from scipy.sparse import load_npz
 from tqdm import tqdm
+from typing import Optional
 
 
 plt.rcParams.update({
@@ -45,7 +46,7 @@ PALETTE = {
 
 # -------- Loader --------
 class GTLengthLoader:
-    def __init__(self, name: str, path: str, key: str | None = None):
+    def __init__(self, name: str, path: str, key: Optional[str] = None):
         self.name, self.path, self.key = name, path, key
 
     def _load_pkl(self):
@@ -66,12 +67,84 @@ class GTLengthLoader:
     #    data = self._load()
     #    return [len(v) for v in data.values() if isinstance(v, list)]
     def lengths(self):
+        """
+        Return per-row link counts (>0) with optional filtering for csv-level GTs
+        to exclude generic CSV sets. Filtering rules apply to csv-level matrices only.
+        """
         if self.path.endswith(".npz"):
             M = load_npz(self.path).tocsr()
-            return [n for n in M.getnnz(axis=1).tolist() if n > 0]
-        else:
-            data = self._load_pkl()
-            return [l for l in (len(v) for v in data.values() if isinstance(v, list)) if l > 0]
+
+            # Optional filtering (csv-level only): remove generic CSV rows/cols
+            # Known csv-level sources in this figure: "Paper Links" (direct_label)
+            # "All Links" may not have an index available; filter only if index found.
+            GENERIC_TABLE_PATTERNS = [
+                "1910.09700_table",
+                "204823751_table",
+            ]
+
+            def load_index_list(idx_path: str):
+                import pickle
+                if not os.path.exists(idx_path):
+                    return []
+                if idx_path.endswith('.pkl'):
+                    with open(idx_path, 'rb') as f:
+                        lst = pickle.load(f)
+                    return [os.path.basename(str(x)) for x in lst]
+                with open(idx_path, 'r', encoding='utf-8') as f:
+                    return [os.path.basename(line.strip()) for line in f if line.strip()]
+
+            keep_mask = None
+            # Map figure source name to an index file path if available
+            if self.name == "Paper Links":
+                idx_file = os.path.join("data", "gt", "csv_list_direct_label.pkl")
+                idx_names = load_index_list(idx_file)
+                if idx_names and len(idx_names) == M.shape[0]:
+                    name2idx = {n: i for i, n in enumerate(idx_names)}
+                    keep_mask = np.ones(len(idx_names), dtype=bool)
+                    # mask out generic
+                    for n, i in name2idx.items():
+                        if any(p in n for p in GENERIC_TABLE_PATTERNS):
+                            keep_mask[i] = False
+            elif self.name == "All Links":
+                # Try a few likely index filenames; skip if not found
+                candidates = [
+                    os.path.join("data", "gt", "csv_list_union_direct_processed.pkl"),
+                    os.path.join("data", "gt", "csv_list_union.pkl"),
+                    os.path.join("data", "gt", "csv_list_union.txt"),
+                ]
+                idx_names = []
+                for c in candidates:
+                    idx_names = load_index_list(c)
+                    if idx_names:
+                        break
+                if idx_names and len(idx_names) == M.shape[0]:
+                    name2idx = {n: i for i, n in enumerate(idx_names)}
+                    keep_mask = np.ones(len(idx_names), dtype=bool)
+                    for n, i in name2idx.items():
+                        if any(p in n for p in GENERIC_TABLE_PATTERNS):
+                            keep_mask[i] = False
+
+            if keep_mask is None:
+                # Fallback: no index or not csv-level → no filtering
+                return [n for n in M.getnnz(axis=1).tolist() if n > 0]
+
+            # Fast masked counting without building a sliced submatrix
+            indptr, indices = M.indptr, M.indices
+            out = []
+            for i in range(M.shape[0]):
+                if not keep_mask[i]:
+                    continue
+                start, end = indptr[i], indptr[i+1]
+                if end <= start:
+                    continue
+                cnt = int(np.count_nonzero(keep_mask[indices[start:end]]))
+                if cnt > 0:
+                    out.append(cnt)
+            return out
+
+        # Pickle path (baseline benchmarks): unchanged
+        data = self._load_pkl()
+        return [l for l in (len(v) for v in data.values() if isinstance(v, list)) if l > 0]
             #return [len(v) for v in data.values() if isinstance(v, list)]
 
 # -------- Helper --------
@@ -210,3 +283,15 @@ if __name__ == "__main__":
     #plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
     #plot_log_boxplot(lengths, PALETTE, "Log-scale GT link count distribution across benchmarks", "gt_boxplot")
     plot_violin(lengths, PALETTE, "Log-scale links count distribution across benchmarks", "gt_violin")
+
+"""
+SANTOS Small: count=50, min=11, max=31
+TUS Small: count=1327, min=4, max=235
+TUS Large: count=4296, min=4, max=735
+SANTOS Large: count=82, min=20, max=20
+Paper Links: count=92963, min=1, max=66522
+Model Links: count=92874, min=2, max=15327
+Dataset Links: count=92856, min=2, max=12052
+All Links: count=92964, min=2, max=80345
+Violin plot saved → data/analysis/gt_violin_violin.pdf
+"""
