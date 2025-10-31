@@ -85,22 +85,33 @@ def main():
     parser.add_argument("--repo_root", type=str, default="/u4/z6dong/Repo", help="Repository root path.")
     parser.add_argument("--mode", type=str, choices=list(MODE_SUFFIX.keys())+["all"], default="base",
                         help="Mode for folder and file suffix. Use 'all' to run every mode.")
+    parser.add_argument("--dir-name", type=str, default=None,
+                        help="Override target directory name (default: scilake_final{suffix}). E.g., scilake_final_v2")
     args = parser.parse_args()
 
     modes = [args.mode] if args.mode != "all" else list(MODE_SUFFIX.keys())
 
     for mode in modes:
         dir_suffix, file_suffix = MODE_SUFFIX[mode]
+        # Use v2 source directories for base data; augmented variants append suffixes to v2 dirs
+        base_dirs = {
+            "hugging": "deduped_hugging_csvs_v2",
+            "github":  "deduped_github_csvs_v2",
+            "html":    "tables_output_v2",
+            "llm":     "llm_tables"
+        }
+        # Apply dir_suffix to create augmented folder names next to v2 dirs
         src_folders = [
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"deduped_hugging_csvs{dir_suffix}"), ######## apply dir_suffix to all
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"deduped_github_csvs{dir_suffix}"), ########
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"tables_output{dir_suffix}"), ########
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"llm_tables{dir_suffix}") ########
+            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['hugging']}{dir_suffix}"),
+            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['github']}{dir_suffix}"),
+            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['html']}{dir_suffix}"),
+            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['llm']}{dir_suffix}")
         ]
+        dir_name = args.dir_name if args.dir_name else f"scilake_final{dir_suffix}"
         target_dir = os.path.join(
             args.repo_root,
             "starmie_internal", "data",
-            f"scilake_final{dir_suffix}",
+            dir_name,
             "datalake"
         )  ######## build correct target directory
 

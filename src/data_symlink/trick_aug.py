@@ -224,10 +224,10 @@ def main():
     args = parser.parse_args()
     
     folders = [
-        "CitationLake/data/processed/deduped_hugging_csvs",
-        "CitationLake/data/processed/deduped_github_csvs",
-        "CitationLake/data/processed/tables_output",
-        "CitationLake/data/processed/llm_tables"
+        "CitationLake/data/processed/deduped_hugging_csvs_v2",
+        "CitationLake/data/processed/deduped_github_csvs_v2",
+        "CitationLake/data/processed/tables_output_v2",
+        #"CitationLake/data/processed/llm_tables"
     ]
     for folder in folders:
         full_folder = os.path.join(args.repo_root, folder)
