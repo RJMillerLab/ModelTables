@@ -15,7 +15,7 @@ from matplotlib.patches import Patch
 from src.utils import to_parquet
 import csv
 
-V2_MODE = True  # Set to True to use v2 versions
+V2_MODE = False  # Set to True to use v2 versions
 V2_SUFFIX = "_v2"  # Suffix for v2 output files
 
 # Configuration (switch by V2_MODE)
@@ -37,13 +37,19 @@ GENERIC_TABLE_PATTERNS = [
 ]
 
 # Benchmark data (WDC removed)
+# Note: # Cols is total columns across all tables (avg_cols × #tables)
+#       Avg # Rows is average rows per table
+#       Size (GB) is total benchmark size
 benchmark_data = [
     ["SANTOS Small", 550, 6322, 6921, 0.45],
     ["TUS Small", 1530, 14810, 4466, 1.00],
     ["TUS Large", 5043, 54923, 1915, 1.50],
     ["SANTOS Large", 11090, 123477, 7675, 11.00],
     ["WDC", 50000000, 250000000, 14, 500.00],
-    #["GitTable", 1000000, 12, 142, 10.00]
+    ["GitTable", 1000000, 12000000, 142, 0.0],  # 1M tables × 12 avg cols, avg 142 rows, size unknown
+    ["WikiTables", 1400000, 7500000, 14, 0.0],  # 1.4M tables, 7.5M total cols (avg ~5.36 cols/table), avg ~14 rows (from sample data), size unknown
+    ["UGEN-V1", 1050, 10550, 8, 0.004],  # 1050 tables: 50 query (8×11) + 1000 datalake (8×10). Weighted avg rows: (50×8+1000×8)/1050=8. Total size: 205KB+4MB≈4.2MB
+    ["UGEN-V2", 1050, 13650, 23, 0.01],  # 1050 tables: 50 query (107×13) + 1000 datalake (19×13). Weighted avg rows: (50×107+1000×19)/1050≈23. Total size: 2MB+8MB=10MB
 ]
 
 RESOURCES = {
@@ -294,6 +300,7 @@ def create_combined_results(benchmark_data, resource_stats):
 
 def annotate_bars(ax, fontsize=16, baseline_count=0, metric="", bar_width=0.15, group_width=0.4):
     """Annotate bars with different formatting for baseline vs scilake data.
+    Uses intelligent label placement to avoid overlaps.
     
     Args:
         ax: matplotlib axis
@@ -304,62 +311,78 @@ def annotate_bars(ax, fontsize=16, baseline_count=0, metric="", bar_width=0.15, 
         group_width: width of group spacing
     """
     # Reduce font size to minimize overlap
-    annotation_fontsize = max(8, fontsize - 4)
+    annotation_fontsize = max(7, fontsize - 6)
     
-    # Get all bar heights for smart positioning
-    heights = [p.get_height() for p in ax.patches if p.get_height() > 0]
-    if not heights:
+    # Get all patches and their properties
+    patches = [p for p in ax.patches if p.get_height() > 0]
+    if not patches:
         return
     
-    # Calculate dynamic vertical offset based on data range
-    min_height = min(heights)
-    max_height = max(heights)
-    height_range = max_height - min_height
+    # Calculate positions and heights
+    positions = []
+    heights = []
+    for i, p in enumerate(patches):
+        x = p.get_x() + p.get_width() / 2
+        y = p.get_height()
+        positions.append((x, y))
+        heights.append(y)
     
-    # Base offset - smaller for better spacing
-    base_offset = 2
+    max_height = max(heights) if heights else 1
+    min_height = min(heights) if heights else 0
     
-    for i, p in enumerate(ax.patches):
-        height = p.get_height()
-        if height > 0:
-            # Determine if this is a baseline bar or scilake bar
-            is_baseline = i < baseline_count
+    for i, (p, (x, height)) in enumerate(zip(patches, positions)):
+        if height <= 0:
+            continue
             
-            # Special formatting for Avg # Rows
-            if metric == "Avg # Rows":
-                if is_baseline:
-                    # Baseline: keep as integer
-                    display_text = f'{int(height)}'
-                else:
-                    # Scilake: use 1 decimal place
-                    display_text = f'{height:.1f}'
+        # Determine if this is a baseline bar or scilake bar
+        is_baseline = i < baseline_count
+        
+        # Special formatting for Avg # Rows
+        if metric == "Avg # Rows":
+            if is_baseline:
+                display_text = f'{int(height)}'
             else:
-                # For other metrics: integers show as int, decimals show 1 decimal place
-                if height == int(height):
-                    display_text = f'{int(height)}'
-                else:
-                    display_text = f'{height:.1f}'
-            
-            # Smart vertical positioning to reduce overlap
-            # Alternate between top and bottom positioning for nearby bars
-            if i % 2 == 0:
-                # Even bars: position above
+                display_text = f'{height:.1f}'
+        else:
+            # For other metrics: integers show as int, decimals show 1 decimal place
+            if height == int(height):
+                display_text = f'{int(height)}'
+            else:
+                display_text = f'{height:.1f}'
+        
+        # Intelligent placement to avoid overlaps
+        # For baseline bars (dense group), use staggered vertical offsets (closer to bars)
+        if is_baseline:
+            # Use pattern: every 3rd bar uses larger offset to stagger labels
+            pattern = i % 3
+            if pattern == 0:
+                # Standard above (close to bar)
                 va = 'bottom'
-                y_offset = base_offset + (height / max_height) * 2  # Reduced dynamic offset
+                y_offset = 2 + (height / max_height) * 1
+            elif pattern == 1:
+                # Lower offset (closer to bar)
+                va = 'bottom'
+                y_offset = 3 + (height / max_height) * 1.5
             else:
-                # Odd bars: position below (if there's space)
-                va = 'top'
-                y_offset = -(base_offset + 1)
-            
-            # Always keep horizontal centering - no horizontal offset
-            x_offset = 0
-            
-            ax.annotate(display_text,
-                        (p.get_x() + p.get_width() / 2, height),
-                        ha='center', va=va, fontsize=annotation_fontsize, rotation=0,
-                        xytext=(x_offset, y_offset), 
-                        textcoords='offset points',
-                        bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='none', alpha=0.6))
+                # Slightly higher offset (still close)
+                va = 'bottom'
+                y_offset = 4 + (height / max_height) * 2
+        else:
+            # For scilake bars (more spaced), use simple alternating (close to bars)
+            if i % 2 == 0:
+                va = 'bottom'
+                y_offset = 2
+            else:
+                va = 'bottom'
+                y_offset = 3
+        
+        # Place annotation with smaller padding to reduce overlap
+        ax.annotate(display_text,
+                  (x, height),
+                  ha='center', va=va, fontsize=annotation_fontsize, rotation=0,
+                  xytext=(0, y_offset), 
+                  textcoords='offset points',
+                  bbox=dict(boxstyle='round,pad=0.1', fc='white', ec='none', alpha=0.7))
 
 def plot_metric(df, metric, filename):
     from matplotlib.patches import Patch
@@ -375,11 +398,22 @@ def plot_metric(df, metric, filename):
     })
     figsize=(12, 4)
     
-    palette_baseline = ["#8b2e2e", "#b74a3c", "#d96e44", "#f29e4c", "#FFBE5F"]
+    # Extended palette for 9 baseline benchmarks (red shades from dark to light)
+    palette_baseline = [
+        "#8b2e2e",  # Dark red
+        "#a03a35",  # Dark red-orange
+        "#b74a3c",  # Red-brown
+        "#c85a45",  # Medium red-orange
+        "#d96e44",  # Orange-red
+        "#e6864c",  # Light orange-red
+        "#f29e4c",  # Orange
+        "#FFB55A",  # Light orange
+        "#FFBE5F"   # Pale orange-yellow
+    ]
     palette_resource = ["#486f90", "#4e8094", "#50a89d", "#a5d2bc"]
 
-    bar_width = 0.15
-    gap = 0.4
+    bar_width = 0.12  # Reduced bar width for tighter spacing
+    gap = 0.25  # Reduced gap between clusters for tighter layout
     group_width = len(RESOURCES) * bar_width + gap
     clusters = ['baseline', 'duplicated', 'dedup', 'w/ title', 'w/ valid title']
     resources = list(RESOURCES.keys())
@@ -394,7 +428,28 @@ def plot_metric(df, metric, filename):
     heights = []
     colors = []
     positions = []
-    for i, val in enumerate(df.iloc[:4][metric]):
+    # Find all baseline benchmarks (not starting with "scilake-")
+    baseline_mask = ~df['Benchmark'].str.startswith('scilake-')
+    baseline_df = df[baseline_mask]
+    num_baselines = len(baseline_df)
+    
+    # Ensure we have enough colors
+    if num_baselines > len(palette_baseline):
+        # Extend palette if needed by creating more shades
+        from matplotlib.colors import LinearSegmentedColormap
+        import numpy as np
+        # Generate additional colors by interpolation from last color to a lighter shade
+        cmap = LinearSegmentedColormap.from_list('reds', [palette_baseline[-1], '#FFF4E6'])
+        n_needed = num_baselines - len(palette_baseline)
+        additional_colors = []
+        for i in np.linspace(0.2, 1.0, n_needed):
+            rgb = cmap(i)
+            # Convert to hex (rgb is already in [0,1] range)
+            hex_color = f"#{int(rgb[0]*255):02x}{int(rgb[1]*255):02x}{int(rgb[2]*255):02x}"
+            additional_colors.append(hex_color)
+        palette_baseline = palette_baseline + additional_colors
+    
+    for i, val in enumerate(baseline_df[metric]):
         positions.append(i * bar_width)
         heights.append(val)
         colors.append(palette_baseline[i])
@@ -409,14 +464,15 @@ def plot_metric(df, metric, filename):
                 heights.append(val[0])
                 colors.append(palette_resource[ri])
 
-    xtick_positions = [0 + (4 - 1) * bar_width / 2] + [
+    xtick_positions = [0 + (num_baselines - 1) * bar_width / 2] + [
         i * group_width + (len(resources) - 1) * bar_width / 2 for i in range(1, len(clusters))
     ]
     xtick_labels = clusters
 
     fig = plt.figure(figsize=figsize)
 
-    ax = fig.add_axes([0.08, 0.1, 0.7, 0.8])
+    # Adjust axes to leave more space at bottom for two-row legend
+    ax = fig.add_axes([0.08, 0.15, 0.7, 0.75])
 
     ax.bar(positions, heights, width=bar_width, color=colors)
     ax.set_yscale('log')
@@ -424,31 +480,43 @@ def plot_metric(df, metric, filename):
     ax.set_xticklabels(xtick_labels) #, fontsize=12
     ax.set_ylabel(f"{metric} (log scale)")
     ax.set_title(f"{metric}")
-    annotate_bars(ax, fontsize=fontsize)
+    annotate_bars(ax, fontsize=fontsize, baseline_count=num_baselines, metric=metric, bar_width=bar_width, group_width=group_width)
 
     handles_baseline = [
         Patch(facecolor=palette_baseline[i], label=BENCHMARK_NAMES[i])
         for i in range(len(BENCHMARK_NAMES))
     ]
-    labels_baseline = [f"Baseline: {n}" for n in BENCHMARK_NAMES]
+    labels_baseline = BENCHMARK_NAMES
 
     handles_resource = [
         Patch(facecolor=palette_resource[i], label=resources[i])
         for i in range(len(resources))
     ]
-    labels_resource = [f"Resource: {res}" for res in resources]
+    labels_resource = resources
 
+    # Create two-row legend for baseline benchmarks to avoid overlap
+    num_baseline = len(BENCHMARK_NAMES)
+    ncol_baseline = (num_baseline + 1) // 2  # Ceiling division for 2 rows
+    
     fig.legend(
         handles_baseline, labels_baseline,
-        loc="upper left",           
-        bbox_to_anchor=(0.80, 0.90),
-        title="Baseline" 
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.02),
+        ncol=ncol_baseline,
+        fontsize=11,
+        columnspacing=1.0,
+        handletextpad=0.5,
+        title="Baseline Benchmarks"
     )
     fig.legend(
         handles_resource, labels_resource,
-        loc="upper left",
-        bbox_to_anchor=(0.80, 0.50),
-        title="Resource"
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.02),
+        ncol=4,
+        fontsize=11,
+        columnspacing=1.0,
+        handletextpad=0.5,
+        title="Resources"
     )
 
     # avoid using tight_layout()

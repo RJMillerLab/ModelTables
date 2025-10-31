@@ -252,12 +252,12 @@ Prepare data and augmentations for integration with the Starmie benchmark framew
 # go to starmie folder, and copy this sh file to run 
 python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str # trick: header-str(value)
 python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode transpose # trick: permutation
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_transpose # trick: tr + str 
+#python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_transpose # trick: tr + str 
 
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr_str
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base # symlink csvs to the target folder
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --dir-name scilake_final_v2_str
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --dir-name scilake_final_v2_tr
+#python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr_str --dir-name scilake_final_v2_tr_str
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --dir-name scilake_final_v2 # symlink csvs to the target folder
 # bash src/data_analysis/count_files.sh check whether the symlink path include some files
 ```
 
