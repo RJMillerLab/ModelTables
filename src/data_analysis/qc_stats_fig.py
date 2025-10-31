@@ -15,7 +15,7 @@ OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # V2 mode configuration (should match qc_stats.py)
-V2_MODE = False  # Set to True to use v2 versions of CSV files
+V2_MODE = True  # Set to True to use v2 versions of CSV files
 V2_SUFFIX = "_v2"  # Suffix for v2 output files
 
 RESOURCES = {

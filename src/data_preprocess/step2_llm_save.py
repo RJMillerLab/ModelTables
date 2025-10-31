@@ -8,8 +8,12 @@ import os, re
 import pandas as pd
 import numpy as np
 import json
+from tqdm import tqdm
 from src.data_ingestion.readme_parser import MarkdownHandler
 from src.utils import to_parquet
+
+# Flag: Virtual mode - generate paths but don't actually create CSV files
+VIRTUAL_CSV_GENERATION = True  ######## Set to True to generate llm_table_list paths without creating actual CSV files
 
 
 def clean_markdown_block(md_block: str):
@@ -22,7 +26,7 @@ def clean_markdown_block(md_block: str):
         md_block = md_block[:-3].strip()
     return md_block
 
-def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_column: str = "corpusid", skip_if_html_fulltext: bool = True):
+def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_column: str = "corpusid", skip_if_html_fulltext: bool = True, virtual_mode: bool = False):
     """
     For each row in df, extract markdown tables from 'llm_response_raw',
     save them as individual CSV files, and collect their paths.
@@ -31,7 +35,7 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
     os.makedirs(output_dir, exist_ok=True)
     df["llm_table_list"] = [[] for _ in range(len(df))]  ######## initialize empty list
 
-    for idx, row in df.iterrows():
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing LLM tables"):
         # --- skip if HTML fulltext is available ---
         if skip_if_html_fulltext:
             html_path = row["html_html_path"]
@@ -83,18 +87,24 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
             markdown_table = clean_markdown_block(block)
             filename = f"{safe_key}_table{i}.csv"
             out_csv_path = os.path.join(output_dir, filename)
-            if markdown_table:
-                try:
-                    tmp_csv_path = MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
-                    if tmp_csv_path:
-                        csv_paths.append(out_csv_path)
-                except Exception as e:
-                    print('----------------------')
-                    print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
-                    print(markdown_table)
-                    continue
+            
+            if virtual_mode:
+                # Virtual mode: just generate the path without creating the file
+                csv_paths.append(out_csv_path)
             else:
-                continue
+                # Normal mode: actually create the CSV file
+                if markdown_table:
+                    try:
+                        tmp_csv_path = MarkdownHandler.markdown_to_csv(markdown_table, out_csv_path)
+                        if tmp_csv_path:
+                            csv_paths.append(out_csv_path)
+                    except Exception as e:
+                        print('----------------------')
+                        print(f"⚠️ Failed to convert markdown for {safe_key}, table {i}: {e}")
+                        print(markdown_table)
+                        continue
+                else:
+                    continue
         df.at[idx, "llm_table_list"] = csv_paths
     return df
 
@@ -104,12 +114,19 @@ if __name__ == "__main__":
     print(df_parquet.head(5))
     print(df_parquet.columns)
 
-    output_dir =  "data/processed/llm_tables"
+    output_dir = "data/processed/llm_tables"
     os.makedirs(output_dir, exist_ok=True)
-    # Process tables and write csvs
-    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=False)
-    # Save updated parquet
-    updated_parquet_path = "data/processed/final_integration_with_paths.parquet"
+    
+    # Process tables and write csvs (or just generate paths in virtual mode)
+    df_parquet = process_markdown_and_save_paths(df_parquet, output_dir, key_column="corpusid", skip_if_html_fulltext=False, virtual_mode=VIRTUAL_CSV_GENERATION)
+    
+    if VIRTUAL_CSV_GENERATION:
+        print(f"\n🎉 Virtual mode: Generated llm_table_list paths (no CSV files created).")
+    else:
+        print(f"\n🎉 All markdown tables saved. Paths recorded in 'llm_table_list'.")
+    
+    # Save updated parquet (always save, regardless of skip flag)
+    updated_parquet_path = "data/processed/final_integration_with_paths_v2.parquet"
     to_parquet(df_parquet, updated_parquet_path)
     print(f"\n🎉 All markdown tables saved. Paths recorded in 'llm_table_list'.")
     print(f"📝 Updated parquet saved to: {updated_parquet_path}")

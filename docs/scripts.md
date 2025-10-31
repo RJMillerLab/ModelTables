@@ -135,7 +135,7 @@ mkdir logs
 # Input: title2arxiv_new_cache.json, html_table.parquet, extracted_annotations.parquet, pdf_download_cache.json
 # Output: before_llm_output.parquet, batch_input.jsonl, batch_output.jsonl, llm_markdown_table_results.parquet
 python -m src.data_preprocess.step2_integration_order > logs/step2_integration_order_0508.log
-# Check OpenAI batch job status (if using LLM for table processing)
+# (Optional) Check OpenAI batch job status (if using LLM for table processing)
 bash src/data_preprocess/openai_batchjob_status.sh
 
 # (Optional) If the sequence is wrong, reproduce from the log...
@@ -161,6 +161,7 @@ python -m src.data_gt.step3_pre_merge
 # (Only need if we not run s2orc_API_query) python -m src.data_gt.step3_API_query # paper level: get citations relation by API | Tips: notify the timing issue, this is the updated real-time query, your local corpus data might be outdated
 # I: final_integration_with_paths.parquet. O: modelcard_citation_enriched.parquet
 
+####################################### just for paper pairs
 # Compute paper-pair overlap scores for citation analysis.
 # Input: extracted_annotations/modelcard_citation_enriched
 # Output: modelcard_rate/label.pickle
@@ -213,10 +214,8 @@ python -m src.data_gt.step3_create_symlinks
 # Build ground truth (paper-level, model-level, dataset-level).
 bash src/data_gt/step3_gt.sh
 
-python -m src.tools.check_gt_coverage \
-  --csv-name 1910.09700_table0.csv \
-  --levels direct \
-  --mode both
+# (Optional)
+python -m src.tools.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both
 
 # Debug NPZ ground truth files to ensure valid conditions.
 python -m src.data_gt.debug_npz --gt-dir data/gt/

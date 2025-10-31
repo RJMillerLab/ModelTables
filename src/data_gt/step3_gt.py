@@ -34,8 +34,8 @@ GT_DIR = "data/gt"
 # ---- default files (can be overridden by CLI/kwargs) ----
 FILES = {
     "combined": f"{DATA_DIR}/modelcard_citation_all_matrices.pkl.gz",
-    "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup.parquet",
-    "integration": f"{DATA_DIR}/final_integration_with_paths.parquet",
+    "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup_v2.parquet",
+    "integration": f"{DATA_DIR}/final_integration_with_paths_v2.parquet",
     "title_list": f"{DATA_DIR}/modelcard_all_title_list.parquet",
     "valid_title": f"{DATA_DIR}/all_title_list_valid.parquet"
 }

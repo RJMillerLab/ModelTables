@@ -99,8 +99,8 @@ if __name__ == "__main__":
     processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
     
-    # load four keys directly from step3_merged.parquet
-    df_merged = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step3_dedup.parquet"),
+    # load four keys directly from step3_merged_v2.parquet
+    df_merged = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step3_dedup_v2.parquet"),
                                 columns=['modelId', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup', 'hugging_table_list_dedup', 'github_table_list_dedup'])
     print(f"Loaded DataFrame with {len(df_merged)} rows.")
 
@@ -112,8 +112,8 @@ if __name__ == "__main__":
 
     # Save the final DataFrame
     df_merged.drop(columns=['hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'], inplace=True, errors='ignore')
-    to_parquet(df_merged, os.path.join(processed_base_path, f"{data_type}_step4.parquet"))
-    print(f"Symlinks recreated and saved to data/processed/{data_type}_step4.parquet.")
+    to_parquet(df_merged, os.path.join(processed_base_path, f"{data_type}_step4_v2.parquet"))
+    print(f"Symlinks recreated and saved to data/processed/{data_type}_step4_v2.parquet.")
 
     mapping_path = os.path.join(processed_base_path, "symlink_mapping.pickle")
     with open(mapping_path, "wb") as f:

@@ -15,10 +15,18 @@ from matplotlib.patches import Patch
 from src.utils import to_parquet
 import csv
 
-# Configuration
-INPUT_FILE = "data/processed/modelcard_step3_merged.parquet"
-INPUT_FILE_DEDUP = "data/processed/modelcard_step3_dedup.parquet"
-INTEGRATION_FILE = "data/processed/final_integration_with_paths.parquet"
+V2_MODE = True  # Set to True to use v2 versions
+V2_SUFFIX = "_v2"  # Suffix for v2 output files
+
+# Configuration (switch by V2_MODE)
+if V2_MODE:
+    INPUT_FILE = "data/processed/modelcard_step3_merged_v2.parquet"
+    INPUT_FILE_DEDUP = "data/processed/modelcard_step3_dedup_v2.parquet"
+    INTEGRATION_FILE = "data/processed/final_integration_with_paths_v2.parquet"
+else:
+    INPUT_FILE = "data/processed/modelcard_step3_merged.parquet"
+    INPUT_FILE_DEDUP = "data/processed/modelcard_step3_dedup.parquet"
+    INTEGRATION_FILE = "data/processed/final_integration_with_paths.parquet"
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 VALID_TITLE_PARQUET = "data/processed/all_title_list_valid.parquet"
@@ -27,10 +35,6 @@ GENERIC_TABLE_PATTERNS = [
     "1910.09700_table",
     "204823751_table"
 ]
-
-# V2 mode configuration
-V2_MODE = False  # Set to True to use v2 versions of CSV files
-V2_SUFFIX = "_v2"  # Suffix for v2 output files
 
 # Benchmark data (WDC removed)
 benchmark_data = [

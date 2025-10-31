@@ -21,7 +21,8 @@ from src.utils import to_parquet
 
 # --------------- Fixed Path Constants --------------- #
 TITLE2ARXIV_JSON = "data/processed/title2arxiv_new_cache.json"             ######## # Mapping: title -> arxiv_id
-HTML_TABLE_PARQUET = "data/processed/html_table.parquet"    ######## # Contains: paper_id, html_path, page_type, table_list
+HTML_TABLE_PARQUET = "data/processed/html_table.parquet"    ######## # v1: Contains: paper_id, html_path, page_type, table_list
+HTML_TABLE_PARQUET_V2 = "data/processed/html_parsing_results_v2.parquet"  ######## # v2: Contains: paper_id, html_path, page_type, csv_paths
 ANNOTATIONS_PARQUET = "data/processed/extracted_annotations.parquet"       ######## # base
 PDF_CACHE_PATH = "data/processed/pdf_download_cache.json"
 FINAL_OUTPUT_CSV = "data/processed/llm_markdown_table_results.parquet"
@@ -236,7 +237,26 @@ def main():
     print("📝 df_title2arxiv shape:", df_title2arxiv.shape)
 
     # --- Step 3: Load html_table.parquet which contains HTML info including table_list ---
-    df_html = pd.read_parquet(HTML_TABLE_PARQUET) # Columns: [paper_id, html_path, page_type, table_list]
+    # Try v2 first, fallback to v1
+    if os.path.exists(HTML_TABLE_PARQUET_V2):
+        print(f"📦 Loading HTML tables from v2: {HTML_TABLE_PARQUET_V2}")
+        df_html = pd.read_parquet(HTML_TABLE_PARQUET_V2) # Columns: [paper_id, html_path, page_type, csv_paths]
+        # Rename csv_paths to table_list for compatibility
+        if 'csv_paths' in df_html.columns and 'table_list' not in df_html.columns:
+            # Handle both list and numpy.ndarray types
+            def convert_to_list(x):
+                if isinstance(x, list):
+                    return x
+                elif isinstance(x, np.ndarray):
+                    return x.tolist()
+                elif x is None or pd.isna(x):
+                    return []
+                else:
+                    return []
+            df_html['table_list'] = df_html['csv_paths'].apply(convert_to_list)
+    else:
+        print(f"📦 Loading HTML tables from v1: {HTML_TABLE_PARQUET}")
+        df_html = pd.read_parquet(HTML_TABLE_PARQUET) # Columns: [paper_id, html_path, page_type, table_list]
     print("📝 df_html shape:", df_html.shape)
 
     # 2502.12345v1 => (2502.12345, 1)

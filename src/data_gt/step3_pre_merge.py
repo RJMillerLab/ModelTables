@@ -17,10 +17,10 @@ from tqdm import tqdm
 from collections import defaultdict
 from src.utils import to_parquet
 
-FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths.parquet"
+FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths_v2.parquet"
 ALL_TITLE_PATH              = "data/processed/modelcard_all_title_list.parquet"
-MERGE_PATH                  = "data/processed/modelcard_step3_merged.parquet"
-SIDE_PATH                   = "data/processed/modelcard_step2.parquet" 
+MERGE_PATH                  = "data/processed/modelcard_step3_merged_v2.parquet"
+SIDE_PATH                   = "data/processed/modelcard_step2_v2.parquet"  # v1
 
 def _combine_lists(series):
     """
@@ -50,9 +50,19 @@ def _safe_parse_list(val):
 
 def populate_hugging_table_list(df_merged, processed_base_path):
     """
-    Populate 'hugging_table_list' using 'hugging_deduped_mapping.json'
+    Populate 'hugging_table_list' using 'hugging_deduped_mapping.json' (v1) or 'hugging_deduped_mapping_v2.json' (v2)
     """
-    hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping.json")
+    # Try v2 first, fallback to v1
+    hugging_map_json_path_v2 = os.path.join(processed_base_path, "hugging_deduped_mapping_v2.json")
+    hugging_map_json_path_v1 = os.path.join(processed_base_path, "hugging_deduped_mapping.json")
+    
+    if os.path.exists(hugging_map_json_path_v2):
+        print(f"📦 Using HuggingFace mapping v2: {hugging_map_json_path_v2}")
+        hugging_map_json_path = hugging_map_json_path_v2
+    else:
+        print(f"📦 Using HuggingFace mapping v1: {hugging_map_json_path_v1}")
+        hugging_map_json_path = hugging_map_json_path_v1
+    
     with open(hugging_map_json_path, 'r', encoding='utf-8') as jf:
         hash_to_csv_map = json.load(jf)
     df_merged['hugging_table_list'] = [[] for _ in range(len(df_merged))]
@@ -67,9 +77,24 @@ def populate_hugging_table_list(df_merged, processed_base_path):
 
 def populate_github_table_list(df_merged, processed_base_path):
     """
-    Populate 'github_table_list' using 'md_to_csv_mapping.json'
+    Populate 'github_table_list' using 'md_to_csv_mapping.json' (v1) or v2 version
     """
-    with open(os.path.join(processed_base_path, "deduped_github_csvs", "md_to_csv_mapping.json"), 'r', encoding='utf-8') as jf:
+    # Try v2 first, fallback to v1
+    github_csvs_v2 = os.path.join(processed_base_path, "deduped_github_csvs_v2")
+    github_csvs_v1 = os.path.join(processed_base_path, "deduped_github_csvs")
+    github_mapping_v2 = os.path.join(github_csvs_v2, "md_to_csv_mapping.json")
+    github_mapping_v1 = os.path.join(github_csvs_v1, "md_to_csv_mapping.json")
+    
+    if os.path.exists(github_mapping_v2):
+        print(f"📦 Using GitHub mapping v2: {github_mapping_v2}")
+        github_csvs_folder = github_csvs_v2
+        github_mapping_path = github_mapping_v2
+    else:
+        print(f"📦 Using GitHub mapping v1: {github_mapping_v1}")
+        github_csvs_folder = github_csvs_v1
+        github_mapping_path = github_mapping_v1
+    
+    with open(github_mapping_path, 'r', encoding='utf-8') as jf:
         md_to_csv_mapping = json.load(jf)
     df_merged['github_table_list'] = [[] for _ in range(len(df_merged))]
     for i, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Populating GitHub table list"):
@@ -85,7 +110,7 @@ def populate_github_table_list(df_merged, processed_base_path):
         combined_csvs = list(set(combined_csvs))
         full_csv_paths = []
         for csv_basename in combined_csvs:
-            csv_full_path = os.path.join(processed_base_path, "deduped_github_csvs", csv_basename)
+            csv_full_path = os.path.join(github_csvs_folder, csv_basename)
             full_csv_paths.append(csv_full_path)
         df_merged.at[i, "github_table_list"] = full_csv_paths
     return df_merged
@@ -104,10 +129,13 @@ def map_tables_by_dict(df2, df):
     df_lookup = {}
     for row in df.itertuples(index=False):
         # row: query, html_table_list, llm_table_list
-        df_lookup[row.query] = (
-            row.html_table_list if isinstance(row.html_table_list, list) else [],
-            row.llm_table_list  if isinstance(row.llm_table_list,  list) else []
-        )
+        # Handle both list and numpy.ndarray types
+        html_list = row.html_table_list if isinstance(row.html_table_list, (list, np.ndarray)) else []
+        llm_list = row.llm_table_list if isinstance(row.llm_table_list, (list, np.ndarray)) else []
+        # Convert numpy.ndarray to list if needed
+        html_list = html_list.tolist() if isinstance(html_list, np.ndarray) else html_list
+        llm_list = llm_list.tolist() if isinstance(llm_list, np.ndarray) else llm_list
+        df_lookup[row.query] = (html_list, llm_list)
     # add col to df2：html_table_list_mapped, llm_table_list_mapped
     df2["html_table_list_mapped"] = [[] for _ in range(len(df2))]
     df2["llm_table_list_mapped"]  = [[] for _ in range(len(df2))]
@@ -175,9 +203,13 @@ def merge_table_list_to_df2():
             lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else []
         )
     # load side data and merge to df with modelId
-    side_df = pd.read_parquet(SIDE_PATH, columns=['modelId', 'readme_path', 'readme_hash'])
-    side_df = populate_hugging_table_list(side_df, os.path.dirname(SIDE_PATH))
-    side_df = populate_github_table_list(side_df, os.path.dirname(SIDE_PATH))
+    # Try v2 first, fallback to v1
+    print(f"📦 Loading side data from v2: {SIDE_PATH}")
+    side_path = SIDE_PATH
+    side_df = pd.read_parquet(side_path, columns=['modelId', 'readme_path', 'readme_hash'])
+    processed_base_path = os.path.dirname(side_path)
+    side_df = populate_hugging_table_list(side_df, processed_base_path)
+    side_df = populate_github_table_list(side_df, processed_base_path)
     df_final = pd.merge(df2_merged, side_df[['modelId', 'github_table_list', 'hugging_table_list']], on='modelId', how='left')
     df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
     to_parquet(df_final, MERGE_PATH)

@@ -35,7 +35,7 @@ INVALID_FILES = set()
 
 # ---------------- Hyperparameters / configuration ----------------
 INPUT_DIR = "data/processed"
-INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_merged.parquet")
+INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_merged_v2.parquet")
 OUTPUT_DIR = "data/deduped"
 FIG_DIR = "data/analysis"
 
@@ -46,16 +46,16 @@ GENERIC_TABLE_PATTERNS = [
 ]
 # Ensure the output directory exists.
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_dedup.parquet")
+OUTPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_dedup_v2.parquet")
 DUPLICATE_MAPPING_JSON = os.path.join(OUTPUT_DIR, "duplicate_mapping.json")
 UNIQUE_FILES_TXT = os.path.join(OUTPUT_DIR, "unique_files.txt")
 DUPLICATE_GROUPS_JSON = os.path.join(OUTPUT_DIR, "duplicate_groups.json")
 STATS_PATH = os.path.join(OUTPUT_DIR, "stats.json")
 # Directories containing CSV files with their resource labels and priorities.
 DIRS = [
-    {"path": "data/processed/deduped_hugging_csvs", "resource": "hugging", "priority": 1},
-    {"path": "data/processed/deduped_github_csvs", "resource": "github", "priority": 2},
-    {"path": "data/processed/tables_output", "resource": "html", "priority": 3},
+    {"path": "data/processed/deduped_hugging_csvs_v2", "resource": "hugging", "priority": 1},
+    {"path": "data/processed/deduped_github_csvs_v2", "resource": "github", "priority": 2},
+    {"path": "data/processed/tables_output_v2", "resource": "html", "priority": 3},
     {"path": "data/processed/llm_tables", "resource": "llm", "priority": 4}
 ]
 # Resource priority dictionary (for comparing cross-resource priority)
@@ -92,11 +92,11 @@ def get_linked_set_from_parquet(df, cols):
 
 def infer_resource_from_path(path: str):
     """Infer the resource label from the canonical file path."""
-    if "/deduped_hugging_csvs/" in path or "/hugging" in path:
+    if "/deduped_hugging_csvs_v2/" in path or "/deduped_hugging_csvs/" in path or "/hugging" in path:
         return "hugging"
-    if "/deduped_github_csvs/" in path or "/github" in path:
+    if "/deduped_github_csvs_v2/" in path or "/deduped_github_csvs/" in path or "/github" in path:
         return "github"
-    if "/tables_output/" in path or "/html" in path:
+    if "/tables_output_v2/" in path or "/tables_output/" in path or "/html" in path:
         return "html"
     if "/llm_tables/" in path or "/llm" in path:
         return "llm"
@@ -591,10 +591,10 @@ def main():
     # filter out invalid paths (qc remove)
     VALID_PATHS = set(fi['file_path'] for fi in filtered_files_info)
     for col in cols:
-        total_before = df[col].apply(lambda x: len(x) if isinstance(x, np.ndarray) else 0).sum()
+        total_before = df[col].apply(lambda x: len(x) if isinstance(x, (list, tuple, np.ndarray)) else 0).sum()
         print(f"Filtering {col}... Before: {total_before}")
         df[col] = df[col].apply(lambda x: [p for p in x if p in VALID_PATHS])
-        total_after = df[col].apply(lambda x: len(x) if isinstance(x, np.ndarray) else 0).sum()
+        total_after = df[col].apply(lambda x: len(x) if isinstance(x, (list, tuple, np.ndarray)) else 0).sum()
         print(f"After: {total_after}")
     # map the file path to the canonical file path
     new_cols = {col + "_dedup": [] for col in cols}
