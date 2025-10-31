@@ -226,18 +226,16 @@ python -m src.data_localindexing.turn_tus_into_pickle
 
 # Add other two levels of citation graphs (modelcard and dataset).
 python -m src.data_gt.modelcard_matrix
+# Merge union ground truth.
+python -m src.data_gt.merge_union --level direct
 
 # Plot GT length distribution (boxplot/violin).
 python -m src.data_analysis.gt_distri
-
 # Compute non-zero edge statistics for citation graphs.
 python -m src.data_gt.nonzeroedge --gt_dir data/gt
 
 # (test)python -m src.data_gt.test_modelcard_update --mode dataset # check whether matrix multiplication and for loop obtain the same results
 #(test)python -m src.data_gt.convert_adj_to_npz --input data/gt/scilake_gt_modellink_dataset_adj_processed.pkl --output-prefix data/gt/scilake_gt_modellink_dataset # pkl2npz
-
-# Merge union ground truth.
-python -m src.data_gt.merge_union --level direct
 
 # Update CSV lists for various ground truth variants.
 python -m src.data_gt.create_csvlist_variants --level direct
