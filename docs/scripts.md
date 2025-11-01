@@ -517,5 +517,7 @@ python -m src.data_analysis.hf_models_analysis # get statistics of models in Hug
 # after carefully examining
 python -m src.data_analysis.filtered_gt_visualization
 python -m src.data_analysis.quick_visualization_final
+# the count v.s. time visualization
+python src/data_analysis/table_model_counts_over_time.py --use-v2 --output-dir data/analysis
 # TODO: top-10!
 ```
