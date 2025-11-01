@@ -29,7 +29,7 @@ RESOURCE_LABELS = {
     'hugging': 'ModelCard',
     'github': 'GitHub',
     'html': 'arXiv',
-    'llm': 'S2ORC'
+    'llm': 'Semantic Scholar'
 }
 
 # Define benchmark names that should be treated as baseline (not scilake)

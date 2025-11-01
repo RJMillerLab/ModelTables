@@ -511,6 +511,8 @@ python src.data_analysis.load_sv_to_db --engine sqlite --db-path deduped_hugging
 python -m src.data_analysis.get_from --target html_table_list_mapped_dedup --source modelId --value google-bert/bert-base-uncased
 python -m src.data_analysis.get_from --target readme_path --source csv_paths --value "64dc62e53f_table2.csv" 
 python -m src.data_analysis.get_from --target modelId --source hugging_table_list --value data/processed/deduped_hugging_csvs/021f09961f_table1.csv
+python -m src.data_analysis.get_from --target modelId --source pdf_link --value https://arxiv.org/pdf/0803.1019
+python get_modelid_from_arxiv_comprehensive.py "0803.1019" --search-all --debug
 # step by step filtering img
 python -m src.data_analysis.card_statistics # get statistics of model cards
 python -m src.data_analysis.hf_models_analysis # get statistics of models in Hugging Face

@@ -39,6 +39,8 @@ PALETTE = {
     "SANTOS Small":       "#8b2e2e",
     "TUS Large":          "#d96e44",
     "TUS Small":          "#b74a3c",
+    "UGEN-V1":            "#FFBE5F",
+    "UGEN-V2":            "#FFB55A",
     "All Links":           "#a5d2bc",
     # "TUS Others":          "#8b2e2e",
     # "TUS Santos":          "#8b2e2e",
@@ -221,7 +223,12 @@ def plot_log_boxplot(length_data, palette, title, prefix):
     print("Boxplot saved →", os.path.join(OUTPUT_DIR, f"{prefix}_boxplot.pdf"))
 
 def plot_violin(length_data, palette, title, prefix):
-    plt.figure(figsize=(10, 4))
+    # Increase figure width to accommodate more labels
+    n_labels = sum(1 for src in length_data if length_data[src])
+    # Reduce figure width since we're making violins closer together
+    fig_width = max(10, n_labels * 0.9)  # Reduced multiplier from 1.2 to 0.9
+    plt.figure(figsize=(fig_width, 4))
+    
     labels = []
     data = []
     colors = []
@@ -232,7 +239,10 @@ def plot_violin(length_data, palette, title, prefix):
         data.append(length_data[src])
         colors.append(palette[src])
 
-    violin = plt.violinplot(data, showmeans=False, showmedians=False)
+    # Use tighter positions to reduce spacing between violins
+    # Reduce width to 0.5 (default is 0.8) to make violins narrower and closer together
+    positions = list(range(1, len(labels) + 1))
+    violin = plt.violinplot(data, positions=positions, widths=0.5, showmeans=False, showmedians=False)
     
     # Customize violin plot colors
     for i, pc in enumerate(violin['bodies']):
@@ -243,15 +253,19 @@ def plot_violin(length_data, palette, title, prefix):
     #violin['cmedians'].set_color('black')
     #violin['cmeans'].set_color('red')
 
+    # Use smaller font size and split labels with newlines to prevent overlap
     split_labels = [l.replace(' ', '\n') for l in labels]
-    plt.xticks(range(1, len(split_labels) + 1), split_labels, rotation=0, fontsize=17)
+    plt.xticks(range(1, len(split_labels) + 1), split_labels, 
+               rotation=0, fontsize=12)
 
     plt.yscale('log')
     plt.ylabel('# Links', fontsize=22)
     plt.title(title, fontsize=22)
 
-    plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_violin.pdf"))
+    # Reduce margins by adjusting subplot parameters - tighter margins
+    plt.subplots_adjust(left=0.06, right=0.99, top=0.95, bottom=0.12)
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_violin.pdf"), 
+                bbox_inches='tight', pad_inches=0.02)
     print("Violin plot saved →", os.path.join(OUTPUT_DIR, f"{prefix}_violin.pdf"))
 
 if __name__ == "__main__":
@@ -262,6 +276,8 @@ if __name__ == "__main__":
         "TUS Small":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_small_query_candidate.pkl"),
         "TUS Large":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_large_query_candidate.pkl"),
         "SANTOS Large": os.path.join(ROOT_DIR, "santos/groundtruth/real_tablesUnionBenchmark.pickle"),
+        "UGEN-V1":      os.path.join(ROOT_DIR, "gen/evaluation/groundtruth/ugen_v1UnionBenchmark.pickle"),
+        "UGEN-V2":      os.path.join(ROOT_DIR, "gen/evaluation/groundtruth/ugen_v2UnionBenchmark.pickle"),
         "Paper Links":     os.path.join(GT_DIR, "csv_pair_matrix_direct_label.npz"),
         "Model Links":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.npz"),
         "Dataset Links":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.npz"),
