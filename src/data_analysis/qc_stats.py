@@ -15,8 +15,12 @@ from matplotlib.patches import Patch
 from src.utils import to_parquet
 import csv
 
-V2_MODE = False  # Set to True to use v2 versions
+V2_MODE = True  # Set to True to use v2 versions
 V2_SUFFIX = "_v2"  # Suffix for v2 output files
+
+# Filter configuration for tables that are too long or too wide (v2 filtering)
+MAX_COLS = 100  # Maximum number of columns
+MAX_ROWS = 200  # Maximum number of rows
 
 # Configuration (switch by V2_MODE)
 if V2_MODE:
@@ -164,6 +168,29 @@ def count_columns_from_header_fast(csv_path, max_scan_bytes=8 * 1024 * 1024):
         return 0
 
 
+def should_filter_table_by_size_from_data(rows, cols):
+    """Check if table should be filtered based on dimensions (using already computed data).
+    
+    Args:
+        rows: Number of rows (already computed)
+        cols: Number of columns (already computed)
+        
+    Returns:
+        True if table should be filtered (too long/wide), False otherwise
+    """
+    if rows is None or cols is None:
+        return False
+    
+    # Filter if too many columns
+    if cols >= MAX_COLS:
+        return True
+    # Filter if too many rows
+    if rows >= MAX_ROWS:
+        return True
+    
+    return False
+
+
 def process_csv_file(csv_file):
     """Optimized CSV processing using binary reading for better performance."""
     try:
@@ -245,6 +272,17 @@ def compute_resource_stats(df, resource):
 
     title_valid_files = [f for f in dedup_valid_files if f['path'] in title_paths_set]  ########
     valid_title_valid_files = [f for f in dedup_valid_files if f['path'] in valid_title_paths_set]  ########
+    
+    # Filter out tables that are too long or too wide (v2 filtering) - using already computed data
+    original_valid_count = len(valid_title_valid_files)
+    valid_title_valid_files = [
+        f for f in valid_title_valid_files 
+        if not should_filter_table_by_size_from_data(f['rows'], f['cols'])
+    ]
+    filtered_count = original_valid_count - len(valid_title_valid_files)
+    if filtered_count > 0:
+        print(f"  Filtered {filtered_count} tables (too long/wide) from {resource}_valid_title_valid.txt")
+    
     title_valid_metrics = calculate_metrics(title_valid_files)
     valid_title_valid_metrics = calculate_metrics(valid_title_valid_files)
 
@@ -255,6 +293,7 @@ def compute_resource_stats(df, resource):
     valid_title_valid_paths_set = set(valid_title_valid_paths)
     print(f"Found {len(title_valid_paths_set)} valid titles in {resource} files")
     print(f"Found {len(valid_title_valid_paths_set)} valid titles in {resource} files")
+    
     # save to txt files
     title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_title_valid.txt")
     valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid.txt")
@@ -565,6 +604,7 @@ def main():
     print(f"\nSaved results to {results_path}")
     
     # Concatenate per-resource valid-title lists into a global list
+    # Note: Tables are already filtered in compute_resource_stats, so no need to filter again here
     try:
         combined_paths = set()
         for resource in RESOURCES:
@@ -575,11 +615,13 @@ def main():
                         line = line.strip()
                         if line:
                             combined_paths.add(line)
+        
         all_valid_title_valid_file = os.path.join(OUTPUT_DIR, "all_valid_title_valid.txt")
         with open(all_valid_title_valid_file, 'w') as f:
             for path in sorted(combined_paths):
                 f.write(path + "\n")
         print(f"Saved concatenated valid-title list to {all_valid_title_valid_file} ({len(combined_paths)})")
+        print(f"  (Tables already filtered by size thresholds: max_cols={MAX_COLS}, max_rows={MAX_ROWS})")
     except Exception as e:
         print(f"Warning: failed to generate all_valid_title_valid.txt: {e}")
 

@@ -6,7 +6,7 @@ Last Edited: 2025-10-15
 Description: Compare two folders of CSVs: histogram of per-table columns and rows (by basename).
 
 Usage example:
-python -m src.data_analysis.qc_anomaly --recursive --anomaly-min-cols 500 --anomaly-min-rows 1000 --anomaly-ratio 2.0
+python -m src.data_analysis.qc_anomaly --recursive --anomaly-min-cols 100 --anomaly-min-rows 200
 """
 import argparse
 import os
@@ -768,7 +768,7 @@ def _print_aligned_table(headers, rows):
     for r in rows:
         print(fmt(r))
 
-def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols, anomaly_ratio):
+def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols):
     """Write only unequal rows using provided csv writer; return (kept, total)."""
     total = 0
     kept = 0
@@ -778,16 +778,14 @@ def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_so
         rows_equal = (v1_t == v2_t) if (v1_t is not None and v2_t is not None) else ''
         cols_diff = (v2_o - v1_o) if (v1_o is not None and v2_o is not None) else ''
         rows_diff = (v2_t - v1_t) if (v1_t is not None and v2_t is not None) else ''
-        # Anomaly detection: v2 has high rows/cols ratio OR v2 has many cols OR v2 has many rows
+        # Anomaly detection: v2 has many cols OR v2 has many rows
         anomaly_v2 = False
         if v2_o and v2_t:
-            # High rows/cols ratio
-            ratio_anomaly = (v2_t >= anomaly_min_rows) and (v2_t / v2_o >= anomaly_ratio)
             # Many columns
             cols_anomaly = (v2_o >= anomaly_min_cols)
             # Many rows  
             rows_anomaly = (v2_t >= anomaly_min_rows)
-            anomaly_v2 = ratio_anomaly or cols_anomaly or rows_anomaly
+            anomaly_v2 = cols_anomaly or rows_anomaly
         
         anomaly = True if anomaly_v2 else False if (mode == 'both') else ''
         model_id = csv_to_modelid.get(base, '')
@@ -817,12 +815,12 @@ def write_overlay_rows(csv_writer, resource, csv_rows, csv_to_modelid, csv_to_so
         ])
     return kept, total
 
-def write_overlay_csv(csv_out, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols, anomaly_ratio):
+def write_overlay_csv(csv_out, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols):
     os.makedirs(os.path.dirname(csv_out), exist_ok=True)
     with open(csv_out, 'w', newline='', encoding='utf-8') as fcsv:
         writer = csv.writer(fcsv)
         writer.writerow(['resource', 'basename', 'modelId', 'source_path', 'mode', 'v1_cols', 'v2_cols', 'cols_equal', 'cols_diff', 'v1_rows', 'v2_rows', 'rows_equal', 'rows_diff', 'anomaly'])
-        kept, total = write_overlay_rows(writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols, anomaly_ratio)
+        kept, total = write_overlay_rows(writer, resource, csv_rows, csv_to_modelid, csv_to_sourcepath, anomaly_min_rows, anomaly_min_cols)
 
     print(f"Saved unequal items to {csv_out} ({kept}/{total}).")
 ### updated ###
@@ -835,9 +833,8 @@ def main():
     ap.add_argument("--workers", type=int, default=min(32, (os.cpu_count() or 4) * 2), help="Max worker threads for parallel file processing")
     ap.add_argument("--top", type=int, default=0, help="Print top-N examples where rows >> columns (by ratio)")
     ap.add_argument("--csv-out", default="data/analysis/v1v2_overlay.csv", help="CSV with per-basename stats, equality diffs, and anomaly flag")
-    ap.add_argument("--anomaly-ratio", type=float, default=2.0, help="Rows/cols ratio threshold to flag anomalies")
-    ap.add_argument("--anomaly-min-rows", type=int, default=1000, help="Minimum rows to consider when flagging anomalies")
-    ap.add_argument("--anomaly-min-cols", type=int, default=500, help="Minimum columns to consider when flagging anomalies")
+    ap.add_argument("--anomaly-min-rows", type=int, default=200, help="Minimum rows to consider when flagging anomalies")
+    ap.add_argument("--anomaly-min-cols", type=int, default=100, help="Minimum columns to consider when flagging anomalies")
     args = ap.parse_args()
 
     # Run all resources and aggregate
@@ -862,7 +859,7 @@ def main():
             results_rows, csv_rows, v1_orig, v1_trans, v2_orig, v2_trans = process_basenames(
                 basenames, v1_file_map, v2_file_map, args.workers
             )
-            kept, total = write_overlay_rows(writer, res, csv_rows, csv_to_modelid, csv_to_sourcepath, args.anomaly_min_rows, args.anomaly_min_cols, args.anomaly_ratio)
+            kept, total = write_overlay_rows(writer, res, csv_rows, csv_to_modelid, csv_to_sourcepath, args.anomaly_min_rows, args.anomaly_min_cols)
             # Count mode categories and equal/changed
             mode_counts = {"both": 0, "v1_only": 0, "v2_only": 0}
             changed = 0
