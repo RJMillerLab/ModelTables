@@ -8,10 +8,126 @@ import duckdb
 import sqlite3
 import pyarrow as pa
 import pyarrow.parquet as pq
+from pathlib import Path
+import glob
 
 def load_config(file_path):
     with open(file_path, 'r') as file:
         return yaml.safe_load(file)
+
+def list_available_raw_dates(base_path=None):
+    """
+    List all available raw date directories (data/raw_*).
+    
+    Args:
+        base_path: Base data directory path. If None, tries to get from config or uses default.
+    
+    Returns:
+        List of date strings (e.g., ['251116', '251117'])
+    """
+    if base_path is None:
+        try:
+            config = load_config('config.yaml')
+            base_path = config.get('base_path', 'data')
+        except:
+            base_path = os.path.expanduser("~/Repo/CitationLake/data")
+    
+    base_path = os.path.expanduser(base_path)
+    base_path = os.path.dirname(base_path) if base_path.endswith('raw') else base_path
+    
+    # Find all directories matching raw_*
+    raw_pattern = os.path.join(base_path, 'raw_*')
+    raw_dirs = glob.glob(raw_pattern)
+    
+    # Extract dates from directory names
+    dates = []
+    for raw_dir in raw_dirs:
+        dir_name = os.path.basename(raw_dir)
+        if dir_name.startswith('raw_'):
+            date_str = dir_name[4:]  # Remove 'raw_' prefix
+            # Check if it's a valid directory with parquet files
+            if os.path.isdir(raw_dir):
+                parquet_files = glob.glob(os.path.join(raw_dir, 'train-*.parquet'))
+                if parquet_files:
+                    dates.append(date_str)
+    
+    dates.sort()
+    return dates
+
+def validate_raw_date(date, base_path=None, raise_error=True):
+    """
+    Validate if a raw date directory exists and has parquet files.
+    If not found, lists available dates and provides helpful error message.
+    
+    Args:
+        date: Date string (e.g., '251117')
+        base_path: Base data directory path. If None, tries to get from config or uses default.
+        raise_error: If True, raises FileNotFoundError with helpful message. If False, returns (is_valid, error_msg).
+    
+    Returns:
+        If raise_error=False: (is_valid: bool, error_msg: str or None)
+        If raise_error=True: None (raises exception if invalid)
+    
+    Raises:
+        FileNotFoundError: If date directory not found and raise_error=True
+    """
+    if base_path is None:
+        try:
+            config = load_config('config.yaml')
+            base_path = config.get('base_path', 'data')
+        except:
+            base_path = os.path.expanduser("~/Repo/CitationLake/data")
+    
+    base_path = os.path.expanduser(base_path)
+    base_path = os.path.dirname(base_path) if base_path.endswith('raw') else base_path
+    
+    # Construct path to raw_日期 directory
+    raw_date_path = os.path.join(base_path, f"raw_{date}")
+    raw_date_path = os.path.expanduser(raw_date_path)
+    
+    # Check if directory exists
+    if not os.path.exists(raw_date_path):
+        available_dates = list_available_raw_dates(base_path)
+        
+        error_msg = f"\n❌ Raw snapshot '{date}' not found!\n"
+        error_msg += f"   Expected directory: {raw_date_path}\n\n"
+        
+        if available_dates:
+            error_msg += f"   📅 Available snapshots: {', '.join(available_dates)}\n"
+        else:
+            error_msg += f"   📅 No snapshots found in {base_path}\n"
+        
+        error_msg += f"\n   💡 To download a new snapshot, run:\n"
+        error_msg += f"      python -m src.data_preprocess.download_hf_dataset --date {date}\n"
+        
+        if raise_error:
+            raise FileNotFoundError(error_msg)
+        else:
+            return False, error_msg
+    
+    # Check if directory has parquet files
+    parquet_files = glob.glob(os.path.join(raw_date_path, 'train-*.parquet'))
+    if not parquet_files:
+        available_dates = list_available_raw_dates(base_path)
+        
+        error_msg = f"\n❌ Raw snapshot '{date}' found but contains no parquet files!\n"
+        error_msg += f"   Directory: {raw_date_path}\n\n"
+        
+        if available_dates:
+            error_msg += f"   📅 Available snapshots: {', '.join(available_dates)}\n"
+        
+        error_msg += f"\n   💡 To download a new snapshot, run:\n"
+        error_msg += f"      python -m src.data_preprocess.download_hf_dataset --date {date}\n"
+        
+        if raise_error:
+            raise FileNotFoundError(error_msg)
+        else:
+            return False, error_msg
+    
+    if raise_error:
+        return None
+    else:
+        return True, None
 
 def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", columns=[], date=None):
     """
@@ -47,14 +163,14 @@ def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", colu
         file_path = os.path.join(base_path, f"raw_{date}")
         file_path = os.path.expanduser(file_path)
         
-        # Auto-detect parquet files in the directory
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Directory not found: {file_path}")
+        # Validate date directory exists and has parquet files (with helpful error message)
+        validate_raw_date(date, base_path=base_path, raise_error=True)
         
         # Find all parquet files matching the pattern train-*.parquet
         all_files = [f for f in os.listdir(file_path) if f.endswith('.parquet') and f.startswith('train-')]
         if not all_files:
-            raise FileNotFoundError(f"No parquet files found in {file_path}")
+            # This should not happen if validate_raw_date passed, but keep as safety check
+            validate_raw_date(date, base_path=base_path, raise_error=True)
         
         # Sort files to ensure correct order
         all_files.sort()

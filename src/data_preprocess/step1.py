@@ -6,6 +6,7 @@ Last Modified: 2025-02-25
 
 Description: Extract BibTeX entries from the 'card_readme' column and save to CSV files.
 """
+import argparse
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -20,6 +21,8 @@ import pyarrow.parquet as pq
 import duckdb
 from src.data_ingestion.readme_parser import BibTeXExtractor
 from src.data_ingestion.bibtex_parser import BibTeXFactory
+import hashlib
+from typing import Tuple, Optional, Set
 
 tqdm.pandas()
 
@@ -204,38 +207,256 @@ def ensure_string(entry):
     """Ensure the input is a string."""
     return str(entry) if entry is not None else None
 
+def compute_card_hash(card_content):
+    """Compute hash of card content for quick comparison"""
+    if pd.isna(card_content) or card_content is None:
+        return None
+    return hashlib.sha256(str(card_content).encode('utf-8')).hexdigest()
+
+def compare_cards_incremental(df_new, baseline_step1_path, baseline_raw_path=None, baseline_date=None):
+    """
+    Compare new raw data with baseline to identify unchanged/updated/new models.
+    
+    Args:
+        df_new: New raw dataframe with modelId and card columns
+        baseline_step1_path: Path to previous step1 parquet file
+        baseline_raw_path: Path to baseline raw data directory (optional, will try to infer)
+        baseline_date: Date string of baseline snapshot (optional)
+    
+    Returns:
+        Tuple of (unchanged_ids: Set, updated_ids: Set, new_ids: Set, baseline_df: DataFrame)
+    """
+    print("🔄 Versioning mode: Comparing with baseline...")
+    
+    # Load baseline step1 result
+    if not os.path.exists(baseline_step1_path):
+        print(f"⚠️  Baseline step1 file not found: {baseline_step1_path}")
+        print("   Running in full mode (no baseline)")
+        return set(), set(), set(df_new['modelId'].unique()), None
+    
+    print(f"   Loading baseline: {baseline_step1_path}")
+    baseline_step1 = pd.read_parquet(baseline_step1_path)
+    baseline_model_ids = set(baseline_step1['modelId'].unique())
+    print(f"   Baseline has {len(baseline_model_ids)} models")
+    
+    # Load baseline raw data to get card content
+    if baseline_raw_path is None:
+        # Try to infer from baseline_step1_path or use default
+        if baseline_date:
+            from src.utils import load_config
+            config = load_config('config.yaml')
+            base_path = config.get('base_path')
+            baseline_raw_path = os.path.join(base_path, f"raw_{baseline_date}")
+            baseline_has_date = True
+        else:
+            # Default: use data/raw (no date tag) as baseline
+            from src.utils import load_config
+            config = load_config('config.yaml')
+            base_path = config.get('base_path')
+            baseline_raw_path = os.path.join(base_path, 'raw')
+            baseline_has_date = False
+            print(f"   Using default baseline raw data: {baseline_raw_path}")
+    
+    baseline_raw_path = os.path.expanduser(baseline_raw_path)
+    
+    if not os.path.exists(baseline_raw_path):
+        print(f"⚠️  Baseline raw directory not found: {baseline_raw_path}")
+        print("   Running in full mode (no baseline raw data)")
+        return set(), set(), set(df_new['modelId'].unique()), baseline_step1
+    
+    print(f"   Loading baseline raw data: {baseline_raw_path}")
+    # For data/raw (no date), use date=None to use fixed file names
+    # For data/raw_<date>, use date parameter to auto-detect files
+    if baseline_has_date:
+        # Extract date from path (e.g., "raw_251116" -> "251116")
+        baseline_date_from_path = os.path.basename(baseline_raw_path).replace('raw_', '')
+        baseline_raw = load_combined_data('modelcard', file_path=baseline_raw_path, columns=['modelId', 'card'], date=baseline_date_from_path)
+    else:
+        # Use date=None for data/raw to use fixed file names (old rule)
+        baseline_raw = load_combined_data('modelcard', file_path=baseline_raw_path, columns=['modelId', 'card'], date=None)
+    print(f"   Baseline raw has {len(baseline_raw)} models")
+    
+    # Compute hashes for comparison (vectorized)
+    print("   Computing card hashes...")
+    df_new['card_hash'] = df_new['card'].apply(compute_card_hash)
+    baseline_raw['card_hash'] = baseline_raw['card'].apply(compute_card_hash)
+    
+    # Use pandas merge for fast comparison (much faster than loops)
+    print("   Comparing cards using merge...")
+    # Create comparison dataframe
+    df_new_hash = df_new[['modelId', 'card_hash']].copy()
+    baseline_hash_df = baseline_raw[['modelId', 'card_hash']].copy()
+    baseline_hash_df = baseline_hash_df.rename(columns={'card_hash': 'baseline_hash'})
+    
+    # Merge to compare
+    comparison_df = df_new_hash.merge(baseline_hash_df, on='modelId', how='left')
+    
+    # Classify models using vectorized operations
+    # New models: not in baseline
+    new_ids = set(df_new['modelId'].unique()) - baseline_model_ids
+    
+    # Existing models: compare hashes
+    existing_df = comparison_df[comparison_df['baseline_hash'].notna()].copy()
+    
+    # Unchanged: hashes match
+    unchanged_mask = existing_df['card_hash'] == existing_df['baseline_hash']
+    unchanged_ids = set(existing_df[unchanged_mask]['modelId'].unique())
+    
+    # Updated: hashes don't match
+    updated_mask = existing_df['card_hash'] != existing_df['baseline_hash']
+    updated_ids = set(existing_df[updated_mask]['modelId'].unique())
+    
+    # Also include models in baseline step1 but not in baseline raw
+    missing_in_raw = baseline_model_ids - set(baseline_raw['modelId'].unique())
+    updated_ids.update(missing_in_raw & set(df_new['modelId'].unique()))
+    
+    new_model_ids = set(df_new['modelId'].unique())
+    print(f"   📊 Comparison results:")
+    print(f"      Unchanged: {len(unchanged_ids):,} models")
+    print(f"      Updated:   {len(updated_ids):,} models")
+    print(f"      New:        {len(new_ids):,} models")
+    print(f"      Total:      {len(new_model_ids):,} models")
+    
+    return unchanged_ids, updated_ids, new_ids, baseline_step1
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Step1: parse initial model card elements")
+    parser.add_argument("--raw-date", dest="raw_date", default=None,
+                        help="If set, load raw data from data/raw_<DATE> (e.g., 251117)")
+    parser.add_argument("--tag", dest="tag", default=None,
+                        help="Suffix for output parquet (default: equals --raw-date when provided)")
+    parser.add_argument("--versioning", dest="versioning", action="store_true",
+                        help="Enable versioning mode: reuse results for unchanged cards from baseline")
+    parser.add_argument("--baseline-step1", dest="baseline_step1", default=None,
+                        help="Path to baseline step1 parquet file (default: auto-detect)")
+    parser.add_argument("--baseline-date", dest="baseline_date", default=None,
+                        help="Date of baseline snapshot (e.g., 251116). Used to locate baseline raw data")
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
     data_type = "modelcard"
     config = load_config('config.yaml')
-    raw_base_path = os.path.join(config.get('base_path'), 'raw')
+    base_path = config.get('base_path')
+    if not base_path:
+        raise ValueError("base_path missing in config.yaml")
+
+    # Validate raw date if provided
+    if args.raw_date:
+        from src.utils import validate_raw_date
+        validate_raw_date(args.raw_date, base_path=base_path, raise_error=True)
     
-    print("⚠️ Step 1: Loading data from DuckDB...")
+    raw_dir = f"raw_{args.raw_date}" if args.raw_date else "raw"
+    raw_base_path = os.path.join(base_path, raw_dir)
+    raw_base_path = os.path.expanduser(raw_base_path)
+    if not os.path.exists(raw_base_path):
+        # If no date provided, use standard error. If date provided, validate_raw_date should have caught it.
+        if args.raw_date:
+            from src.utils import validate_raw_date
+            validate_raw_date(args.raw_date, base_path=base_path, raise_error=True)
+        raise FileNotFoundError(f"Raw data directory not found: {raw_base_path}")
+    tag = args.tag or args.raw_date
+    output_suffix = f"_{tag}" if tag else ""
+    output_path = os.path.join(base_path, 'processed', f"{data_type}_step1{output_suffix}.parquet")
+    
+    # Determine baseline path for versioning mode
+    baseline_step1_path = args.baseline_step1
+    if args.versioning and baseline_step1_path is None:
+        # Auto-detect baseline: Priority: 1) modelcard_step1.parquet (no tag, default), 2) modelcard_step1_<date>.parquet
+        processed_dir = os.path.join(base_path, 'processed')
+        default_baseline = os.path.join(processed_dir, f"{data_type}_step1.parquet")
+        if os.path.exists(default_baseline):
+            baseline_step1_path = default_baseline
+            print(f"📌 Auto-detected baseline (default): {baseline_step1_path}")
+        else:
+            # Fallback: Try to find latest dated version only if default doesn't exist
+            from src.utils import list_available_raw_dates
+            available_dates = list_available_raw_dates(base_path)
+            if available_dates and args.raw_date:
+                # Try previous date
+                prev_dates = [d for d in available_dates if d < args.raw_date]
+                if prev_dates:
+                    prev_date = prev_dates[-1]
+                    candidate = os.path.join(processed_dir, f"{data_type}_step1_{prev_date}.parquet")
+                    if os.path.exists(candidate):
+                        baseline_step1_path = candidate
+                        print(f"📌 Auto-detected baseline (dated): {baseline_step1_path}")
+    
+    print(f"⚠️ Step 1: Loading data from {raw_base_path} ...")
     start_time = time.time()
-    df = load_combined_data(data_type, file_path=raw_base_path)
+    df = load_combined_data(data_type, file_path=raw_base_path, date=args.raw_date)
     #df = load_table_from_duckdb(f"raw_{data_type}", db_path="modellake_all.db")
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
+    
+    # Versioning mode: compare with baseline
+    unchanged_ids = set()
+    updated_ids = set()
+    new_ids = set()
+    baseline_step1 = None
+    
+    if args.versioning and baseline_step1_path:
+        unchanged_ids, updated_ids, new_ids, baseline_step1 = compare_cards_incremental(
+            df, baseline_step1_path, baseline_date=args.baseline_date
+        )
+        
+        if baseline_step1 is not None and len(unchanged_ids) > 0:
+            print(f"\n⚡ Versioning mode: Reusing {len(unchanged_ids):,} unchanged models from baseline")
+            # Filter to only process changed/new models
+            changed_ids = updated_ids | new_ids
+            df_to_process = df[df['modelId'].isin(changed_ids)].copy()
+            print(f"   Processing {len(df_to_process):,} changed/new models")
+        else:
+            print("\n⚠️  Versioning mode enabled but no baseline found, running in full mode")
+            df_to_process = df
+    else:
+        df_to_process = df
+    
+    # Store original df for merging later
+    df_original = df.copy()
 
     print("⚠️ Step 2: Splitting readme and tags...")
     start_time = time.time()
-    df = extract_tags_and_readme_parallel(df)
+    df_to_process = extract_tags_and_readme_parallel(df_to_process)
     #inconsistencies_df = validate_parsing(df_split)
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
     print("⚠️ Step 3: Extracting URLs...")
     start_time = time.time()
-    df = process_basic_elements_parallel(df)
+    df_to_process = process_basic_elements_parallel(df_to_process)
     print(f"✅ Done. Time cost: {time.time() - start_time:.2f} seconds.")
 
     print("⚠️Step 4: Extracting BibTeX entries...")
     start_time = time.time()
-    extract_bibtex(df)
-    df["extracted_bibtex_tuple"] = df["extracted_bibtex"].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
+    extract_bibtex(df_to_process)
+    df_to_process["extracted_bibtex_tuple"] = df_to_process["extracted_bibtex"].apply(lambda x: tuple(x) if isinstance(x, list) else (x,))
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
 
     print("⚠️Step 5: Parsing BibTeX entries...")
     start_time = time.time()
-    processed_entries = parse_bibtex_entries(df)
+    processed_entries = parse_bibtex_entries(df_to_process)
     print("✅ done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
+    
+    # Merge with baseline if in versioning mode
+    if args.versioning and baseline_step1 is not None and len(unchanged_ids) > 0:
+        print(f"\n🔄 Merging with baseline results...")
+        # Get unchanged rows from baseline
+        baseline_unchanged = baseline_step1[baseline_step1['modelId'].isin(unchanged_ids)].copy()
+        
+        # Ensure columns match
+        # Remove 'card' column from both if present (we don't save it in step1 output)
+        df_to_process = df_to_process.drop(columns=['card'], errors='ignore')
+        baseline_unchanged = baseline_unchanged.drop(columns=['card'], errors='ignore')
+        
+        # Align columns
+        common_cols = set(df_to_process.columns) & set(baseline_unchanged.columns)
+        df_to_process = df_to_process[[c for c in df_to_process.columns if c in common_cols]]
+        baseline_unchanged = baseline_unchanged[[c for c in baseline_unchanged.columns if c in common_cols]]
+        
+        # Merge
+        df = pd.concat([df_to_process, baseline_unchanged], ignore_index=True)
+        print(f"   Merged: {len(df_to_process):,} new/updated + {len(baseline_unchanged):,} unchanged = {len(df):,} total")
+    else:
+        df = df_to_process.drop(columns=['card'], errors='ignore')
 
     print("all attributes: ", list(df.columns))
 
@@ -249,7 +470,7 @@ def main():
     print("⚠️ Step 5: Saving results to Parquet file...")
     df.drop(columns=['card'], inplace=True, errors='ignore') # get card from raw instead of this saved file
     start_time = time.time()
-    to_parquet(df, os.path.join(config.get('base_path'), 'processed', f"{data_type}_step1.parquet"))
+    to_parquet(df, output_path)
     #df.to_parquet(os.path.join(config.get('base_path'), 'processed', f"{data_type}_step1.parquet"), compression='zstd', engine='pyarrow')
     print("✅ Done. Time cost: {:.2f} seconds.".format(time.time() - start_time))
     print("Sampled data: ", df.head(5))

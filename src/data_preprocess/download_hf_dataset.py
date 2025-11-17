@@ -6,13 +6,14 @@ This script uses huggingface_hub to download the parquet files directly.
 """
 
 import os
+import argparse
 from pathlib import Path
 import subprocess
 import sys
 
-# Configuration
+# Configuration defaults
 DATASET_NAME = "librarian-bots/model_cards_with_metadata"
-OUTPUT_DIR = Path("data/raw_251116")
+DEFAULT_OUTPUT_DIR = Path("data/raw_251116")
 
 def install_package(package):
     """Install a package using pip"""
@@ -27,7 +28,39 @@ def install_package(package):
             return False
     return True
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Download Hugging Face model_cards_with_metadata snapshot")
+    parser.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="Date tag (e.g., 251117). Output dir becomes data/raw_<date>."
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Custom output directory (overrides --date)."
+    )
+    parser.add_argument(
+        "--dataset-name",
+        type=str,
+        default=DATASET_NAME,
+        help="Hugging Face dataset ID."
+    )
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
+
+    dataset_name = args.dataset_name
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    elif args.date:
+        output_dir = Path("data") / f"raw_{args.date}"
+    else:
+        output_dir = DEFAULT_OUTPUT_DIR
+    
     # Try to import required packages
     try:
         from huggingface_hub import hf_hub_download, list_repo_files
@@ -36,6 +69,7 @@ def main():
         if not install_package("huggingface_hub"):
             print("Please install huggingface_hub manually: pip install huggingface_hub")
             return
+        from huggingface_hub import hf_hub_download, list_repo_files
     
     try:
         import pyarrow.parquet as pq
@@ -44,15 +78,16 @@ def main():
         if not install_package("pyarrow"):
             print("Please install pyarrow manually: pip install pyarrow")
             return
+        import pyarrow.parquet as pq
     
     # Create output directory
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"Downloading dataset: {DATASET_NAME}")
-    print(f"Output directory: {OUTPUT_DIR.absolute()}")
+    print(f"Downloading dataset: {dataset_name}")
+    print(f"Output directory: {output_dir.absolute()}")
     
     # List files in the dataset repository
-    files = list_repo_files(DATASET_NAME, repo_type="dataset")
+    files = list_repo_files(dataset_name, repo_type="dataset")
     
     # Filter for parquet files
     parquet_files = [f for f in files if f.endswith('.parquet')]
@@ -66,15 +101,15 @@ def main():
     for parquet_file in parquet_files:
         print(f"\nDownloading {parquet_file}...")
         local_path = hf_hub_download(
-            repo_id=DATASET_NAME,
+            repo_id=dataset_name,
             filename=parquet_file,
             repo_type="dataset",
-            local_dir=str(OUTPUT_DIR)
+            local_dir=str(output_dir)
         )
         downloaded_files.append(local_path)
         print(f"✓ Downloaded to {local_path}")
     
-    print(f"\n✓ All files downloaded successfully to {OUTPUT_DIR.absolute()}")
+    print(f"\n✓ All files downloaded successfully to {output_dir.absolute()}")
     
     # Show file sizes
     total_size = 0

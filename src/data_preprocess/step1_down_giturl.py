@@ -19,6 +19,7 @@ from joblib import Parallel, delayed
 from tqdm_joblib import tqdm_joblib
 import aiohttp
 import asyncio
+import argparse
 
 cache = {}
 
@@ -53,30 +54,134 @@ def is_text_file(url):
     except:
         return False
 
-def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet"):
+def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet", 
+                  baseline_info_path=None, baseline_cache_path=None, versioning=False, base_path=None):
+    """
+    Download GitHub README files.
+    
+    Args:
+        df: DataFrame with modelId and github_link columns
+        base_output_dir: Directory to save downloaded files (new folder for this tag)
+        to_path: Output path for download info parquet
+        baseline_info_path: Path to baseline github_readmes_info.parquet (for versioning mode)
+        baseline_cache_path: Path to baseline github_readme_cache.parquet (for versioning mode)
+        versioning: If True, reuse existing downloads from baseline (version control mode)
+        base_path: Base path of the project (for resolving relative paths)
+    """
     assert 'github_link' in df.columns, "Missing 'github_link' column in DataFrame."
     assert 'modelId' in df.columns, "Missing 'modelId' column in DataFrame."
+    
+    if base_path is None:
+        base_path = os.getcwd()
 
     # step1: get all links
     start_time = time.time()
-    #df['github_link'] = df['github_link'].apply(
-    #    lambda x: eval(x) if isinstance(x, str) and x.startswith('[') and x.endswith(']') else x
-    #)
     all_raw_links = df[['modelId', 'github_link']].explode('github_link').dropna()
     total_links_before_dedup = len(all_raw_links)
     all_links = set(clean_github_link(str(link).strip()) for link in all_raw_links['github_link'] if link)
 
     print(f"Found {total_links_before_dedup} GitHub links before deduplication.")
     print(f"Found {len(all_links)} unique GitHub URLs after deduplication.")
+    
+    # Auto-cache: Always check for existing files in base_output_dir
+    # This is independent of versioning mode
+    existing_in_dir = 0
+    for link in all_links:
+        local_filename = create_local_filename(base_output_dir, link)
+        if os.path.exists(local_filename):
+            rel_path = os.path.relpath(local_filename, base_path)
+            cache[link] = rel_path
+            existing_in_dir += 1
+    
+    if existing_in_dir > 0:
+        print(f"📦 Auto-cache: Found {existing_in_dir:,} existing files in {base_output_dir}")
+    
+    # Versioning mode: load baseline info and reuse existing downloads from previous versions
+    links_to_download = {link for link in all_links if link not in cache or cache.get(link) is None}
+    baseline_info_dict = {}  # url -> list of paths from baseline
+    if versioning and baseline_info_path:
+        baseline_info_path = os.path.expanduser(baseline_info_path)
+        if os.path.exists(baseline_info_path):
+            print(f"\n🔄 Versioning mode: Loading baseline info from {baseline_info_path}")
+            baseline_info_df = pd.read_parquet(baseline_info_path)
+            
+            # Build a mapping from URL to existing paths
+            # Explode readme_path lists to get all URLs and their paths
+            for _, row in baseline_info_df.iterrows():
+                github_links = row.get('github_link', [])
+                readme_paths = row.get('readme_path', [])
+                
+                # Handle different data types: list, array, single value, or None
+                if isinstance(github_links, (list, tuple, np.ndarray)):
+                    github_links = list(github_links)
+                elif pd.isna(github_links) or github_links is None:
+                    github_links = []
+                else:
+                    github_links = [github_links]
+                
+                if isinstance(readme_paths, (list, tuple, np.ndarray)):
+                    readme_paths = list(readme_paths)
+                elif pd.isna(readme_paths) or readme_paths is None:
+                    readme_paths = []
+                else:
+                    readme_paths = [readme_paths]
+                
+                for link, path in zip(github_links, readme_paths):
+                    if link and path:
+                        cleaned_link = clean_github_link(str(link).strip())
+                        if cleaned_link not in baseline_info_dict:
+                            baseline_info_dict[cleaned_link] = []
+                        baseline_info_dict[cleaned_link].append(path)
+            
+            # Check which files exist and populate cache
+            existing_count = 0
+            for url, paths in baseline_info_dict.items():
+                for path in paths:
+                    if path:
+                        # Try to resolve the path
+                        # Path might be relative to base_path or absolute
+                        if os.path.isabs(path):
+                            full_path = path
+                        else:
+                            # Try relative to base_path first
+                            full_path = os.path.join(base_path, path)
+                            if not os.path.exists(full_path):
+                                # Try relative to current working directory
+                                full_path = path if os.path.exists(path) else None
+                        
+                        if full_path and os.path.exists(full_path):
+                            # Store the original path (preserving folder structure)
+                            if url not in cache:
+                                cache[url] = path  # Store relative path to preserve folder info
+                            existing_count += 1
+                            break  # Found existing file, no need to check other paths for this URL
+            
+            # Update links_to_download to exclude URLs that already have existing files from baseline
+            links_to_download = {link for link in links_to_download 
+                                if link not in cache or cache.get(link) is None}
+            
+            print(f"   Baseline info has {len(baseline_info_dict)} unique URLs")
+            print(f"   Existing files found from baseline: {existing_count:,}")
+            print(f"   Already available (auto-cache + baseline): {len(all_links) - len(links_to_download):,} URLs")
+            print(f"   Need to download: {len(links_to_download):,} URLs")
+            if len(all_links) > 0:
+                print(f"   Total speedup: {(len(all_links) - len(links_to_download)) / len(all_links) * 100:.1f}% reuse")
+        else:
+            print(f"\n⚠️  Versioning mode enabled but baseline info not found: {baseline_info_path}")
+            print("   Continuing with auto-cache only")
+    
     print(f"Speedup ratio: {total_links_before_dedup / len(all_links):.2f}x reduction in requests.")
     print(f"Step1 time cost: {time.time() - start_time:.2f} seconds.")
 
-    # step2: download all
+    # step2: download only new/missing links
     start_time = time.time()
-    bulk_download_github_urls(all_links, base_output_dir)
+    if links_to_download:
+        bulk_download_github_urls(links_to_download, base_output_dir, base_path=base_path)
+    else:
+        print("   All URLs already downloaded, skipping download step.")
     print(f"Step2 time cost: {time.time() - start_time:.2f} seconds.")
     
-    # step3: link downloaded files back ot the model data
+    # step3: link downloaded files back to the model data
     start_time = time.time()
     download_info = []
     for index, row in tqdm(df.iterrows(), total=len(df), desc="Assembling Results"):
@@ -102,6 +207,14 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
             cleaned_link = clean_github_link(g_link.strip())
             local_path = cache.get(cleaned_link)
             if local_path:
+                # Ensure path is relative to base_path (preserving folder structure)
+                if os.path.isabs(local_path):
+                    # Convert absolute path to relative path
+                    try:
+                        local_path = os.path.relpath(local_path, base_path)
+                    except ValueError:
+                        # If paths are on different drives (Windows), keep absolute
+                        pass
                 readme_paths.append(local_path)
         download_info.append({
             "modelId": model_id,
@@ -110,11 +223,36 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
         })
     download_info_df = pd.DataFrame(download_info)
     to_parquet(download_info_df, to_path)
-    # save the cache as parquet
-    cache_df = pd.DataFrame(list(cache.items()), columns=['raw_url', 'downloaded_path'])
-    to_parquet(cache_df, os.path.join(config.get('base_path'), "processed", "github_readme_cache.parquet"))
-    skipped_df = pd.DataFrame(skipped_links, columns=['raw_url', 'reason'])
-    to_parquet(skipped_df, os.path.join(config.get('base_path'), "processed", "github_skipped_urls.parquet"))
+    
+    # Save the cache as parquet (with relative paths)
+    cache_items = []
+    for url, path in cache.items():
+        if path:
+            # Ensure path is relative
+            if os.path.isabs(path):
+                try:
+                    path = os.path.relpath(path, base_path)
+                except ValueError:
+                    pass
+            cache_items.append({'raw_url': url, 'downloaded_path': path})
+    if cache_items:
+        cache_df = pd.DataFrame(cache_items)
+        cache_output_path = os.path.join(os.path.dirname(to_path), "github_readme_cache.parquet")
+        if os.path.basename(to_path).startswith('github_readmes_info_'):
+            # Extract tag from to_path and add to cache filename
+            tag = os.path.basename(to_path).replace('github_readmes_info_', '').replace('.parquet', '')
+            cache_output_path = os.path.join(os.path.dirname(to_path), f"github_readme_cache_{tag}.parquet")
+        to_parquet(cache_df, cache_output_path)
+    
+    # Save skipped URLs
+    if skipped_links:
+        skipped_df = pd.DataFrame(skipped_links, columns=['raw_url', 'reason'])
+        skipped_output_path = os.path.join(os.path.dirname(to_path), "github_skipped_urls.parquet")
+        if os.path.basename(to_path).startswith('github_readmes_info_'):
+            tag = os.path.basename(to_path).replace('github_readmes_info_', '').replace('.parquet', '')
+            skipped_output_path = os.path.join(os.path.dirname(to_path), f"github_skipped_urls_{tag}.parquet")
+        to_parquet(skipped_df, skipped_output_path)
+    
     print(f"Downloaded {len([d for d in download_info if d['readme_path']])} READMEs.")
     print(f"Skipped {len([d for d in download_info if not d['readme_path']])} READMEs.")
     print(f"Step3 time cost: {time.time() - start_time:.2f} seconds.")
@@ -146,23 +284,32 @@ async def async_download_github_urls(all_links, base_output_dir, num_workers=20)
     for url, downloaded_path in results:
         cache[url] = downloaded_path
 
-def bulk_download_github_urls(all_links, base_output_dir, num_workers=8):
-    #asyncio.run(async_download_github_urls(all_links, base_output_dir, num_workers))
+def bulk_download_github_urls(all_links, base_output_dir, num_workers=8, base_path=None):
+    """Download GitHub URLs to base_output_dir, saving paths relative to base_path"""
+    if base_path is None:
+        base_path = os.getcwd()
+    
     def process_link(link):
         """ single URL downloading """
-        if link in cache:
+        if link in cache and cache[link]:
             return link, cache[link]
         local_filename = create_local_filename(base_output_dir, link)
         if os.path.exists(local_filename):
-            cache[link] = local_filename
-            return link, local_filename
+            # Convert to relative path
+            rel_path = os.path.relpath(local_filename, base_path)
+            cache[link] = rel_path
+            return link, rel_path
         downloaded_path = download_readme(link, local_filename)
-        downloaded_path = downloaded_path.split("CitationLake/", 1)[-1] if isinstance(downloaded_path, str) and "CitationLake/" in downloaded_path else downloaded_path
+        if downloaded_path:
+            # Convert to relative path
+            try:
+                downloaded_path = os.path.relpath(downloaded_path, base_path)
+            except ValueError:
+                # If paths are on different drives (Windows), keep as is
+                pass
         cache[link] = downloaded_path
         return link, downloaded_path
-    #results = Parallel(n_jobs=num_workers)(
-    #    delayed(process_link)(link) for link in tqdm(all_links, desc="Bulk Download")
-    #)
+    
     with tqdm_joblib(tqdm(desc="Bulk Download", total=len(all_links))) as progress_bar:
         results = Parallel(n_jobs=num_workers)(
             delayed(process_link)(link) for link in all_links
@@ -268,18 +415,85 @@ def download_readme(github_url, output_path):
         skipped_links.append((raw_url, "exception occurred"))
         return None
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Download GitHub README files from step1 data")
+    parser.add_argument("--input-step1", dest="input_step1", default=None,
+                        help="Path to step1 parquet file (default: auto-detect from tag)")
+    parser.add_argument("--tag", dest="tag", default=None,
+                        help="Tag suffix for versioning (e.g., 251117). Enables versioning mode.")
+    parser.add_argument("--versioning", dest="versioning", action="store_true",
+                        help="Enable versioning mode: reuse existing downloads from baseline (requires --tag)")
+    parser.add_argument("--baseline-info", dest="baseline_info", default=None,
+                        help="Path to baseline github_readmes_info.parquet (for versioning mode)")
+    parser.add_argument("--baseline-cache", dest="baseline_cache", default=None,
+                        help="Path to baseline github_readme_cache.parquet (for versioning mode)")
+    return parser.parse_args()
+
 if __name__ == "__main__":
+    args = parse_args()
     config = load_config('config.yaml')
-    processed_base_path = os.path.join(config.get('base_path'), "processed")
-    base_output_dir = os.path.join(config.get('base_path'), "downloaded_github_readmes")
+    base_path = config.get('base_path')
+    processed_base_path = os.path.join(base_path, "processed")
+    
+    # Determine tag (default to date if not provided)
+    tag = args.tag
+    
+    # Determine output folder and file based on tag
+    if tag:
+        base_output_dir = os.path.join(base_path, f"downloaded_github_readmes_{tag}")
+        output_file = os.path.join(processed_base_path, f'github_readmes_info_{tag}.parquet')
+    else:
+        base_output_dir = os.path.join(base_path, "downloaded_github_readmes")
+        output_file = os.path.join(processed_base_path, 'github_readmes_info.parquet')
+    
     data_type = "modelcard"
     os.makedirs(base_output_dir, exist_ok=True)
-    df_split_temp = pd.read_parquet(os.path.join(processed_base_path, f'{data_type}_step1.parquet'), columns=['github_link', 'modelId'])
+    
+    # Determine input file
+    if args.input_step1:
+        input_file = args.input_step1
+    else:
+        input_suffix = f"_{tag}" if tag else ""
+        input_file = os.path.join(processed_base_path, f'{data_type}_step1{input_suffix}.parquet')
+    
+    # Versioning mode: enable if tag is provided or --versioning flag is set
+    enable_versioning = args.versioning or (args.tag is not None)
+    
+    # Determine baseline paths for versioning mode
+    baseline_info_path = args.baseline_info
+    baseline_cache_path = args.baseline_cache
+    baseline_info_path_original = os.path.join(processed_base_path, 'github_readmes_info.parquet')
+    
+    if enable_versioning:
+        if baseline_info_path is None:
+            # Default baseline: no tag version (original)
+            baseline_info_path = baseline_info_path_original
+        if baseline_cache_path is None:
+            baseline_cache_path = os.path.join(processed_base_path, 'github_readme_cache.parquet')
+        
+        print(f"📌 Versioning mode enabled (tag: {tag if tag else 'default'})")
+        print(f"   Baseline info: {baseline_info_path}")
+        print(f"   Baseline cache: {baseline_cache_path}")
+        print(f"   New files will be saved to: {base_output_dir}")
+    else:
+        print(f"📦 Auto-cache mode: Will reuse existing files in {base_output_dir}")
+    
+    print(f"📁 Loading input: {input_file}")
+    df_split_temp = pd.read_parquet(input_file, columns=['github_link', 'modelId'])
     print(df_split_temp.info())
     df_split_temp['github_link'] = df_split_temp['github_link'].apply(lambda x: eval(x) if isinstance(x, str) and x.startswith('[') and x.endswith(']') else x)
-    #df_split_temp['github_link'] = df_split_temp['github_link'].apply(lambda x: clean_github_link(x) if isinstance(x, str) else x)
-    download_info_df = main_download(df_split_temp, base_output_dir, to_path=os.path.join(processed_base_path, 'github_readmes_info.parquet'))
-    #print(download_info_df.head())
+    
+    download_info_df = main_download(
+        df_split_temp, 
+        base_output_dir, 
+        to_path=output_file,
+        baseline_info_path=baseline_info_path if enable_versioning else None,
+        baseline_cache_path=baseline_cache_path if enable_versioning else None,
+        versioning=enable_versioning,
+        base_path=base_path
+    )
+    print(f"✅ Results saved to: {output_file}")
+    print(f"✅ Downloaded files saved to: {base_output_dir}")
 
 """
 Exampled output:

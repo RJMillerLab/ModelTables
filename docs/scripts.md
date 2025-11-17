@@ -6,26 +6,42 @@ This section outlines the workflow for processing data, building the ground trut
 
 ## Data Processing Workflow
 
+### 0\. Download Latest Hugging Face Snapshot
+
+Use `download_hf_dataset.py` (at repo root) to pull the newest `librarian-bots/model_cards_with_metadata` parquet shards into a date-tagged folder (for example, `data/raw_251117`). The script automatically enumerates the parquet shards available on Hugging Face Hub and stores them locally so downstream steps can point to a specific snapshot when re-running the pipeline.
+
+```bash
+# Adjust OUTPUT_DIR (and DATASET_NAME if needed) in download_hf_dataset.py before running.
+# Example: save the Nov 17, 2025 snapshot to data/raw_251117
+python -m src.data_preprocess.download_hf_dataset --date 251117
+# Verify the downloaded shards
+#ls -lh data/raw_251117/*.parquet
+```
+
 ### 1\. Parse Initial Elements
 
 This step extracts key metadata from model cards and associated links.
 ```bash
 # Split readme and tags, parse URLs, parse BibTeX entries.
 # Output: ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
-python -m src.data_preprocess.load_raw_to_db sqlite/duckdb # save raw to DuckDB
-python -m src.data_preprocess.step1
+# (Optional)
+#python -m src.data_preprocess.load_raw_to_db sqlite/duckdb # save raw to DuckDB, but will explode the memory
+python -m src.data_preprocess.step1 --raw-date 251117 --versioning \
+    --baseline-step1 data/processed/modelcard_step1.parquet \
+    --baseline-date 251116
+# or 
+python -m src.data_preprocess.step1 --raw-date 251117
 
 # Download GitHub READMEs and HTMLs from extracted URLs.
 # Input: modelcard_step1.parquet
 # Output: giturl_info.parquet, downloaded_github_readmes/
-python -m src.data_preprocess.step1_down_giturl
-#python -m src.data_preprocess.step1_down_giturl_fake # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
-find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' # some readme files are too large, we fix this issue
+python -m src.data_preprocess.step1_down_giturl --tag 251117 --versioning \
+    --baseline-cache data/processed/github_readme_cache.parquet
 
-# Query specific GitHub URL content (example)
-# Input: local path to a downloaded README
-# Output: URL content
-python -m src.data_preprocess.step1_query_giturl load --query "data/downloaded_github_readmes/0a0c3d247213c087eb2472c3fe387292.md" # sql
+#python -m src.data_preprocess.step1_down_giturl_fake # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
+find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' # some readme files are too large
+# Query specific GitHub URL content (example). Input: local path to a downloaded README, Output: URL content
+python -m src.data_preprocess.step1_query_giturl load --query "data/downloaded_github_readmes/0a0c3d247213c087eb2472c3fe387292.md" # sql. # (Optional)
 ```
 
 ### 2\. Download and Build Database for Faster Querying
