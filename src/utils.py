@@ -13,13 +13,66 @@ def load_config(file_path):
     with open(file_path, 'r') as file:
         return yaml.safe_load(file)
 
-def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", columns=[]):
+def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", columns=[], date=None):
+    """
+    Load combined data from parquet files.
+    
+    Args:
+        data_type: "modelcard" or "datasetcard"
+        file_path: Base path for raw data (default: "~/Repo/CitationLake/data/raw")
+        columns: List of columns to load (empty list means load all)
+        date: Optional date string (e.g., "251116"). If provided, loads from data/raw_日期 directory
+              and automatically detects the number of parquet files.
+    
+    Returns:
+        Combined DataFrame
+    """
     assert data_type in ["modelcard", "datasetcard"], "data_type must be 'modelcard' or 'datasetcard'"
-    if data_type == "modelcard":
-        file_names = [f"train-0000{i}-of-00004.parquet" for i in range(4)]
-    elif data_type == "datasetcard":
-        #file_names = [f"train-0000{i}-of-00003.parquet" for i in range(3)]
-        file_names = [f"train-0000{i}-of-00002.parquet" for i in range(2)]
+    
+    # If date is provided, use raw_日期 directory and auto-detect files
+    if date:
+        # Try to get base_path from config, otherwise use default
+        try:
+            config = load_config('config.yaml')
+            base_path = config.get('base_path', 'data')
+        except:
+            # If config doesn't exist or fails, try to infer from file_path or use default
+            if 'data' in file_path:
+                # Extract base path from file_path (e.g., "~/Repo/CitationLake/data/raw" -> "~/Repo/CitationLake/data")
+                base_path = os.path.dirname(os.path.expanduser(file_path))
+            else:
+                base_path = os.path.expanduser("~/Repo/CitationLake/data")
+        
+        # Construct path to raw_日期 directory
+        file_path = os.path.join(base_path, f"raw_{date}")
+        file_path = os.path.expanduser(file_path)
+        
+        # Auto-detect parquet files in the directory
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Directory not found: {file_path}")
+        
+        # Find all parquet files matching the pattern train-*.parquet
+        all_files = [f for f in os.listdir(file_path) if f.endswith('.parquet') and f.startswith('train-')]
+        if not all_files:
+            raise FileNotFoundError(f"No parquet files found in {file_path}")
+        
+        # Sort files to ensure correct order
+        all_files.sort()
+        file_names = all_files
+        print(f"📁 Loading from date-specific directory: {file_path}")
+        print(f"   Found {len(file_names)} parquet file(s)")
+    else:
+        # Original logic: use predefined file names based on data_type
+        if data_type == "modelcard":
+            file_names = [f"train-0000{i}-of-00004.parquet" for i in range(4)]
+        elif data_type == "datasetcard":
+            #file_names = [f"train-0000{i}-of-00003.parquet" for i in range(3)]
+            file_names = [f"train-0000{i}-of-00002.parquet" for i in range(2)]
+    
+    # Expand user path if needed
+    file_path = os.path.expanduser(file_path)
+    
+    # Load parquet files
     if columns:
         dfs = [pd.read_parquet(os.path.join(file_path, file), columns=columns) for file in file_names]
     else:
@@ -254,8 +307,6 @@ def load_table_from_sqlite(table_name, db_path="modellake_all.db", parquet_path=
     finally:
         # Close connection
         conn.close()
-
-
 
 
 # ------------------------
