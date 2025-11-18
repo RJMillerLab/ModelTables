@@ -15,13 +15,13 @@ import os
 
 # === Font settings (consistent with qc_stats_fig, no bold) ===
 plt.rcParams.update({
-    'font.size': 20,
-    'axes.titlesize': 22,
-    'axes.labelsize': 20,
-    'xtick.labelsize': 18,
-    'ytick.labelsize': 18,
-    'legend.fontsize': 16,
-    'figure.titlesize': 22
+    'font.size': 26,
+    'axes.titlesize': 32,
+    'axes.labelsize': 30,
+    'xtick.labelsize': 19,
+    'ytick.labelsize': 24,
+    'legend.fontsize': 22,
+    'figure.titlesize': 32
 })
 
 
@@ -55,7 +55,7 @@ def create_combined_visualization():
     bars = ax1.bar(x_positions, counts, color=colors, alpha=0.85, width=0.8)
 
     ax1.set_title("Model Filtering Process", pad=25)
-    ax1.set_ylabel("Model Count (Log Scale)")
+    ax1.set_ylabel("Model Count") # (Log Scale)
     ax1.set_xlabel("Filtering Conditions on Model")
     ax1.set_xticks(x_positions)
     ax1.set_xticklabels(categories, rotation=0, ha='center')
@@ -85,7 +85,7 @@ def create_combined_visualization():
     # === Axis setup ===
     ax2.set_yscale("log")
     ax2.set_xlabel("Table Ranking")
-    ax2.set_ylabel("Table Frequency (Log Scale)")
+    ax2.set_ylabel("Table Frequency") # (Log Scale)
     ax2.set_title("Table Frequency Distribution", pad=25)
     ax2.set_xlim(-n_points * 0.02, n_points * 1.02)
     ax2.set_ylim(min_frequency * 0.5, max_frequency * 1.6)

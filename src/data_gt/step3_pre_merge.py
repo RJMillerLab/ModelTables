@@ -9,13 +9,14 @@ Usage:
 
 import ast  ########
 import os
+import argparse
 import json
 import pickle
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
-from src.utils import to_parquet
+from src.utils import to_parquet, load_config
 
 FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths_v2.parquet"
 ALL_TITLE_PATH              = "data/processed/modelcard_all_title_list.parquet"
@@ -48,15 +49,20 @@ def _safe_parse_list(val):
     else:
         return []
 
-def populate_hugging_table_list(df_merged, processed_base_path):
+def populate_hugging_table_list(df_merged, processed_base_path, tag=None):
     """
     Populate 'hugging_table_list' using 'hugging_deduped_mapping.json' (v1) or 'hugging_deduped_mapping_v2.json' (v2)
     """
-    # Try v2 first, fallback to v1
+    suffix = f"_{tag}" if tag else ""
+    # Try v2 with tag first, then v2 without tag, then v1
+    hugging_map_json_path_v2_tag = os.path.join(processed_base_path, f"hugging_deduped_mapping_v2{suffix}.json")
     hugging_map_json_path_v2 = os.path.join(processed_base_path, "hugging_deduped_mapping_v2.json")
     hugging_map_json_path_v1 = os.path.join(processed_base_path, "hugging_deduped_mapping.json")
     
-    if os.path.exists(hugging_map_json_path_v2):
+    if tag and os.path.exists(hugging_map_json_path_v2_tag):
+        print(f"📦 Using HuggingFace mapping v2 with tag: {hugging_map_json_path_v2_tag}")
+        hugging_map_json_path = hugging_map_json_path_v2_tag
+    elif os.path.exists(hugging_map_json_path_v2):
         print(f"📦 Using HuggingFace mapping v2: {hugging_map_json_path_v2}")
         hugging_map_json_path = hugging_map_json_path_v2
     else:
@@ -75,17 +81,24 @@ def populate_hugging_table_list(df_merged, processed_base_path):
                                                   for p in deduped_csv_list]
     return df_merged
 
-def populate_github_table_list(df_merged, processed_base_path):
+def populate_github_table_list(df_merged, processed_base_path, tag=None):
     """
     Populate 'github_table_list' using 'md_to_csv_mapping.json' (v1) or v2 version
     """
-    # Try v2 first, fallback to v1
+    suffix = f"_{tag}" if tag else ""
+    # Try v2 with tag first, then v2 without tag, then v1
+    github_csvs_v2_tag = os.path.join(processed_base_path, f"deduped_github_csvs_v2{suffix}")
     github_csvs_v2 = os.path.join(processed_base_path, "deduped_github_csvs_v2")
     github_csvs_v1 = os.path.join(processed_base_path, "deduped_github_csvs")
+    github_mapping_v2_tag = os.path.join(github_csvs_v2_tag, "md_to_csv_mapping.json")
     github_mapping_v2 = os.path.join(github_csvs_v2, "md_to_csv_mapping.json")
     github_mapping_v1 = os.path.join(github_csvs_v1, "md_to_csv_mapping.json")
     
-    if os.path.exists(github_mapping_v2):
+    if tag and os.path.exists(github_mapping_v2_tag):
+        print(f"📦 Using GitHub mapping v2 with tag: {github_mapping_v2_tag}")
+        github_csvs_folder = github_csvs_v2_tag
+        github_mapping_path = github_mapping_v2_tag
+    elif os.path.exists(github_mapping_v2):
         print(f"📦 Using GitHub mapping v2: {github_mapping_v2}")
         github_csvs_folder = github_csvs_v2
         github_mapping_path = github_mapping_v2
@@ -99,10 +112,20 @@ def populate_github_table_list(df_merged, processed_base_path):
     df_merged['github_table_list'] = [[] for _ in range(len(df_merged))]
     for i, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Populating GitHub table list"):
         readme_paths = row['readme_path']
-        if isinstance(readme_paths, str):
+        # Handle different types: str, list, tuple, numpy.ndarray, or None
+        # Check numpy array first to avoid ValueError with pd.isna() on empty arrays
+        if isinstance(readme_paths, np.ndarray):
+            readme_paths = readme_paths.tolist() if readme_paths.size > 0 else []
+        elif pd.isna(readme_paths):
+            readme_paths = []
+        elif isinstance(readme_paths, str):
             readme_paths = [readme_paths]
+        elif not isinstance(readme_paths, (list, tuple)):
+            readme_paths = []
         combined_csvs = []
         for md_file in readme_paths:
+            if not md_file or not isinstance(md_file, str):
+                continue
             md_basename = os.path.basename(md_file).replace(".md", "")
             value = md_to_csv_mapping.get(md_basename)
             if value not in [None, []]:
@@ -158,15 +181,15 @@ def map_tables_by_dict(df2, df):
         df2.at[i, "llm_table_list_mapped"]  = combined_llm
     return df2
 
-def merge_table_list_to_df2():
-    df = pd.read_parquet(FINAL_INTEGRATION_PARQUET, columns=['query', 'html_table_list', 'llm_table_list']) # , 'corpusid'
+def merge_table_list_to_df2(final_integration_path, all_title_path, merge_path, side_path, tag=None):
+    df = pd.read_parquet(final_integration_path, columns=['query', 'html_table_list', 'llm_table_list']) # , 'corpusid'
     print(f"  df loaded with shape: {df.shape}")
 
     # Clean stringified lists ########
     df['html_table_list'] = df['html_table_list'].apply(_safe_parse_list)  ########
     df['llm_table_list'] = df['llm_table_list'].apply(_safe_parse_list)  ########
 
-    df2 = pd.read_parquet(ALL_TITLE_PATH, columns=['modelId', 'all_title_list'])
+    df2 = pd.read_parquet(all_title_path, columns=['modelId', 'all_title_list'])
     print(f"  df2 loaded with shape: {df2.shape}")
     print("\nStep 1: Expanding df2 to match df (on df2.all_title_list vs df.query)...")
 
@@ -204,18 +227,48 @@ def merge_table_list_to_df2():
         )
     # load side data and merge to df with modelId
     # Try v2 first, fallback to v1
-    print(f"📦 Loading side data from v2: {SIDE_PATH}")
-    side_path = SIDE_PATH
+    print(f"📦 Loading side data from: {side_path}")
     side_df = pd.read_parquet(side_path, columns=['modelId', 'readme_path', 'readme_hash'])
     processed_base_path = os.path.dirname(side_path)
-    side_df = populate_hugging_table_list(side_df, processed_base_path)
-    side_df = populate_github_table_list(side_df, processed_base_path)
+    side_df = populate_hugging_table_list(side_df, processed_base_path, tag=tag)
+    side_df = populate_github_table_list(side_df, processed_base_path, tag=tag)
     df_final = pd.merge(df2_merged, side_df[['modelId', 'github_table_list', 'hugging_table_list']], on='modelId', how='left')
     df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
-    to_parquet(df_final, MERGE_PATH)
+    to_parquet(df_final, merge_path)
     return df_final
 
 if __name__ == "__main__":
-    print(f"Merging all tables list...")
-    merge_table_list_to_df2()
-    print(f"\n🎉 All tables merged and saved to {MERGE_PATH}.")
+    parser = argparse.ArgumentParser(description="Merge all table lists into a unified model ID file")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input-integration', dest='input_integration', default=None,
+                        help='Path to final_integration_with_paths parquet (default: auto-detect from tag)')
+    parser.add_argument('--input-title-list', dest='input_title_list', default=None,
+                        help='Path to modelcard_all_title_list parquet (default: auto-detect from tag)')
+    parser.add_argument('--input-step2', dest='input_step2', default=None,
+                        help='Path to modelcard_step2 parquet (default: auto-detect from tag)')
+    parser.add_argument('--output', dest='output', default=None,
+                        help='Path to modelcard_step3_merged parquet (default: auto-detect from tag)')
+    args = parser.parse_args()
+    
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+    
+    # Determine input/output paths based on tag
+    final_integration_path = args.input_integration or os.path.join(processed_base_path, f"final_integration_with_paths_v2{suffix}.parquet")
+    all_title_path = args.input_title_list or os.path.join(processed_base_path, f"modelcard_all_title_list{suffix}.parquet")
+    side_path = args.input_step2 or os.path.join(processed_base_path, f"modelcard_step2_v2{suffix}.parquet")
+    merge_path = args.output or os.path.join(processed_base_path, f"modelcard_step3_merged_v2{suffix}.parquet")
+    
+    print("📁 Paths in use:")
+    print(f"   Final integration:  {final_integration_path}")
+    print(f"   All title list:      {all_title_path}")
+    print(f"   Step2 side data:     {side_path}")
+    print(f"   Output merged:       {merge_path}")
+    
+    print(f"\nMerging all tables list...")
+    merge_table_list_to_df2(final_integration_path, all_title_path, merge_path, side_path, tag=tag)
+    print(f"\n🎉 All tables merged and saved to {merge_path}.")

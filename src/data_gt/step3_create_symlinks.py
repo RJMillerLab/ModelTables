@@ -8,6 +8,7 @@ Usage:
 """
 
 import os, re, time, logging, hashlib, json
+import argparse
 import pandas as pd
 from joblib import Parallel, delayed
 from tqdm import tqdm
@@ -95,12 +96,35 @@ create_symlink_llm = symlink_factory("llm_table_list_mapped_dedup", "sym_llm_csv
 
 # Main execution
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Create symbolic links for organizing processed tables")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input', dest='input', default=None,
+                        help='Path to modelcard_step3_dedup parquet (default: auto-detect from tag)')
+    parser.add_argument('--output', dest='output', default=None,
+                        help='Path to modelcard_step4 parquet (default: auto-detect from tag)')
+    parser.add_argument('--mapping', dest='mapping', default=None,
+                        help='Path to symlink_mapping pickle (default: auto-detect from tag)')
+    args = parser.parse_args()
+    
     config = load_config('config.yaml')
     processed_base_path = os.path.join(config.get('base_path'), 'processed')
     data_type = 'modelcard'
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
     
-    # load four keys directly from step3_merged_v2.parquet
-    df_merged = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step3_dedup_v2.parquet"),
+    # Determine input/output paths based on tag
+    input_file = args.input or os.path.join(processed_base_path, f"{data_type}_step3_dedup_v2{suffix}.parquet")
+    output_file = args.output or os.path.join(processed_base_path, f"{data_type}_step4_v2{suffix}.parquet")
+    mapping_path = args.mapping or os.path.join(processed_base_path, f"symlink_mapping{suffix}.pickle")
+    
+    print("📁 Paths in use:")
+    print(f"   Input dedup:          {input_file}")
+    print(f"   Output step4:         {output_file}")
+    print(f"   Symlink mapping:      {mapping_path}")
+    
+    # load four keys directly from step3_dedup_v2.parquet
+    df_merged = pd.read_parquet(input_file,
                                 columns=['modelId', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup', 'hugging_table_list_dedup', 'github_table_list_dedup'])
     print(f"Loaded DataFrame with {len(df_merged)} rows.")
 
@@ -112,10 +136,9 @@ if __name__ == "__main__":
 
     # Save the final DataFrame
     df_merged.drop(columns=['hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'], inplace=True, errors='ignore')
-    to_parquet(df_merged, os.path.join(processed_base_path, f"{data_type}_step4_v2.parquet"))
-    print(f"Symlinks recreated and saved to data/processed/{data_type}_step4_v2.parquet.")
+    to_parquet(df_merged, output_file)
+    print(f"Symlinks recreated and saved to {output_file}.")
 
-    mapping_path = os.path.join(processed_base_path, "symlink_mapping.pickle")
     with open(mapping_path, "wb") as f:
         pickle.dump(global_symlink_mapping, f)
     print(f"Symlink mapping saved to {mapping_path}")

@@ -96,9 +96,18 @@ class GTLengthLoader:
                     return [os.path.basename(line.strip()) for line in f if line.strip()]
 
             keep_mask = None
+            # Get tag suffix from path if available (hacky but works)
+            # Extract tag from path like "csv_pair_matrix_direct_label_251117.npz"
+            tag_suffix = ""
+            if "_" in os.path.basename(self.path):
+                parts = os.path.basename(self.path).replace(".npz", "").split("_")
+                # Check if last part looks like a date tag (6 digits)
+                if len(parts) > 0 and parts[-1].isdigit() and len(parts[-1]) == 6:
+                    tag_suffix = f"_{parts[-1]}"
+            
             # Map figure source name to an index file path if available
             if self.name == "Paper Links":
-                idx_file = os.path.join("data", "gt", "csv_list_direct_label.pkl")
+                idx_file = os.path.join("data", "gt", f"csv_list_direct_label{tag_suffix}.pkl")
                 idx_names = load_index_list(idx_file)
                 if idx_names and len(idx_names) == M.shape[0]:
                     name2idx = {n: i for i, n in enumerate(idx_names)}
@@ -110,9 +119,9 @@ class GTLengthLoader:
             elif self.name == "All Links":
                 # Try a few likely index filenames; skip if not found
                 candidates = [
-                    os.path.join("data", "gt", "csv_list_union_direct_processed.pkl"),
-                    os.path.join("data", "gt", "csv_list_union.pkl"),
-                    os.path.join("data", "gt", "csv_list_union.txt"),
+                    os.path.join("data", "gt", f"csv_list_union_direct{tag_suffix}_processed.pkl"),
+                    os.path.join("data", "gt", f"csv_list_union{tag_suffix}.pkl"),
+                    os.path.join("data", "gt", f"csv_list_union{tag_suffix}.txt"),
                 ]
                 idx_names = []
                 for c in candidates:
@@ -269,8 +278,14 @@ def plot_violin(length_data, palette, title, prefix):
     print("Violin plot saved →", os.path.join(OUTPUT_DIR, f"{prefix}_violin.pdf"))
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Plot GT length distribution")
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.')
+    args = parser.parse_args()
+    
     GT_DIR = "data/gt"
     ROOT_DIR = "/Users/doradong/Repo"
+    suffix = f"_{args.tag}" if args.tag else ""
     PATHS = {
         "SANTOS Small": os.path.join(ROOT_DIR, "santos/groundtruth/santosUnionBenchmark.pickle"),
         "TUS Small":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_small_query_candidate.pkl"),
@@ -278,10 +293,10 @@ if __name__ == "__main__":
         "SANTOS Large": os.path.join(ROOT_DIR, "santos/groundtruth/real_tablesUnionBenchmark.pickle"),
         "UGEN-V1":      os.path.join(ROOT_DIR, "gen/evaluation/groundtruth/ugen_v1UnionBenchmark.pickle"),
         "UGEN-V2":      os.path.join(ROOT_DIR, "gen/evaluation/groundtruth/ugen_v2UnionBenchmark.pickle"),
-        "Paper Links":     os.path.join(GT_DIR, "csv_pair_matrix_direct_label.npz"),
-        "Model Links":     os.path.join(GT_DIR, "scilake_gt_modellink_model_adj_processed.npz"),
-        "Dataset Links":   os.path.join(GT_DIR, "scilake_gt_modellink_dataset_adj_processed.npz"),
-        "All Links":     os.path.join(GT_DIR, "csv_pair_union_direct_processed.npz"),
+        "Paper Links":     os.path.join(GT_DIR, f"csv_pair_matrix_direct_label{suffix}.npz"),
+        "Model Links":     os.path.join(GT_DIR, f"scilake_gt_modellink_model_adj{suffix}_processed.npz"),
+        "Dataset Links":   os.path.join(GT_DIR, f"scilake_gt_modellink_dataset_adj{suffix}_processed.npz"),
+        "All Links":     os.path.join(GT_DIR, f"csv_pair_union_direct{suffix}_processed.npz"),
         # "TUS Others":    os.path.join(ROOT_DIR, "santos/groundtruth/tusUnionBenchmark.pickle"),
         # "TUS Santos":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_query_candidate.pkl"),
     }

@@ -1,9 +1,12 @@
+import os
+import argparse
 import gzip
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 import warnings
 import pandas as pd
+from src.utils import load_config
 
 # === Functions ===
 def load_and_summarize(path):
@@ -110,7 +113,28 @@ def plot_violin_by_mode(distributions, metrics, modes, colors, save_path):
 
 # === Main execution ===
 if __name__ == '__main__':
-    uploaded_path = 'data/processed/modelcard_citation_all_matrices.pkl.gz'
+    parser = argparse.ArgumentParser(description="Plot violin figures of overlap rates")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input', dest='input', default=None,
+                        help='Path to modelcard_citation_all_matrices pkl.gz (default: auto-detect from tag)')
+    parser.add_argument('--output', dest='output', default=None,
+                        help='Path to output PDF (default: overlap_violin_by_mode_<tag>.pdf)')
+    args = parser.parse_args()
+    
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+    
+    # Determine input/output paths based on tag
+    uploaded_path = args.input or os.path.join(processed_base_path, f"modelcard_citation_all_matrices{suffix}.pkl.gz")
+    output_path = args.output or (f"overlap_violin_by_mode{suffix}.pdf" if tag else "overlap_violin_by_mode.pdf")
+    
+    print("📁 Paths in use:")
+    print(f"   Input matrices:      {uploaded_path}")
+    print(f"   Output PDF:          {output_path}")
     summary_df = load_and_summarize(uploaded_path)
     print(summary_df.to_string(index=False))
 
@@ -131,5 +155,5 @@ if __name__ == '__main__':
     # Load distributions
     dists = load_overlap_data(uploaded_path, keys)
 
-    plot_violin_by_mode(dists, metrics, modes, colors, 'overlap_violin_by_mode.pdf')
-    print('Plots saved: overlap_violin_by_mode.pdf')
+    plot_violin_by_mode(dists, metrics, modes, colors, output_path)
+    print(f'Plots saved: {output_path}')

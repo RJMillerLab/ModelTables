@@ -5,12 +5,13 @@ Last edited: 2025-04-05
 Description: This script save the polished markdown tables to CSV files.
 """
 import os, re
+import argparse
 import pandas as pd
 import numpy as np
 import json
 from tqdm import tqdm
 from src.data_ingestion.readme_parser import MarkdownHandler
-from src.utils import to_parquet
+from src.utils import to_parquet, load_config
 
 # Flag: Virtual mode - generate paths but don't actually create CSV files
 VIRTUAL_CSV_GENERATION = True  ######## Set to True to generate llm_table_list paths without creating actual CSV files
@@ -109,12 +110,37 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
     return df
 
 if __name__ == "__main__":
-    input_csv = os.path.join("data/processed/llm_markdown_table_results.parquet")
+    parser = argparse.ArgumentParser(description="Save LLM-processed markdown tables to CSV files")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input', dest='input', default=None,
+                        help='Path to llm_markdown_table_results parquet (default: auto-detect from tag)')
+    parser.add_argument('--output-dir', dest='output_dir', default=None,
+                        help='Directory to save CSV files (default: auto-detect from tag)')
+    parser.add_argument('--output-parquet', dest='output_parquet', default=None,
+                        help='Path to final_integration_with_paths parquet (default: auto-detect from tag)')
+    args = parser.parse_args()
+    
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+    
+    # Determine input/output paths based on tag
+    input_csv = args.input or os.path.join(processed_base_path, f"llm_markdown_table_results{suffix}.parquet")
+    output_dir = args.output_dir or os.path.join(processed_base_path, f"llm_tables{suffix}")
+    updated_parquet_path = args.output_parquet or os.path.join(processed_base_path, f"final_integration_with_paths_v2{suffix}.parquet")
+    
+    print("📁 Paths in use:")
+    print(f"   Input parquet:      {input_csv}")
+    print(f"   Output CSV dir:     {output_dir}")
+    print(f"   Output parquet:     {updated_parquet_path}")
+    
     df_parquet = pd.read_parquet(input_csv)
     print(df_parquet.head(5))
     print(df_parquet.columns)
 
-    output_dir = "data/processed/llm_tables"
     os.makedirs(output_dir, exist_ok=True)
     
     # Process tables and write csvs (or just generate paths in virtual mode)
@@ -126,7 +152,6 @@ if __name__ == "__main__":
         print(f"\n🎉 All markdown tables saved. Paths recorded in 'llm_table_list'.")
     
     # Save updated parquet (always save, regardless of skip flag)
-    updated_parquet_path = "data/processed/final_integration_with_paths_v2.parquet"
     to_parquet(df_parquet, updated_parquet_path)
     print(f"\n🎉 All markdown tables saved. Paths recorded in 'llm_table_list'.")
     print(f"📝 Updated parquet saved to: {updated_parquet_path}")

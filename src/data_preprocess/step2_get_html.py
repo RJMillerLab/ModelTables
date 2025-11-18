@@ -8,6 +8,7 @@ Description: This script is used to get the arXiv ID for the title extracted fro
 import os, re
 import json
 import time
+import argparse
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -15,6 +16,7 @@ from src.data_preprocess.step2_se_url_title import extract_arxiv_id
 from urllib.parse import quote
 import requests
 import xml.etree.ElementTree as ET
+from src.utils import load_config
 
 HTML_CACHE_FILE = "data/processed/arxiv_html_cache.json"  ########
 HTML_FOLDER = "arxiv_fulltext_html"  ########
@@ -237,8 +239,38 @@ def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
     return pd.DataFrame(new_rows, columns=["title", "arxiv_id"])
 
 def main():
+    parser = argparse.ArgumentParser(description="Download arXiv HTML pages for retrieved titles")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input-annotations', dest='input_annotations', default=None,
+                        help='Path to extracted annotations parquet (default: auto-detect from tag)')
+    args = parser.parse_args()
+
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+
+    suffix = f"_{tag}" if tag else ""
+
+    # Determine input annotations path
+    if args.input_annotations:
+        parquet_path = args.input_annotations
+    else:
+        parquet_path = os.path.join(processed_base_path, f"extracted_annotations{suffix}.parquet")
+
+    # Update global paths based on tag
+    global HTML_CACHE_FILE, HTML_FOLDER, NEW_CACHE_PATH
+    HTML_CACHE_FILE = os.path.join(processed_base_path, f"arxiv_html_cache{suffix}.json")
+    HTML_FOLDER = os.path.join(base_path, f"arxiv_fulltext_html{suffix}") if tag else os.path.join(base_path, "arxiv_fulltext_html")
+    NEW_CACHE_PATH = os.path.join(processed_base_path, f"title2arxiv_new_cache{suffix}.json")
+
+    print(f"📁 Input annotations: {parquet_path}")
+    print(f"📁 HTML cache: {HTML_CACHE_FILE}")
+    print(f"📁 HTML folder: {HTML_FOLDER}")
+    print(f"📁 Title→arxiv cache: {NEW_CACHE_PATH}")
+
     ######## 1) Load a local Parquet file with "retrieved_title" column ########
-    parquet_path = "data/processed/extracted_annotations.parquet"
     df_parquet = pd.read_parquet(parquet_path)
     all_titles = set(df_parquet["retrieved_title"].dropna().unique())
     print(f"[INFO] Loaded {len(df_parquet)} rows from {parquet_path}, found {len(all_titles)} unique 'retrieved_title'.")
@@ -251,7 +283,7 @@ def main():
     else:
         print('No new cache found, use the old parquet')
         ######## 3) Load the original old JSON cache {url -> extracted_title} ########
-        json_cache_path = "data/processed/arxiv_titles_cache.json"
+        json_cache_path = os.path.join(processed_base_path, f"arxiv_titles_cache{suffix}.json")
         old_cache = load_json_cache(json_cache_path)  # Format: {url: title}
         ######## 4) Convert old cache to {title -> arxiv_id} using extract_arxiv_id ########
         old_title_id_dict = {}
@@ -282,7 +314,7 @@ def main():
     print(f"[INFO] Missing (need fetch): {len(missing)}")
     #pause
     ######## 7) Save missing titles to a temporary file for manual inspection ########
-    tmp_missing_file = "missing_titles_tmp.txt"
+    tmp_missing_file = os.path.join(processed_base_path, f"missing_titles_tmp{suffix}.txt")
     with open(tmp_missing_file, "w", encoding="utf-8") as f:
         for title in sorted(missing):
             f.write(title + "\n")

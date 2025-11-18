@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
-from src.utils import to_parquet, sanitize_table_separators
+from src.utils import to_parquet, sanitize_table_separators, load_config
 
 SOUP_PARSER = 'lxml'
 VERBOSE = False
@@ -251,28 +251,58 @@ def process_single_html(html_path, paper_id, output_dir='data/processed/tables_o
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Process HTML files and extract tables')
-    parser.add_argument('--input_dir', default='arxiv_fulltext_html')
-    parser.add_argument('--output_dir', default='data/processed/tables_output_v2')
-    parser.add_argument('--db_path', default='data/processed/tables_output.db')
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input_dir', default=None,
+                        help='Directory containing HTML files (default: auto-detect from tag)')
+    parser.add_argument('--output_dir', default=None,
+                        help='Directory to write processed CSVs (default: auto-detect from tag)')
+    parser.add_argument('--db_path', default=None,
+                        help='DuckDB path (default: auto-detect from tag)')
     parser.add_argument('--preserve_bold', action='store_true')
     parser.add_argument('--save_mode', default='csv', choices=['csv', 'duckdb'])
     parser.add_argument('--n_jobs', type=int, default=4)
     parser.add_argument('--sequential', action='store_true')
     args = parser.parse_args()
+
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+
+    if args.input_dir:
+        input_dir = args.input_dir
+    else:
+        input_dir = os.path.join(base_path, f"arxiv_fulltext_html_{tag}") if tag else os.path.join(base_path, "arxiv_fulltext_html")
+    output_dir = args.output_dir or os.path.join(processed_base_path, f"tables_output_v2{suffix}")
+    db_path = args.db_path or os.path.join(processed_base_path, f"tables_output{suffix}.db")
+    results_parquet = os.path.join(processed_base_path, f"html_parsing_results_v2{suffix}.parquet")
+
+    print(f"📁 Input dir: {input_dir}")
+    print(f"📁 Output dir: {output_dir}")
+    print(f"📁 DB path: {db_path}")
+    print(f"📁 Results parquet: {results_parquet}")
     global VERBOSE, PROFILE
-    html_files = [(os.path.join(args.input_dir, f), f.replace('.html', '')) for f in os.listdir(args.input_dir) if f.endswith('.html')]
+    if not os.path.isdir(input_dir):
+        raise FileNotFoundError(f"Input directory not found: {input_dir}")
+
+    html_files = [(os.path.join(input_dir, f), f.replace('.html', '')) for f in os.listdir(input_dir) if f.endswith('.html')]
     print(f"Found {len(html_files)} HTML files to process")
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
     results = []
     if args.sequential or args.n_jobs <= 1:
         for html_path, paper_id in tqdm(html_files):
-            results.append(process_single_html(html_path, paper_id, args.output_dir, args.db_path, args.preserve_bold, args.save_mode))
+            results.append(process_single_html(html_path, paper_id, output_dir, db_path, args.preserve_bold, args.save_mode))
     else:
         with tqdm_joblib(tqdm(total=len(html_files), desc="Processing HTML files")):
             results = Parallel(n_jobs=args.n_jobs)(delayed(process_single_html)(
-                html_path, paper_id, args.output_dir, args.db_path, args.preserve_bold, args.save_mode
+                html_path, paper_id, output_dir, db_path, args.preserve_bold, args.save_mode
             ) for html_path, paper_id in html_files)
     df = pd.DataFrame(results)
-    to_parquet(df, 'data/processed/html_parsing_results_v2.parquet')
+    to_parquet(df, results_parquet)
     print(f"✅ Done. Saved {len(df)} results.")
 
 

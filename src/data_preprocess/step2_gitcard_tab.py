@@ -16,6 +16,7 @@ import numpy as np
 from shutil import copytree
 import shutil
 from bs4 import BeautifulSoup
+import argparse
 from src.data_ingestion.readme_parser import MarkdownHandler
 from src.utils import load_config, to_parquet
 
@@ -435,13 +436,55 @@ def process_markdown_files(github_folder, output_folder):
     with open(mapping_json_path, 'w', encoding='utf-8') as json_file:
         json.dump(md_to_csv_mapping, json_file, indent=4)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Extract markdown tables from GitHub READMEs and Model Cards")
+    parser.add_argument("--tag", dest="tag", default=None,
+                        help="Tag suffix for versioning (e.g., 251117). Enables versioning mode.")
+    parser.add_argument("--input-step1", dest="input_step1", default=None,
+                        help="Path to step1 parquet file (default: auto-detect from tag)")
+    parser.add_argument("--input-github-info", dest="input_github_info", default=None,
+                        help="Path to github_readmes_info parquet file (default: auto-detect from tag)")
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
     config = load_config('config.yaml')
-    processed_base_path = os.path.join(config.get('base_path'), 'processed')
+    base_path = config.get('base_path')
+    processed_base_path = os.path.join(base_path, 'processed')
     data_type = 'modelcard'
+    
+    # Determine input files based on tag
+    tag = args.tag
+    if args.input_step1:
+        step1_file = args.input_step1
+    else:
+        step1_suffix = f"_{tag}" if tag else ""
+        step1_file = os.path.join(processed_base_path, f"{data_type}_step1{step1_suffix}.parquet")
+    
+    if args.input_github_info:
+        github_info_file = args.input_github_info
+    else:
+        github_info_suffix = f"_{tag}" if tag else ""
+        github_info_file = os.path.join(processed_base_path, f"github_readmes_info{github_info_suffix}.parquet")
+    
+    # Determine output file based on tag
+    output_suffix = f"_{tag}" if tag else ""
+    output_file = os.path.join(processed_base_path, f"{data_type}_step2_v2{output_suffix}.parquet")
+    
+    # Determine GitHub readme folder based on tag
+    if tag:
+        github_readme_folder = os.path.join(base_path, f"downloaded_github_readmes_{tag}")
+    else:
+        github_readme_folder = os.path.join(base_path, "downloaded_github_readmes")
+    
+    print(f"📁 Loading step1 data from: {step1_file}")
+    print(f"📁 Loading GitHub info from: {github_info_file}")
+    print(f"📁 Using GitHub readme folder: {github_readme_folder}")
+    print(f"📁 Output will be saved to: {output_file}")
+    
     print("⚠️Step 1: Loading modelcard_step1 data...")
-    df_modelcard = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'card_readme', 'github_link'])
-    df_giturl = pd.read_parquet(os.path.join(processed_base_path, "github_readmes_info.parquet"))
+    df_modelcard = pd.read_parquet(step1_file, columns=['modelId', 'card_readme', 'github_link'])
+    df_giturl = pd.read_parquet(github_info_file)
     df_merged = pd.merge(df_modelcard, df_giturl[['modelId', 'readme_path']], on='modelId', how='left')
     print(f"✅ After merge: {len(df_merged)} rows.")
 
@@ -456,7 +499,6 @@ def main():
     df_unique = df_merged.drop_duplicates(subset=['readme_hash'], keep='first').copy()
     df_unique = df_unique[df_unique['readme_hash'].notnull()]
     print(f"...Found {len(df_unique)} unique readme content out of {len(df_merged)} rows.")
-    output_file = os.path.join(processed_base_path, f"{data_type}_step2_v2.parquet")
     df_merged.drop(columns=['card_readme', 'github_link'], inplace=True, errors='ignore')
     to_parquet(df_merged, output_file)
     print(f"✅ Results saved to: {output_file}")
@@ -470,8 +512,9 @@ def main():
     #df_unique['extracted_markdown_table_hugging'] = df_unique.index.map(lambda idx: row_index_to_result[idx][1])
     # We'll store these results in a dict: readme_hash -> list_of_tables
     print('Start creating dictionary for {readme_path: list_of_tables}...')
-    dedup_folder_hugging = os.path.join(processed_base_path, "deduped_hugging_csvs_v2")  ########
-    os.makedirs(dedup_folder_hugging, exist_ok=True)  ########
+    hugging_csv_suffix = f"_{tag}" if tag else ""
+    dedup_folder_hugging = os.path.join(processed_base_path, f"deduped_hugging_csvs_v2{hugging_csv_suffix}")
+    os.makedirs(dedup_folder_hugging, exist_ok=True)
     
     # Define processing function for parallel execution at hash level
     def process_and_save_tables_for_hash(row_tuple, output_folder):
@@ -547,7 +590,9 @@ def main():
     # Build the hash_to_csv_map from results
     hash_to_csv_map = {hval: csv_list for hval, csv_list in results}
     
-    hugging_map_json_path = os.path.join(processed_base_path, "hugging_deduped_mapping_v2.json")  ########
+    # Determine output paths for mappings based on tag
+    hugging_map_suffix = f"_{tag}" if tag else ""
+    hugging_map_json_path = os.path.join(processed_base_path, f"hugging_deduped_mapping_v2{hugging_map_suffix}.json")
     with open(hugging_map_json_path, 'w', encoding='utf-8') as jf:
         json.dump(hash_to_csv_map, jf, indent=2)
     print(f"✅ Deduped CSV mapping saved to: {hugging_map_json_path}")
@@ -556,10 +601,10 @@ def main():
     
     # ---------- GitHub part ----------
     print("⚠️Step 3: Processing GitHub readme files and saving extracted tables to CSV...")
-    output_folder_github = os.path.join(processed_base_path, "deduped_github_csvs_v2")
+    github_csv_suffix = f"_{tag}" if tag else ""
+    output_folder_github = os.path.join(processed_base_path, f"deduped_github_csvs_v2{github_csv_suffix}")
     os.makedirs(output_folder_github, exist_ok=True)
-    input_folder_github = os.path.join(config.get('base_path'), 'downloaded_github_readmes')
-    process_markdown_files(input_folder_github, output_folder_github) # save csv and md_to_csv_mapping
+    process_markdown_files(github_readme_folder, output_folder_github) # save csv and md_to_csv_mapping
 
 if __name__ == "__main__":
     main()

@@ -6,13 +6,14 @@ Description: Get statistics of tables in CSV files from different resources with
 """
 
 import os
+import argparse
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from matplotlib.patches import Patch
-from src.utils import to_parquet
+from src.utils import to_parquet, load_config
 import csv
 
 V2_MODE = True  # Set to True to use v2 versions
@@ -218,14 +219,32 @@ def process_csv_file(csv_file):
 def compute_resource_stats(df, resource):
     col = RESOURCES[resource][0]
     paths = df[col].explode()
-    valid_paths = paths[paths.apply(lambda x: isinstance(x, str) and os.path.exists(x))]
+    
+    # Debug: Check path existence
+    total_paths = len(paths.dropna())
+    existing_paths = paths[paths.apply(lambda x: isinstance(x, str) and os.path.exists(x))]
+    non_existing_count = total_paths - len(existing_paths)
+    
+    if total_paths > 0:
+        print(f"📊 {resource}: Total paths: {total_paths:,}, Existing: {len(existing_paths):,}, Missing: {non_existing_count:,}")
+        if non_existing_count > 0:
+            # Show sample missing paths (up to 3)
+            missing_paths = paths[paths.apply(lambda x: isinstance(x, str) and not os.path.exists(x))].head(3)
+            if len(missing_paths) > 0:
+                print(f"   Sample missing paths:")
+                for p in list(missing_paths)[:3]:
+                    print(f"      - {p}")
+    
+    valid_paths = existing_paths
     # Filter out generic / too-general tables
     def is_generic_table(path):
         filename = os.path.basename(path)
         return any(pattern in filename for pattern in GENERIC_TABLE_PATTERNS)
     
+    before_generic_filter = len(valid_paths)
     valid_paths = valid_paths[~valid_paths.apply(is_generic_table)]
-    print(f"Filtered generic tables for {resource}: removed {len(paths) - len(valid_paths)} files.")
+    generic_filtered = before_generic_filter - len(valid_paths)
+    print(f"Filtered generic tables for {resource}: removed {generic_filtered:,} files.")
     
     unique_paths = valid_paths.unique().tolist()
 
@@ -564,11 +583,33 @@ def plot_metric(df, metric, filename):
     plt.close()
 
 
-def main():
-    df = pd.read_parquet(INPUT_FILE, columns=['modelId', 'all_title_list'])
-    df_integration = pd.read_parquet(INTEGRATION_FILE, columns=['query'])
+def main(input_file=None, input_file_dedup=None, integration_file=None, output_dir=None, tag=None):
+    # Update global OUTPUT_DIR and VALID_TITLE_PARQUET for use in other functions
+    global OUTPUT_DIR, VALID_TITLE_PARQUET
+    
+    if input_file is None:
+        input_file = INPUT_FILE
+    if input_file_dedup is None:
+        input_file_dedup = INPUT_FILE_DEDUP
+    if integration_file is None:
+        integration_file = INTEGRATION_FILE
+    if output_dir is None:
+        output_dir = OUTPUT_DIR
+    
+    OUTPUT_DIR = output_dir
+    
+    # Determine suffix for output files (use tag if provided)
+    suffix = f"_{tag}" if tag else ""
+    
+    # Update VALID_TITLE_PARQUET based on tag
+    # Get processed_base_path from the caller or use default
+    processed_base_path = os.path.dirname(VALID_TITLE_PARQUET)  # "data/processed"
+    VALID_TITLE_PARQUET = os.path.join(processed_base_path, f"all_title_list_valid{suffix}.parquet")
+    
+    df = pd.read_parquet(input_file, columns=['modelId', 'all_title_list'])
+    df_integration = pd.read_parquet(integration_file, columns=['query'])
     # read data/processed/modelcard_step3_dedup.parquet and get modelId and 4 resources keys
-    df_dedup = pd.read_parquet(INPUT_FILE_DEDUP, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'])
+    df_dedup = pd.read_parquet(input_file_dedup, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'])
     # merge df and df_dedup by modelId
     df = df.merge(df_dedup, on='modelId', how='left')
 
@@ -593,12 +634,12 @@ def main():
 
     results_df = create_combined_results(benchmark_data, resource_stats)
     
-    # Add v2 suffix to output files if V2_MODE is enabled
+    # Add v2 suffix and tag to output files if V2_MODE is enabled
     if V2_MODE:
-        results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{V2_SUFFIX}.parquet")
+        results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{V2_SUFFIX}{suffix}.parquet")
         print(f"\n🔧 V2 Mode enabled - using v2 CSV files when available")
     else:
-        results_path = os.path.join(OUTPUT_DIR, "benchmark_results.parquet")
+        results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{suffix}.parquet" if suffix else "benchmark_results.parquet")
     
     to_parquet(results_df, results_path)
     print(f"\nSaved results to {results_path}")
@@ -626,4 +667,35 @@ def main():
         print(f"Warning: failed to generate all_valid_title_valid.txt: {e}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Get statistics of tables in CSV files from different resources")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input', dest='input', default=None,
+                        help='Path to modelcard_step3_merged parquet (default: auto-detect from tag)')
+    parser.add_argument('--input-dedup', dest='input_dedup', default=None,
+                        help='Path to modelcard_step3_dedup parquet (default: auto-detect from tag)')
+    parser.add_argument('--input-integration', dest='input_integration', default=None,
+                        help='Path to final_integration_with_paths parquet (default: auto-detect from tag)')
+    parser.add_argument('--output-dir', dest='output_dir', default=None,
+                        help='Directory for output files (default: data/analysis)')
+    args = parser.parse_args()
+    
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+    
+    # Determine input/output paths based on tag
+    input_file = args.input or os.path.join(processed_base_path, f"modelcard_step3_merged_v2{suffix}.parquet")
+    input_file_dedup = args.input_dedup or os.path.join(processed_base_path, f"modelcard_step3_dedup_v2{suffix}.parquet")
+    integration_file = args.input_integration or os.path.join(processed_base_path, f"final_integration_with_paths_v2{suffix}.parquet")
+    output_dir = args.output_dir or os.path.join(base_path, 'analysis')
+    
+    print("📁 Paths in use:")
+    print(f"   Input merged:        {input_file}")
+    print(f"   Input dedup:          {input_file_dedup}")
+    print(f"   Input integration:    {integration_file}")
+    print(f"   Output directory:     {output_dir}")
+    
+    main(input_file=input_file, input_file_dedup=input_file_dedup, integration_file=integration_file, output_dir=output_dir, tag=tag)

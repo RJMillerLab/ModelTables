@@ -27,6 +27,7 @@ from joblib import Parallel, delayed
 from src.utils import load_config, to_parquet
 import html2text
 import hashlib
+import argparse
 from src.data_ingestion.readme_parser import BibTeXExtractor
 from src.data_ingestion.bibtex_parser import BibTeXFactory
 from src.data_preprocess.step1 import process_bibtex_tuple, parse_bibtex_entries
@@ -39,8 +40,17 @@ import ast
 class PdfReadError(Exception):
     pass
 
-ARXIV_CACHE_PATH = "data/processed/arxiv_titles_cache.json"
-RXIV_CACHE_PATH = "data/processed/rxiv_titles_cache.json"
+# Cache paths will be determined dynamically based on tag
+def get_cache_paths(base_path, tag=None):
+    """Get cache file paths based on tag"""
+    processed_path = os.path.join(base_path, 'processed')
+    if tag:
+        arxiv_cache = os.path.join(processed_path, f"arxiv_titles_cache_{tag}.json")
+        rxiv_cache = os.path.join(processed_path, f"rxiv_titles_cache_{tag}.json")
+    else:
+        arxiv_cache = os.path.join(processed_path, "arxiv_titles_cache.json")
+        rxiv_cache = os.path.join(processed_path, "rxiv_titles_cache.json")
+    return arxiv_cache, rxiv_cache
 
 
 def extract_titles(bibtex_list):
@@ -92,8 +102,7 @@ PDF_DOWNLOAD_FOLDER = "pdf_downloads"
 if not os.path.exists(PDF_DOWNLOAD_FOLDER):
     os.makedirs(PDF_DOWNLOAD_FOLDER)
 
-GITHUB_README_FOLDER = "data/downloaded_github_readmes_processed"
-assert os.path.exists(GITHUB_README_FOLDER)
+# GITHUB_README_FOLDER will be determined dynamically based on tag
 
 # Separate folder for this script's GitHub downloads
 GITHUB_README_FOLDER_2 = "github_readme_output_2"  
@@ -473,7 +482,7 @@ readme_cache = {}
 def make_upper(content): 
     return content.upper() if content is not None else "" 
 
-def process_github_url_debug(github_url, GITHUB_PATH_CACHE): 
+def process_github_url_debug(github_url, GITHUB_PATH_CACHE, GITHUB_README_FOLDER=None): 
     """Process a single GitHub URL with debug prints."""
     cleaned_url = clean_github_link(github_url)
     if not cleaned_url.strip():
@@ -484,6 +493,13 @@ def process_github_url_debug(github_url, GITHUB_PATH_CACHE):
     local_path = None
     local_path_cached = GITHUB_PATH_CACHE.get(github_url)
     local_path_2 = os.path.join(GITHUB_README_FOLDER_2, url_name)
+    
+    # Also check in GITHUB_README_FOLDER if provided
+    if GITHUB_README_FOLDER and os.path.exists(GITHUB_README_FOLDER):
+        local_path_processed = os.path.join(GITHUB_README_FOLDER, url_name)
+        if os.path.exists(local_path_processed):
+            local_path_cached = local_path_processed
+    
     if local_path_cached and os.path.exists(local_path_cached):
         with open(local_path_cached, 'r', encoding='utf-8') as f:
             local_content = f.read()
@@ -543,11 +559,11 @@ def process_github_url_debug(github_url, GITHUB_PATH_CACHE):
         }
     )
 
-def parallel_fetch_github_info(links, GITHUB_PATH_CACHE, n_jobs=4): 
+def parallel_fetch_github_info(links, GITHUB_PATH_CACHE, GITHUB_README_FOLDER=None, n_jobs=4): 
     """Fetch GitHub info in parallel using joblib."""
     with parallel_backend('loky', n_jobs=n_jobs, temp_folder="./joblib_tmp"): 
         results = Parallel(n_jobs=n_jobs)(
-            delayed(process_github_url_debug)(lk, GITHUB_PATH_CACHE) for lk in tqdm(links, desc="Parallel GitHub Info")
+            delayed(process_github_url_debug)(lk, GITHUB_PATH_CACHE, GITHUB_README_FOLDER) for lk in tqdm(links, desc="Parallel GitHub Info")
         )
     return dict(results)
 
@@ -603,14 +619,29 @@ def fetch_url_title(url):
         print(f"Error in fetch_url_title({url}): {e}")
         return ""
 
-def load_github_cache(config):
-    mapping_path = os.path.join(config.get('base_path'), "processed", "github_readme_cache.parquet")
-    updated_mapping_path = os.path.join(config.get('base_path'), "processed", "github_readme_cache_update.parquet")
-    if os.path.exists(updated_mapping_path):
-        mapping_path = updated_mapping_path
+def load_github_cache(config, tag=None):
+    """Load GitHub cache, preferring tag-specific version if available"""
+    processed_path = os.path.join(config.get('base_path'), "processed")
+    
+    # Try tag-specific cache first, then fallback to default
+    if tag:
+        tag_cache_path = os.path.join(processed_path, f"github_readme_cache_{tag}.parquet")
+        if os.path.exists(tag_cache_path):
+            mapping_path = tag_cache_path
+        else:
+            # Fallback to default
+            mapping_path = os.path.join(processed_path, "github_readme_cache.parquet")
     else:
-        pass
-    assert os.path.exists(mapping_path)
+        updated_mapping_path = os.path.join(processed_path, "github_readme_cache_update.parquet")
+        if os.path.exists(updated_mapping_path):
+            mapping_path = updated_mapping_path
+        else:
+            mapping_path = os.path.join(processed_path, "github_readme_cache.parquet")
+    
+    if not os.path.exists(mapping_path):
+        print(f"Warning: GitHub cache not found at {mapping_path}, using empty cache")
+        return {}
+    
     mapping_df = pd.read_parquet(mapping_path)
     mapping_df = update_downloaded_path(mapping_df) # fix path for new folder
     url_to_hash = {
@@ -618,18 +649,62 @@ def load_github_cache(config):
         for k, v in zip(mapping_df.get('raw_url', []), mapping_df.get('downloaded_path', []))
         if pd.notnull(k) and pd.notnull(v)
     }
-    print(f"Loaded {len(url_to_hash)} valid URL mappings")
+    print(f"Loaded {len(url_to_hash)} valid URL mappings from {mapping_path}")
     return url_to_hash
 
 def main():
+    parser = argparse.ArgumentParser(description='Extract titles from PDF and GitHub links')
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input-step1', dest='input_step1', default=None,
+                        help='Path to step1 parquet file (default: auto-detect from tag)')
+    args = parser.parse_args()
+    
     config = load_config('config.yaml')
-    processed_base_path = os.path.join(config.get('base_path'), 'processed')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
     data_type = 'modelcard'
-    GITHUB_PATH_CACHE = load_github_cache(config)
+    tag = args.tag
+    
+    # Determine input file based on tag
+    if args.input_step1:
+        step1_file = args.input_step1
+    else:
+        step1_suffix = f"_{tag}" if tag else ""
+        step1_file = os.path.join(processed_base_path, f"{data_type}_step1{step1_suffix}.parquet")
+    
+    # Determine output file based on tag
+    output_suffix = f"_{tag}" if tag else ""
+    output_file = os.path.join(processed_base_path, f"{data_type}_all_title_list{output_suffix}.parquet")
+    
+    # Determine cache paths based on tag
+    ARXIV_CACHE_PATH, RXIV_CACHE_PATH = get_cache_paths(base_path, tag)
+    
+    # Determine GitHub readme folder based on tag
+    if tag:
+        GITHUB_README_FOLDER = os.path.join(base_path, f"downloaded_github_readmes_{tag}_processed")
+    else:
+        GITHUB_README_FOLDER = os.path.join(base_path, "downloaded_github_readmes_processed")
+    
+    # Determine GitHub cache and extraction cache paths
+    if tag:
+        github_extraction_cache_path = os.path.join(processed_base_path, f"github_extraction_cache_{tag}.json")
+        github_cache_update_path = os.path.join(processed_base_path, f"github_readme_cache_update_{tag}.parquet")
+    else:
+        github_extraction_cache_path = os.path.join(processed_base_path, "github_extraction_cache.json")
+        github_cache_update_path = os.path.join(processed_base_path, "github_readme_cache_update.parquet")
+    
+    print(f"📁 Input step1 file: {step1_file}")
+    print(f"📁 Output file: {output_file}")
+    print(f"📁 GitHub readme folder: {GITHUB_README_FOLDER}")
+    print(f"📁 ArXiv cache: {ARXIV_CACHE_PATH}")
+    print(f"📁 GitHub extraction cache: {github_extraction_cache_path}")
+    
+    GITHUB_PATH_CACHE = load_github_cache(config, tag)
     print(f"Loaded {len(GITHUB_PATH_CACHE)} GitHub cache entries.")
 
     print("Step 1: Loading data from parquet (modelcard_step1)...")
-    df = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'github_link', 'pdf_link'])
+    df = pd.read_parquet(step1_file, columns=['modelId', 'github_link', 'pdf_link'])
 
     print("Step 2: Extracting links from columns (pdf_link, github_link)")
     all_links = extract_links_from_columns(df, ["pdf_link", "github_link"])
@@ -656,8 +731,10 @@ def main():
             link=lk, domain=dm, category=cat, handler=handler, invalid=invalid
         ))
     df_links = pd.DataFrame(records)
-    df_links.to_csv("data/processed/all_links_with_category.csv", index=False)
-    print("Wrote data/processed/all_links_with_category.csv")
+    links_csv_suffix = f"_{tag}" if tag else ""
+    links_csv_path = os.path.join(processed_base_path, f"all_links_with_category{links_csv_suffix}.csv")
+    df_links.to_csv(links_csv_path, index=False)
+    print(f"Wrote {links_csv_path}")
 
     valid_df = df_links[df_links["invalid"] == False].copy()
     print(f"Valid links: {len(valid_df)}")
@@ -722,8 +799,7 @@ def main():
     github_links_raw = github_df["link"].tolist()
     unique_github_links = list({clean_github_link(x) for x in github_links_raw})
 
-    GITHUB_EXTRA_CACHE_PATH = os.path.join(config.get('base_path'), "processed", "github_extraction_cache.json")  #
-    github_extraction_cache = load_cache(GITHUB_EXTRA_CACHE_PATH)  #
+    github_extraction_cache = load_cache(github_extraction_cache_path)  #
     urls_to_process = []
     for url in unique_github_links:
         if url not in github_extraction_cache:
@@ -732,9 +808,9 @@ def main():
     
     new_github_results = {}
     if urls_to_process:
-        new_github_results = parallel_fetch_github_info(urls_to_process, GITHUB_PATH_CACHE, n_jobs=4)  #
+        new_github_results = parallel_fetch_github_info(urls_to_process, GITHUB_PATH_CACHE, GITHUB_README_FOLDER, n_jobs=4)  #
         github_extraction_cache.update(new_github_results)  #
-        with open(GITHUB_EXTRA_CACHE_PATH, 'w', encoding='utf-8') as f:  #
+        with open(github_extraction_cache_path, 'w', encoding='utf-8') as f:  #
             json.dump(github_extraction_cache, f)  #
 
     # Parallel fetch for GitHub 
@@ -745,9 +821,8 @@ def main():
         'raw_url': list(GITHUB_PATH_CACHE.keys()),
         'downloaded_path': list(GITHUB_PATH_CACHE.values())
     })
-    new_mapping_path = os.path.join(config.get('base_path'), "processed", "github_readme_cache_update.parquet")
-    to_parquet(new_mapping_df, new_mapping_path)
-    print(f"Saved updated GitHub cache to {new_mapping_path}")
+    to_parquet(new_mapping_df, github_cache_update_path)
+    print(f"Saved updated GitHub cache to {github_cache_update_path}")
 
     print("Step 4D: other => HTML or PDF partial fetch (Parallel)")
     other_title_map = {}
@@ -877,14 +952,14 @@ def main():
     #df["github_bibtex_tuple"] = df["github_titles"].apply(extract_bibtex_from_github_titles)
     parse_bibtex_entries(df, key="title_github_bibtex", output_key="parsed_bibtex_tuple_list_github", count_key = "successful_parse_count_github")
     print("\n-- Final df --")
-    df_step1 = pd.read_parquet(os.path.join(processed_base_path, f"{data_type}_step1.parquet"), columns=['modelId', 'parsed_bibtex_tuple_list'])
+    df_step1 = pd.read_parquet(step1_file, columns=['modelId', 'parsed_bibtex_tuple_list'])
     df_final = pd.merge(df_step1, df, on="modelId", how="left")
     df_final["all_bibtex_titles"] = df_final.apply(merge_bibtex_titles, axis=1)
     df_final["all_title_list"] = df_final.apply(merge_all_titles, axis=1)
-    #df_final.to_parquet(os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"), compression='zstd', engine='pyarrow')
     df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
-    to_parquet(df_final, os.path.join(processed_base_path, f"{data_type}_all_title_list.parquet"))
-    print("✅ Merged BibTeX columns into 'all_bibtex_titles'")
+    to_parquet(df_final, output_file)
+    print(f"✅ Merged BibTeX columns into 'all_bibtex_titles'")
+    print(f"✅ Results saved to: {output_file}")
 
 
 if __name__ == "__main__":

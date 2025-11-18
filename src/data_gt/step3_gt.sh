@@ -1,6 +1,10 @@
 #!/bin/bash
 
-LOG=logs/step3_gt_0526.log
+# Usage: bash src/data_gt/step3_gt.sh [TAG]
+# Example: bash src/data_gt/step3_gt.sh 251117
+
+TAG=${1:-""}
+LOG=logs/step3_gt${TAG:+_${TAG}}.log
 
 REL_KEYS=(
   direct_label
@@ -14,13 +18,24 @@ REL_KEYS=(
 )
 
 echo "===== step3_gt started at $(date) =====" > "$LOG"
+if [ -n "$TAG" ]; then
+  echo "Using tag: $TAG" >> "$LOG"
+fi
 
 for key in "${REL_KEYS[@]}"; do
   echo "---- Processing rel_key = $key ----" >> "$LOG"
-  python -m src.data_gt.step3_gt \
-    --overlap_rate_threshold 0.0 \
-    --rel_key "$key" \
-    >> "$LOG" 2>&1
+  if [ -n "$TAG" ]; then
+    python -m src.data_gt.step3_gt \
+      --overlap_rate_threshold 0.0 \
+      --rel_key "$key" \
+      --tag "$TAG" \
+      >> "$LOG" 2>&1
+  else
+    python -m src.data_gt.step3_gt \
+      --overlap_rate_threshold 0.0 \
+      --rel_key "$key" \
+      >> "$LOG" 2>&1
+  fi
   echo "" >> "$LOG"
 done
 

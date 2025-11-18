@@ -6,10 +6,12 @@ Description: Analyze saved overlap scores and direct citation links to evaluate 
 """
 
 import os, json, gzip, pickle
+import argparse
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 import numpy as np
+from src.utils import load_config
 from sklearn.metrics import (
     precision_recall_curve, roc_curve, balanced_accuracy_score, 
     matthews_corrcoef, confusion_matrix, f1_score, precision_score, recall_score
@@ -21,7 +23,6 @@ from sklearn.ensemble import IsolationForest
 # === Paths ===
 COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"  ######## updated ########
 RESULT_DIR = "data/analysis"
-os.makedirs(RESULT_DIR, exist_ok=True)
 
 def find_balanced_accuracy_threshold(y_true, y_scores):
     """Find threshold that maximizes balanced accuracy."""
@@ -161,94 +162,120 @@ def find_hybrid_threshold(y_true, y_scores):
     # 3. 取两者的最小值作为最终阈值
     return min(min_direct_threshold, non_direct_threshold)
 
-# === Load data ===
-with gzip.open(COMBINED_PATH, "rb") as f:
-    combined = pickle.load(f)
+# === Main execution ===
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Determine overlap thresholds")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input', dest='input', default=None,
+                        help='Path to modelcard_citation_all_matrices pkl.gz (default: auto-detect from tag)')
+    parser.add_argument('--output-dir', dest='output_dir', default=None,
+                        help='Directory for output files (default: data/analysis)')
+    args = parser.parse_args()
+    
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+    
+    # Determine input/output paths based on tag
+    combined_path = args.input or os.path.join(processed_base_path, f"modelcard_citation_all_matrices{suffix}.pkl.gz")
+    result_dir = args.output_dir or os.path.join(base_path, 'analysis')
+    os.makedirs(result_dir, exist_ok=True)
+    
+    print("📁 Paths in use:")
+    print(f"   Input matrices:      {combined_path}")
+    print(f"   Output directory:    {result_dir}")
 
-print("✅ Combined matrix file loaded successfully")
-print("📊 Available keys in the data:", list(combined.keys()), "\n")
+    # === Load data ===
+    with gzip.open(combined_path, "rb") as f:
+        combined = pickle.load(f)
 
-# === Create set of direct citation pairs ===
-direct_pairs = load_direct_pairs_from_combined(combined)
+    print("✅ Combined matrix file loaded successfully")
+    print("📊 Available keys in the data:", list(combined.keys()), "\n")
 
-# === Prepare labels and scores ===
-y_true = []
-y_scores = []
-score_labels = []
+    # === Create set of direct citation pairs ===
+    direct_pairs = load_direct_pairs_from_combined(combined)
 
-score_matrix = combined["max_pr"]
-paper_index = combined["paper_index"]
+    # === Prepare labels and scores ===
+    y_true = []
+    y_scores = []
+    score_labels = []
 
-rows, cols = score_matrix.nonzero()
-for i, j in zip(rows, cols):
-    if i >= j:
-        continue
-    pair = tuple(sorted([paper_index[i], paper_index[j]]))
-    score = score_matrix[i, j]
-    is_direct = (pair in direct_pairs)
-    y_true.append(1 if is_direct else 0)
-    y_scores.append(score)
-    score_labels.append("Direct" if is_direct else "None")
+    score_matrix = combined["max_pr"]
+    paper_index = combined["paper_index"]
 
-# Add data validation
-y_true = np.array(y_true)
-y_scores = np.array(y_scores)
-n_direct = np.sum(y_true == 1)
-n_nondirect = np.sum(y_true == 0)
-n_total = len(y_true)
+    rows, cols = score_matrix.nonzero()
+    for i, j in zip(rows, cols):
+        if i >= j:
+            continue
+        pair = tuple(sorted([paper_index[i], paper_index[j]]))
+        score = score_matrix[i, j]
+        is_direct = (pair in direct_pairs)
+        y_true.append(1 if is_direct else 0)
+        y_scores.append(score)
+        score_labels.append("Direct" if is_direct else "None")
 
-print(f"\n📊 Data Distribution:")
-print(f"Total pairs: {n_total}")
-print(f"Direct pairs: {n_direct} ({n_direct/n_total*100:.2f}%)")
-print(f"Non-direct pairs: {n_nondirect} ({n_nondirect/n_total*100:.2f}%)")
-assert n_direct + n_nondirect == n_total, "Data validation failed: direct + non-direct != total"
+    # Add data validation
+    y_true = np.array(y_true)
+    y_scores = np.array(y_scores)
+    n_direct = np.sum(y_true == 1)
+    n_nondirect = np.sum(y_true == 0)
+    n_total = len(y_true)
+
+    print(f"\n📊 Data Distribution:")
+    print(f"Total pairs: {n_total}")
+    print(f"Direct pairs: {n_direct} ({n_direct/n_total*100:.2f}%)")
+    print(f"Non-direct pairs: {n_nondirect} ({n_nondirect/n_total*100:.2f}%)")
+    assert n_direct + n_nondirect == n_total, "Data validation failed: direct + non-direct != total"
 
 # === Compute precision-recall for F1-based threshold ===
-precision, recall, thresholds_pr = precision_recall_curve(y_true, y_scores)
-f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
-best_idx_pr = f1.argmax()
-best_threshold_f1 = thresholds_pr[best_idx_pr]
-best_f1 = f1[best_idx_pr]
-
-print(f"🎯 Best Threshold (F1-based) = {best_threshold_f1:.4f}  (F1 = {best_f1:.4f})")
-
-# === Compute Youden's J threshold (via ROC) ===
-fpr, tpr, thresholds_roc = roc_curve(y_true, y_scores)
-youden = tpr - fpr
-best_idx_roc = np.argmax(youden)
-best_threshold_youden = thresholds_roc[best_idx_roc]
-best_youden_score = youden[best_idx_roc]
-print(f"🟢 Youden's J = {best_youden_score:.4f}; Threshold = {best_threshold_youden:.4f}")
-
-# === Compute other thresholds ===
-balanced_threshold, balanced_score = find_balanced_accuracy_threshold(y_true, y_scores)
-mcc_threshold, mcc_score = find_mcc_threshold(y_true, y_scores)
-gmean_threshold, gmean_score = find_gmean_threshold(y_true, y_scores)
-iba_threshold, iba_score = find_iba_threshold(y_true, y_scores)
-
-print(f"Balanced Accuracy Threshold = {balanced_threshold:.4f} (score = {balanced_score:.4f})")
-print(f"MCC Threshold = {mcc_threshold:.4f} (score = {mcc_score:.4f})")
-print(f"G-mean Threshold = {gmean_threshold:.4f} (score = {gmean_score:.4f})")
-print(f"IBA Threshold = {iba_threshold:.4f} (score = {iba_score:.4f})")
-
-# === Prepare DataFrame for distribution analysis (KDE, histogram) ===
-df_scores = pd.DataFrame({"Score": y_scores, "Label": score_labels})
-vals_direct = df_scores[df_scores.Label == "Direct"]["Score"].values
-vals_none = df_scores[df_scores.Label == "None"]["Score"].values
-
-# === Statistical test (p-value) using t-test ===
-p_value = ttest_ind(vals_direct, vals_none, equal_var=False).pvalue
-print(f"📊 t-test p-value (Direct vs None): {p_value:.4e}")
-
-# Mann-Whitney U test
-u_stat, p_value_mwu = mannwhitneyu(vals_direct, vals_none, alternative='two-sided')
-print(f"📊 Mann-Whitney U test p-value: {p_value_mwu:.4e}")
-
-# KS test
-ks_stat, p_value_ks = ks_2samp(vals_direct, vals_none)
-print(f"📊 KS test p-value: {p_value_ks:.4e}")
-
-# === Add cross-validation for threshold stability ===
+    precision, recall, thresholds_pr = precision_recall_curve(y_true, y_scores)
+    f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
+    best_idx_pr = f1.argmax()
+    best_threshold_f1 = thresholds_pr[best_idx_pr]
+    best_f1 = f1[best_idx_pr]
+    
+    print(f"🎯 Best Threshold (F1-based) = {best_threshold_f1:.4f}  (F1 = {best_f1:.4f})")
+    
+    # === Compute Youden's J threshold (via ROC) ===
+    fpr, tpr, thresholds_roc = roc_curve(y_true, y_scores)
+    youden = tpr - fpr
+    best_idx_roc = np.argmax(youden)
+    best_threshold_youden = thresholds_roc[best_idx_roc]
+    best_youden_score = youden[best_idx_roc]
+    print(f"🟢 Youden's J = {best_youden_score:.4f}; Threshold = {best_threshold_youden:.4f}")
+    
+    # === Compute other thresholds ===
+    balanced_threshold, balanced_score = find_balanced_accuracy_threshold(y_true, y_scores)
+    mcc_threshold, mcc_score = find_mcc_threshold(y_true, y_scores)
+    gmean_threshold, gmean_score = find_gmean_threshold(y_true, y_scores)
+    iba_threshold, iba_score = find_iba_threshold(y_true, y_scores)
+    
+    print(f"Balanced Accuracy Threshold = {balanced_threshold:.4f} (score = {balanced_score:.4f})")
+    print(f"MCC Threshold = {mcc_threshold:.4f} (score = {mcc_score:.4f})")
+    print(f"G-mean Threshold = {gmean_threshold:.4f} (score = {gmean_score:.4f})")
+    print(f"IBA Threshold = {iba_threshold:.4f} (score = {iba_score:.4f})")
+    
+    # === Prepare DataFrame for distribution analysis (KDE, histogram) ===
+    df_scores = pd.DataFrame({"Score": y_scores, "Label": score_labels})
+    vals_direct = df_scores[df_scores.Label == "Direct"]["Score"].values
+    vals_none = df_scores[df_scores.Label == "None"]["Score"].values
+    
+    # === Statistical test (p-value) using t-test ===
+    p_value = ttest_ind(vals_direct, vals_none, equal_var=False).pvalue
+    print(f"📊 t-test p-value (Direct vs None): {p_value:.4e}")
+    
+    # Mann-Whitney U test
+    u_stat, p_value_mwu = mannwhitneyu(vals_direct, vals_none, alternative='two-sided')
+    print(f"📊 Mann-Whitney U test p-value: {p_value_mwu:.4e}")
+    
+    # KS test
+    ks_stat, p_value_ks = ks_2samp(vals_direct, vals_none)
+    print(f"📊 KS test p-value: {p_value_ks:.4e}")
+    
+    # === Add cross-validation for threshold stability ===
 def evaluate_threshold(y_true, y_scores, threshold):
     y_pred = (y_scores >= threshold).astype(int)
     return {
@@ -357,7 +384,7 @@ plt.xlabel("Overlap Score")
 plt.ylabel("Density")
 plt.legend()
 plt.tight_layout()
-kde_fig_path = os.path.join(RESULT_DIR, "score_direct_vs_nondirect_KDE_multi_thresholds.pdf")
+kde_fig_path = os.path.join(result_dir, "score_direct_vs_nondirect_KDE_multi_thresholds.pdf")
 plt.savefig(kde_fig_path, format='pdf')
 plt.close()
 print(f"📈 KDE with multiple thresholds saved to: {kde_fig_path}")
@@ -448,7 +475,7 @@ for idx, score_key in enumerate(score_keys):
     ax.set_ylabel("Frequency")
     ax.legend()
 plt.tight_layout()
-main_fig_path = os.path.join(RESULT_DIR, "score_histogram_3row_multi_score.pdf")
+main_fig_path = os.path.join(result_dir, "score_histogram_3row_multi_score.pdf")
 plt.savefig(main_fig_path, format='pdf')
 plt.close()
 print(f"\n📈 Multi-score 3-row histogram saved to: {main_fig_path}")
@@ -511,5 +538,5 @@ plt.title("Distribution of Scores with New Thresholds")
 plt.xlabel("Score")
 plt.ylabel("Density")
 plt.legend()
-plt.savefig(os.path.join(RESULT_DIR, "score_distribution_new_thresholds.pdf"))
+plt.savefig(os.path.join(result_dir, "score_distribution_new_thresholds.pdf"))
 plt.close()

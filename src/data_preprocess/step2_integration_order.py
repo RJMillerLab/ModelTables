@@ -8,7 +8,7 @@ Description: Integration code for combining HTML, PDF, and extracted annotations
              and saving final results.
 """
 
-import os, re, json, tiktoken
+import os, re, json, tiktoken, argparse
 import hashlib
 import pandas as pd
 import numpy as np
@@ -16,14 +16,15 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 from typing import Tuple, List
 from src.llm.model import LLM_response
-from src.utils import to_parquet
+from src.utils import to_parquet, load_config
 
 
 # --------------- Fixed Path Constants --------------- #
-TITLE2ARXIV_JSON = "data/processed/title2arxiv_new_cache.json"             ######## # Mapping: title -> arxiv_id
-HTML_TABLE_PARQUET = "data/processed/html_table.parquet"    ######## # v1: Contains: paper_id, html_path, page_type, table_list
-HTML_TABLE_PARQUET_V2 = "data/processed/html_parsing_results_v2.parquet"  ######## # v2: Contains: paper_id, html_path, page_type, csv_paths
-ANNOTATIONS_PARQUET = "data/processed/extracted_annotations.parquet"       ######## # base
+# These will be updated dynamically in main()
+TITLE2ARXIV_JSON = "data/processed/title2arxiv_new_cache.json"
+HTML_TABLE_PARQUET = "data/processed/html_table.parquet"
+HTML_TABLE_PARQUET_V2 = "data/processed/html_parsing_results_v2.parquet"
+ANNOTATIONS_PARQUET = "data/processed/extracted_annotations.parquet"
 PDF_CACHE_PATH = "data/processed/pdf_download_cache.json"
 FINAL_OUTPUT_CSV = "data/processed/llm_markdown_table_results.parquet"
 BATCH_OUTPUT_PATH = "data/processed/batch_output.jsonl"
@@ -217,6 +218,55 @@ prompt_template = (
 # ---------------------- Main Process ---------------------- #
 
 def main():
+    parser = argparse.ArgumentParser(description="Integrate HTML/PDF/annotation tables and prepare LLM inputs")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--annotations', dest='annotations', default=None,
+                        help='Path to extracted annotations parquet (default: auto-detect from tag)')
+    parser.add_argument('--title2arxiv', dest='title2arxiv', default=None,
+                        help='Path to title→arxiv cache JSON (default: auto-detect from tag)')
+    parser.add_argument('--html-table', dest='html_table', default=None,
+                        help='Path to html_table parquet (default: auto-detect from tag)')
+    parser.add_argument('--html-table-v2', dest='html_table_v2', default=None,
+                        help='Path to html_parsing_results_v2 parquet (default: auto-detect from tag)')
+    parser.add_argument('--pdf-cache', dest='pdf_cache', default=None,
+                        help='Path to pdf_download_cache JSON (default: auto-detect from tag)')
+    parser.add_argument('--output', dest='output', default=None,
+                        help='Path to final llm_markdown_table_results parquet (default: auto-detect from tag)')
+    parser.add_argument('--batch-input', dest='batch_input', default=None,
+                        help='Path to batch input JSONL (default: auto-detect from tag)')
+    parser.add_argument('--batch-output', dest='batch_output', default=None,
+                        help='Path to batch output JSONL (default: auto-detect from tag)')
+    args = parser.parse_args()
+
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+
+    global TITLE2ARXIV_JSON, HTML_TABLE_PARQUET, HTML_TABLE_PARQUET_V2, ANNOTATIONS_PARQUET
+    global PDF_CACHE_PATH, FINAL_OUTPUT_CSV, BATCH_INPUT_PATH, BATCH_OUTPUT_PATH
+
+    TITLE2ARXIV_JSON = args.title2arxiv or os.path.join(processed_base_path, f"title2arxiv_new_cache{suffix}.json")
+    HTML_TABLE_PARQUET = args.html_table or os.path.join(processed_base_path, f"html_table{suffix}.parquet")
+    HTML_TABLE_PARQUET_V2 = args.html_table_v2 or os.path.join(processed_base_path, f"html_parsing_results_v2{suffix}.parquet")
+    ANNOTATIONS_PARQUET = args.annotations or os.path.join(processed_base_path, f"extracted_annotations{suffix}.parquet")
+    PDF_CACHE_PATH = args.pdf_cache or os.path.join(processed_base_path, f"pdf_download_cache{suffix}.json")
+    FINAL_OUTPUT_CSV = args.output or os.path.join(processed_base_path, f"llm_markdown_table_results{suffix}.parquet")
+    BATCH_INPUT_PATH = args.batch_input or os.path.join(processed_base_path, f"batch_input{suffix}.jsonl")
+    BATCH_OUTPUT_PATH = args.batch_output or os.path.join(processed_base_path, f"batch_output{suffix}.jsonl")
+
+    print("📁 Paths in use:")
+    print(f"   Annotations:        {ANNOTATIONS_PARQUET}")
+    print(f"   Title→arxiv cache:  {TITLE2ARXIV_JSON}")
+    print(f"   HTML table v2:      {HTML_TABLE_PARQUET_V2}")
+    print(f"   HTML table v1:      {HTML_TABLE_PARQUET}")
+    print(f"   PDF cache:          {PDF_CACHE_PATH}")
+    print(f"   Output parquet:     {FINAL_OUTPUT_CSV}")
+    print(f"   Batch input JSONL:  {BATCH_INPUT_PATH}")
+    print(f"   Batch output JSONL: {BATCH_OUTPUT_PATH}")
+
     # --- Step 1: Load extracted annotations ---
     df_anno = pd.read_parquet(ANNOTATIONS_PARQUET, columns=['query', 'retrieved_title', 'paperId', 'corpusid', 'paper_identifier', 'rank', 'score', 'filename', 'line_index', 'title', 'raw_json', 'extracted_openaccessurl', 'extracted_tables', 'extracted_tablerefs', 'extracted_figures', 'extracted_figure_captions', 'extracted_figurerefs'])
     # 'raw_json'

@@ -166,11 +166,13 @@ def process_matrix_by_paper_list(matrix_path, list_path, paper_list):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Compute union of multiple boolean adjacency NPZs with progress")
     parser.add_argument('--level', required=True, choices=list(LEVEL_NPZ.keys()), help='Which citation‑pair level to use as PRIMARY (e.g. direct, max_pr_influential, union …)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.')
     args = parser.parse_args()
 
+    suffix = f"_{args.tag}" if args.tag else ""
     primary_key = args.level
-    primary_npz = _full(LEVEL_NPZ[primary_key])
-    primary_lst = _full(LEVEL_CSVLIST[primary_key])
+    primary_npz = _full(LEVEL_NPZ[primary_key].replace('.npz', f'{suffix}.npz'))
+    primary_lst = _full(LEVEL_CSVLIST[primary_key].replace('.pkl', f'{suffix}.pkl'))
 
     # Load paper list first
     with open(primary_lst, 'rb') as f:
@@ -178,16 +180,16 @@ if __name__ == '__main__':
     print(f"Loaded paper list with {len(paper_list)} entries")
 
     # Process model and dataset matrices
-    model_npz = _full(LEVEL_NPZ['model'])
-    model_lst = _full(LEVEL_CSVLIST['model'])
-    ds_npz = _full(LEVEL_NPZ['dataset'])
-    ds_lst = _full(LEVEL_CSVLIST['dataset'])
+    model_npz = _full(LEVEL_NPZ['model'].replace('.npz', f'{suffix}.npz'))
+    model_lst = _full(LEVEL_CSVLIST['model'].replace('.pkl', f'{suffix}.pkl'))
+    ds_npz = _full(LEVEL_NPZ['dataset'].replace('.npz', f'{suffix}.npz'))
+    ds_lst = _full(LEVEL_CSVLIST['dataset'].replace('.pkl', f'{suffix}.pkl'))
 
     # Process model matrix
     print("Processing model matrix...")
     model_matrix, model_list = process_matrix_by_paper_list(model_npz, model_lst, paper_list)
-    model_processed_npz = _full(LEVEL_NPZ['model'].replace('.npz', '_processed.npz'))
-    model_processed_lst = _full(LEVEL_CSVLIST['model'].replace('.pkl', '_processed.pkl'))
+    model_processed_npz = _full(LEVEL_NPZ['model'].replace('.npz', f'{suffix}_processed.npz'))
+    model_processed_lst = _full(LEVEL_CSVLIST['model'].replace('.pkl', f'{suffix}_processed.pkl'))
     save_npz(model_processed_npz, model_matrix, compressed=True)
     with open(model_processed_lst, 'wb') as f:
         pickle.dump(model_list, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -197,8 +199,8 @@ if __name__ == '__main__':
     # Process dataset matrix
     print("Processing dataset matrix...")
     ds_matrix, ds_list = process_matrix_by_paper_list(ds_npz, ds_lst, paper_list)
-    ds_processed_npz = _full(LEVEL_NPZ['dataset'].replace('.npz', '_processed.npz'))
-    ds_processed_lst = _full(LEVEL_CSVLIST['dataset'].replace('.pkl', '_processed.pkl'))
+    ds_processed_npz = _full(LEVEL_NPZ['dataset'].replace('.npz', f'{suffix}_processed.npz'))
+    ds_processed_lst = _full(LEVEL_CSVLIST['dataset'].replace('.pkl', f'{suffix}_processed.pkl'))
     save_npz(ds_processed_npz, ds_matrix, compressed=True)
     with open(ds_processed_lst, 'wb') as f:
         pickle.dump(ds_list, f, protocol=pickle.HIGHEST_PROTOCOL)

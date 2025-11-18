@@ -11,6 +11,7 @@ Tips: Better save a copy of the four folders, to avoid QC control will affect th
 """
 
 import os, shutil, json, time
+import argparse
 import pandas as pd
 import numpy as np
 import hashlib
@@ -20,7 +21,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from tqdm_joblib import tqdm_joblib
 from datetime import datetime
-from src.utils import to_parquet
+from src.utils import to_parquet, load_config
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -34,6 +35,7 @@ os.makedirs(QC_BACKUP_ROOT, exist_ok=True)
 INVALID_FILES = set()
 
 # ---------------- Hyperparameters / configuration ----------------
+# These will be updated dynamically in main() if tag is provided
 INPUT_DIR = "data/processed"
 INPUT_PARQUET = os.path.join(INPUT_DIR, "modelcard_step3_merged_v2.parquet")
 OUTPUT_DIR = "data/deduped"
@@ -492,12 +494,73 @@ def save_heatmap_percentage(dup_matrix, unique_counts, output_dir):
     """
     save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=True)
 
-def main():
+def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None, tag=None):
+    # Update global paths for use in other functions
+    global INPUT_PARQUET, OUTPUT_PARQUET, OUTPUT_DIR, FIG_DIR, DUPLICATE_MAPPING_JSON, UNIQUE_FILES_TXT, DUPLICATE_GROUPS_JSON, STATS_PATH
+    
+    if input_parquet is None:
+        input_parquet = INPUT_PARQUET
+    if output_parquet is None:
+        output_parquet = OUTPUT_PARQUET
+    if output_dir is None:
+        output_dir = OUTPUT_DIR
+    if fig_dir is None:
+        fig_dir = FIG_DIR
+    
+    # Update global variables
+    INPUT_PARQUET = input_parquet
+    OUTPUT_PARQUET = output_parquet
+    OUTPUT_DIR = output_dir
+    FIG_DIR = fig_dir
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(FIG_DIR, exist_ok=True)
+    
+    # Determine suffix for output files (use tag if provided)
+    suffix = f"_{tag}" if tag else ""
+    
+    DUPLICATE_MAPPING_JSON = os.path.join(OUTPUT_DIR, f"duplicate_mapping{suffix}.json")
+    UNIQUE_FILES_TXT = os.path.join(OUTPUT_DIR, f"unique_files{suffix}.txt")
+    DUPLICATE_GROUPS_JSON = os.path.join(OUTPUT_DIR, f"duplicate_groups{suffix}.json")
+    STATS_PATH = os.path.join(OUTPUT_DIR, f"stats{suffix}.json")
+    
     time_start = time.time()
     # --- Step 1: get the linked set (some files exist in local but not linked to model) ---
-    df = pd.read_parquet(INPUT_PARQUET, columns=['modelId', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped'])
+    df = pd.read_parquet(input_parquet, columns=['modelId', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped'])
     cols = ["hugging_table_list", "github_table_list", "html_table_list_mapped", "llm_table_list_mapped"]
-    file_paths = [item['path'] for item in DIRS]
+    
+    # Update DIRS based on tag
+    processed_base_path = os.path.dirname(input_parquet) if input_parquet else "data/processed"
+    if tag:
+        dirs_with_tag = [
+            {"path": os.path.join(processed_base_path, f"deduped_hugging_csvs_v2_{tag}"), "resource": "hugging", "priority": 1},
+            {"path": os.path.join(processed_base_path, f"deduped_github_csvs_v2_{tag}"), "resource": "github", "priority": 2},
+            {"path": os.path.join(processed_base_path, f"tables_output_v2_{tag}"), "resource": "html", "priority": 3},
+            {"path": os.path.join(processed_base_path, f"llm_tables_{tag}"), "resource": "llm", "priority": 4}
+        ]
+        # Fallback to non-tag directories if tag directories don't exist
+        dirs_to_use = []
+        for dir_tag in dirs_with_tag:
+            if os.path.exists(dir_tag["path"]):
+                dirs_to_use.append(dir_tag)
+            else:
+                # Fallback to original DIRS
+                original_dir = next((d for d in DIRS if d["resource"] == dir_tag["resource"]), None)
+                if original_dir and os.path.exists(original_dir["path"]):
+                    dirs_to_use.append(original_dir)
+                    print(f"⚠️  Tag directory {dir_tag['path']} not found, using {original_dir['path']}")
+        if len(dirs_to_use) == 0:
+            print(f"⚠️  No tag directories found, falling back to default DIRS")
+            dirs_to_use = DIRS
+    else:
+        dirs_to_use = DIRS
+    
+    print(f"📁 Using directories:")
+    for d in dirs_to_use:
+        print(f"   {d['resource']}: {d['path']}")
+    
+    file_paths = [item['path'] for item in dirs_to_use]
 
     linked_set = get_linked_set_from_parquet(df, cols)
     linked_set = set(linked_set)
@@ -515,7 +578,7 @@ def main():
     time_start = time.time()
     # --- Step 2: QC and sha256 hash ---
     # we don't care what's stats before qc. However, we retain all the csv in data/qc_backup for future reference.
-    files_info = valid_filelist_with_qc_from_local(DIRS)
+    files_info = valid_filelist_with_qc_from_local(dirs_to_use)
     # Filter local files that unlinked to modelcard and generic tables
     resource_totals = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     resource_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
@@ -545,14 +608,16 @@ def main():
     dup_matrix, stats, hash_groups = compute_dup_matrix_from_sha(filtered_files_info)
     overall_unique = stats["overall_unique"]
     # save overall_unique
-    with open(os.path.join(OUTPUT_DIR, "overall_unique.txt"), "w") as f:
+    overall_unique_file = os.path.join(OUTPUT_DIR, f"overall_unique{suffix}.txt")
+    with open(overall_unique_file, "w") as f:
         for file_path in overall_unique:
             f.write(file_path + "\n")
     print(f"Overall unique file count: {len(overall_unique)}")
     # save cross_unique_files
     cross_unique_files = stats["cross_unique_files"]
     for res, files in cross_unique_files.items():
-        with open(os.path.join(OUTPUT_DIR, f"{res}_unique.txt"), "w") as f:
+        res_unique_file = os.path.join(OUTPUT_DIR, f"{res}_unique{suffix}.txt")
+        with open(res_unique_file, "w") as f:
             for file_path in files:
                 f.write(file_path + "\n")
         print(f"{res} unique file count: {len(files)}")
@@ -607,8 +672,8 @@ def main():
     print('add new cols:', new_cols.keys())
     
     df.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped'], inplace=True, errors='ignore')
-    to_parquet(df, OUTPUT_PARQUET)
-    print(f"Updated parquet saved as {OUTPUT_PARQUET}")
+    to_parquet(df, output_parquet)
+    print(f"Updated parquet saved as {output_parquet}")
     print(f"Time taken: {time.time() - time_start} seconds")
 
     time_start = time.time()
@@ -641,7 +706,7 @@ def main():
 
     time_start = time.time()
     # --- Step 4.5: Save dup_matrix and stats for later reuse
-    dup_matrix_file = os.path.join(OUTPUT_DIR, "dup_matrix.pkl")
+    dup_matrix_file = os.path.join(OUTPUT_DIR, f"dup_matrix{suffix}.pkl")
     dup_matrix.to_pickle(dup_matrix_file)
     print(f"Dup matrix saved to {dup_matrix_file}")
 
@@ -651,4 +716,35 @@ def main():
     print(f"Time taken: {time.time() - time_start} seconds")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input', dest='input', default=None,
+                        help='Path to modelcard_step3_merged parquet (default: auto-detect from tag)')
+    parser.add_argument('--output', dest='output', default=None,
+                        help='Path to modelcard_step3_dedup parquet (default: auto-detect from tag)')
+    parser.add_argument('--output-dir', dest='output_dir', default=None,
+                        help='Directory for output files (default: data/deduped)')
+    parser.add_argument('--fig-dir', dest='fig_dir', default=None,
+                        help='Directory for figure files (default: data/analysis)')
+    args = parser.parse_args()
+    
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+    
+    # Determine input/output paths based on tag
+    input_parquet = args.input or os.path.join(processed_base_path, f"modelcard_step3_merged_v2{suffix}.parquet")
+    output_parquet = args.output or os.path.join(processed_base_path, f"modelcard_step3_dedup_v2{suffix}.parquet")
+    output_dir = args.output_dir or os.path.join(base_path, f"deduped{suffix}" if tag else "deduped")
+    fig_dir = args.fig_dir or os.path.join(base_path, 'analysis')
+    
+    print("📁 Paths in use:")
+    print(f"   Input parquet:       {input_parquet}")
+    print(f"   Output parquet:      {output_parquet}")
+    print(f"   Output directory:    {output_dir}")
+    print(f"   Figure directory:    {fig_dir}")
+    
+    main(input_parquet=input_parquet, output_parquet=output_parquet, output_dir=output_dir, fig_dir=fig_dir, tag=tag)

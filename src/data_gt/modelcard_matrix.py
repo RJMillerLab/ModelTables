@@ -13,12 +13,13 @@ Usage:
 """
 
 import re, os, json
+import argparse
 import requests                                    
 import pandas as pd
 import numpy as np                                              
 import pickle
 from tqdm import tqdm                            
-from src.utils import load_combined_data, to_parquet    
+from src.utils import load_combined_data, to_parquet, load_config
 from itertools import combinations
 from collections import defaultdict
 from itertools import product
@@ -80,11 +81,18 @@ def normalize_extracted(link: str):
         pass                                                           
     return link.lower()
 
-def load_model_with_valid_table():
-    df_full = pd.read_parquet(DATA_PATH, columns=['modelId', CARD_TAGS_KEY, CARD_README_KEY, 'downloads'])
-    df_full_2 = pd.read_parquet(DATA_2_PATH, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup']) #, 'all_title_list'
+def load_model_with_valid_table(data_path=None, data_2_path=None, data_3_path=None):
+    if data_path is None:
+        data_path = DATA_PATH
+    if data_2_path is None:
+        data_2_path = DATA_2_PATH
+    if data_3_path is None:
+        data_3_path = DATA_3_PATH
+    
+    df_full = pd.read_parquet(data_path, columns=['modelId', CARD_TAGS_KEY, CARD_README_KEY, 'downloads'])
+    df_full_2 = pd.read_parquet(data_2_path, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup']) #, 'all_title_list'
     # this data 2 path don't have all title list, please load all title list from DATA_3_PATH, and get modelId and all_title_list, then merge this to df_full_2 please!
-    df_full_3 = pd.read_parquet(DATA_3_PATH, columns=['modelId', 'all_title_list'])
+    df_full_3 = pd.read_parquet(data_3_path, columns=['modelId', 'all_title_list'])
     df_full_2 = pd.merge(df_full_2, df_full_3, on='modelId', how='left')
     def _to_list_safe(x):
         if isinstance(x, list):
@@ -233,6 +241,38 @@ def extract_basemodels_from_tags(df: pd.DataFrame):
     return df
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Build full-model relation adjacency matrix from model card data")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for input files.')
+    parser.add_argument('--input-step1', dest='input_step1', default=None,
+                        help='Path to modelcard_step1 parquet (default: auto-detect from tag)')
+    parser.add_argument('--input-dedup', dest='input_dedup', default=None,
+                        help='Path to modelcard_step3_dedup parquet (default: auto-detect from tag)')
+    parser.add_argument('--input-merged', dest='input_merged', default=None,
+                        help='Path to modelcard_step3_merged parquet (default: auto-detect from tag)')
+    parser.add_argument('--output-related', dest='output_related', default=None,
+                        help='Path to modelcard_gt_related_model parquet (default: auto-detect from tag, or default path if no tag)')
+    args = parser.parse_args()
+    
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+    
+    # Determine input paths based on tag
+    data_path = args.input_step1 or os.path.join(processed_base_path, f"modelcard_step1{suffix}.parquet")
+    data_2_path = args.input_dedup or os.path.join(processed_base_path, f"modelcard_step3_dedup_v2{suffix}.parquet")
+    data_3_path = args.input_merged or os.path.join(processed_base_path, f"modelcard_step3_merged_v2{suffix}.parquet")
+    output_related_path = args.output_related or (os.path.join(processed_base_path, f"modelcard_gt_related_model{suffix}.parquet") if tag else os.path.join(processed_base_path, "modelcard_gt_related_model.parquet"))
+    
+    print("📁 Paths in use:")
+    print(f"   Input step1:          {data_path}")
+    print(f"   Input dedup:          {data_2_path}")
+    print(f"   Input merged:         {data_3_path}")
+    print(f"   Output related:      {output_related_path}")
+    print(f"   GT output dir:        data/gt/ (with tag suffix)" if tag else "   GT output dir:        data/gt/ (no versioning)")
+    
     ########################################################################
     # 0 )  LOAD DATA  ───────────────────────────────────────────────────────
     ########################################################################
@@ -243,7 +283,7 @@ if __name__ == "__main__":
     print(f"Loaded {len(valid_dataset_ids)} valid dataset IDs")
 
     # get df which contains modelId, card_tags, downloads and all_table_list_dedup
-    df = load_model_with_valid_table()
+    df = load_model_with_valid_table(data_path=data_path, data_2_path=data_2_path, data_3_path=data_3_path)
     print(f"Loaded {len(df)} rows with valid table list")
     # get all valid model IDs
     valid_model_ids= set(df['modelId'])
@@ -329,7 +369,7 @@ if __name__ == "__main__":
                     related_model[target].add(m)
     df["related_model_list"] = df["modelId"].map(lambda m: sorted(related_model.get(m, [])))
     df.drop(columns=['card_tags', 'card_readme', 'downloads'], inplace=True, errors='ignore')
-    to_parquet(df, "data/processed/modelcard_gt_related_model.parquet")
+    to_parquet(df, output_related_path)
 
     ########################################################################
     # 5 )  BUILD CSV-LEVEL GT via related_model_list （no self-pair） ########
@@ -384,9 +424,10 @@ if __name__ == "__main__":
     # (c) Print size after trimming
     print(f"[INFO] MODEL csv adjacency after trim: {M_model.shape[0]} items")
     # (d) Save trimmed matrix and updated CSV list
-    save_npz('data/gt/scilake_gt_modellink_model_adj.npz', M_model, compressed=True)
+    suffix = f"_{tag}" if tag else ""
+    save_npz(f'data/gt/scilake_gt_modellink_model_adj{suffix}.npz', M_model, compressed=True)
     all_csvs_model = [os.path.basename(c) for c in all_csvs_model]
-    with open('data/gt/scilake_gt_modellink_model_adj_csv_list.pkl','wb') as f:
+    with open(f'data/gt/scilake_gt_modellink_model_adj_csv_list{suffix}.pkl','wb') as f:
         pickle.dump(all_csvs_model, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"✔️ Saved MODEL-BASED CSV adjacency matrix ({M_model.nnz} edges) after trimming")
     '''
@@ -508,8 +549,9 @@ if __name__ == "__main__":
     # (c) Print size after trimming
     print(f"[INFO] DATASET csv adjacency after trim: {M_ds.shape[0]} items")
     # (d) Save trimmed matrix and updated CSV list
-    save_npz('data/gt/scilake_gt_modellink_dataset_adj.npz', M_ds, compressed=True)
+    suffix = f"_{tag}" if tag else ""
+    save_npz(f'data/gt/scilake_gt_modellink_dataset_adj{suffix}.npz', M_ds, compressed=True)
     all_csvs_dataset = [os.path.basename(c) for c in all_csvs_dataset]
-    with open('data/gt/scilake_gt_modellink_dataset_adj_csv_list.pkl','wb') as f:
+    with open(f'data/gt/scilake_gt_modellink_dataset_adj_csv_list{suffix}.pkl','wb') as f:
         pickle.dump(all_csvs_dataset, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"✔️ Saved DATASET-BASED CSV adjacency matrix ({M_ds.nnz} edges) after trimming")

@@ -24,6 +24,9 @@ SIMILARITY_MODES = ["max_pr", "jaccard", "dice"]
 INTENTS = ["methodology_or_result"] # "background", "methodology", "result", 
 COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"
 
+import argparse
+from src.utils import load_config
+
 THRESHOLD = 0.1
 SAVE_THRESHOLD_OVERLAP = True
 MODE = "reference"  # or "citation"
@@ -124,8 +127,13 @@ def compute_direct_matrix(Id_to_all, paper_list):
     mat = coo_matrix((np.ones(len(rows), dtype=bool), (rows, cols)), shape=(n, n)).tocsr()
     return mat
 
-def main():
-    df = pd.read_parquet(INPUT_PARQUET)
+def main(input_parquet=None, combined_path=None):
+    if input_parquet is None:
+        input_parquet = INPUT_PARQUET
+    if combined_path is None:
+        combined_path = COMBINED_PATH
+    
+    df = pd.read_parquet(input_parquet)
     df['corpusid'] = df['corpusid'].astype(str)
     print(f"Loaded {len(df)} rows")
     print('keys:', list(df.keys()))
@@ -195,10 +203,33 @@ def main():
         combined[f"direct_label_{intent}_influential"]                = intent_direct_infl[intent]
 
     # Save
-    os.makedirs(os.path.dirname(COMBINED_PATH), exist_ok=True)
-    with gzip.open(COMBINED_PATH, "wb") as f:
+    os.makedirs(os.path.dirname(combined_path), exist_ok=True)
+    with gzip.open(combined_path, "wb") as f:
         pickle.dump(combined, f)
-    print(f"Saved all matrices to {COMBINED_PATH}")
+    print(f"Saved all matrices to {combined_path}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Compute paper-pair overlap scores for citation analysis")
+    parser.add_argument('--tag', dest='tag', default=None,
+                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--input', dest='input', default=None,
+                        help='Path to extracted_annotations parquet (default: auto-detect from tag)')
+    parser.add_argument('--output', dest='output', default=None,
+                        help='Path to modelcard_citation_all_matrices pkl.gz (default: auto-detect from tag)')
+    args = parser.parse_args()
+    
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    processed_base_path = os.path.join(base_path, 'processed')
+    tag = args.tag
+    suffix = f"_{tag}" if tag else ""
+    
+    # Determine input/output paths based on tag
+    input_parquet = args.input or os.path.join(processed_base_path, f"extracted_annotations{suffix}.parquet")
+    combined_path = args.output or os.path.join(processed_base_path, f"modelcard_citation_all_matrices{suffix}.pkl.gz")
+    
+    print("📁 Paths in use:")
+    print(f"   Input annotations:   {input_parquet}")
+    print(f"   Output matrices:     {combined_path}")
+    
+    main(input_parquet=input_parquet, combined_path=combined_path)

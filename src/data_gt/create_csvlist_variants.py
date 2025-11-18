@@ -75,12 +75,25 @@ def main():
     group.add_argument('--level', choices=list(LEVEL_CSVLIST.keys()),
                       help='Which level to process (e.g., direct, max_pr)')
     group.add_argument('--csvlist', help='Path to the CSV list file to process')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.')
     args = parser.parse_args()
 
+    suffix = f"_{args.tag}" if args.tag else ""
     if args.level:
-        csvlist_path = os.path.join(DATA_DIR, LEVEL_CSVLIST[args.level])
+        # For processed files, add suffix before _processed if it exists, otherwise before .pkl
+        base_name = LEVEL_CSVLIST[args.level]
+        if '_processed' in base_name:
+            csvlist_path = os.path.join(DATA_DIR, base_name.replace('_processed', f'{suffix}_processed'))
+        else:
+            csvlist_path = os.path.join(DATA_DIR, base_name.replace('.pkl', f'{suffix}.pkl'))
     else:
         csvlist_path = args.csvlist
+        # If csvlist is provided and tag is set, add suffix
+        if args.tag and csvlist_path.endswith('.pkl'):
+            if '_processed' in csvlist_path:
+                csvlist_path = csvlist_path.replace('_processed', f'{suffix}_processed')
+            else:
+                csvlist_path = csvlist_path.replace('.pkl', f'{suffix}.pkl')
 
     process_csvlist(csvlist_path)
 
