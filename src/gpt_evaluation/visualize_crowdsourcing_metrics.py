@@ -96,8 +96,8 @@ def main():
     # Create an axes for the colorbar
     cbar_ax = fig.add_axes([0.91, 0.15, 0.012, 0.65])  # [left, bottom, width, height]
     cbar = fig.colorbar(im.get_children()[0], cax=cbar_ax)
-    plt.savefig("fig/consistency_heatmaps.pdf")
-    print("✓ Saved heatmaps to fig/consistency_heatmaps.pdf")
+    plt.savefig("data/analysis/consistency_heatmaps.pdf")
+    print("✓ Saved heatmaps to data/analysis/consistency_heatmaps.pdf")
     plt.close()
 
 if __name__ == "__main__":

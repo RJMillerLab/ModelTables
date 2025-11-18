@@ -1,320 +1,550 @@
 #!/usr/bin/env python3
 """
-Author: Zhengyuan Dong
-Date: 2025-10-17
-Description: Analyze batch evaluation results and generate metrics/plots
+Step 3: Analyze multi-model evaluation results
+
+Computes metrics to evaluate crowdsourcing validity:
+- Inter-model agreement
+- Agreement with GT labels
+- Confidence distributions
+- Disagreement patterns
 
 Usage:
-python -m src.gpt_evaluation.analyze_results --results output/fake_tables_results_5.jsonl --output output/analysis_tables
-python -m src.gpt_evaluation.analyze_results --results output/fake_models_results_5.jsonl --output output/analysis_models
+    python src/gpt_evaluation/step3_analyze_results.py \
+        --input output/gpt_evaluation/step2_results/all_model_responses.jsonl \
+        --output output/gpt_evaluation/step3_analysis
 """
 
 import os
 import json
 import argparse
-import matplotlib.pyplot as plt
-from typing import Dict, List, Any, Tuple
-from collections import Counter
+import pandas as pd
+import numpy as np
+from typing import List, Dict, Any
+from collections import Counter, defaultdict
+from pathlib import Path
 
-def load_results(results_file: str) -> List[Dict[str, Any]]:
-    """Load batch results from JSONL"""
+
+def load_results(input_file: str) -> List[Dict[str, Any]]:
+    """Load evaluation results from JSONL"""
     results = []
-    with open(results_file, 'r', encoding='utf-8') as f:
+    with open(input_file, 'r') as f:
         for line in f:
-            line = line.strip()
-            if line:
-                results.append(json.loads(line))
+            try:
+                results.append(json.loads(line.strip()))
+            except json.JSONDecodeError:
+                continue
     return results
 
-def extract_predictions_and_gt(results: List[Dict[str, Any]]) -> Tuple[List[bool], List[bool], List[Dict]]:
-    """Extract LLM predictions and ground truth"""
-    predictions = []
-    ground_truth = []
-    metadata = []
+
+def compute_inter_model_agreement(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute inter-model agreement metrics"""
+    metrics = {
+        'consistency_scores': [],  # Agreement % for each pair
+        'unanimity_count': 0,      # Pairs where all models agree
+        'unanimity_rate': 0.0,
+        'vote_distributions': Counter(),  # Distribution of majority votes
+        'split_decisions': []       # Cases with 3-2 splits
+    }
+    
+    total_pairs = len(results)
     
     for result in results:
-        # Extract LLM prediction
-        response = result.get('response', {})
-        if isinstance(response, dict):
-            llm_related = response.get('related')
-            if isinstance(llm_related, bool):
-                predictions.append(llm_related)
-            elif isinstance(llm_related, str):
-                predictions.append(llm_related.upper() == 'YES')
-            else:
-                predictions.append(None)
-        else:
-            predictions.append(None)
+        responses = result.get('model_responses', {})
+        votes = []
         
-        # Extract ground truth
-        gt = result.get('gt', {})
-        gt_related = gt.get('related')
-        if isinstance(gt_related, bool):
-            ground_truth.append(gt_related)
-        else:
-            ground_truth.append(None)
+        for model_name, response in responses.items():
+            if 'error' not in response and 'related' in response:
+                votes.append(response['related'])
         
-        # Extract metadata
-        metadata.append({
-            'id': result.get('id'),
-            'mode': result.get('mode'),
-            'gt_signals': gt.get('signals', {}),
-            'identifiers': result.get('identifiers', {}),
-            'response': response
-        })
+        if votes:
+            vote_counts = Counter(votes)
+            majority = vote_counts.most_common(1)[0][0]
+            agreement = max(vote_counts.values()) / len(votes)
+            
+            metrics['consistency_scores'].append(agreement)
+            metrics['vote_distributions'][majority] += 1
+            
+            # Check for unanimity
+            if agreement == 1.0:
+                metrics['unanimity_count'] += 1
+            
+            # Check for split decisions (3-2)
+            if len(votes) >= 5:
+                counts = list(vote_counts.values())
+                if sorted(counts) == [2, 3]:
+                    metrics['split_decisions'].append({
+                        'pair_id': result.get('pair_id'),
+                        'majority': majority,
+                        'distribution': dict(vote_counts)
+                    })
     
-    return predictions, ground_truth, metadata
+    if metrics['consistency_scores']:
+        metrics['unanimity_rate'] = metrics['unanimity_count'] / total_pairs
+        metrics['avg_consistency'] = np.mean(metrics['consistency_scores'])
+    
+    return metrics
 
-def compute_basic_metrics(predictions: List[bool], ground_truth: List[bool]) -> Dict[str, float]:
-    """Compute basic classification metrics"""
-    # Filter out None values
-    valid_indices = [i for i, (p, gt) in enumerate(zip(predictions, ground_truth)) 
-                     if p is not None and gt is not None]
-    
-    if not valid_indices:
-        return {"accuracy": 0.0, "total_samples": 0}
-    
-    valid_predictions = [predictions[i] for i in valid_indices]
-    valid_gt = [ground_truth[i] for i in valid_indices]
-    
-    # Calculate accuracy manually
-    correct = sum(1 for p, gt in zip(valid_predictions, valid_gt) if p == gt)
-    accuracy = correct / len(valid_indices)
-    
-    # Count predictions
-    pred_counts = Counter(valid_predictions)
-    gt_counts = Counter(valid_gt)
-    
-    return {
-        "accuracy": accuracy,
-        "total_samples": len(valid_indices),
-        "llm_yes_count": pred_counts.get(True, 0),
-        "llm_no_count": pred_counts.get(False, 0),
-        "gt_yes_count": gt_counts.get(True, 0),
-        "gt_no_count": gt_counts.get(False, 0),
+
+def compute_gt_agreement(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute agreement between model judgments and GT labels"""
+    metrics = {
+        'total_pairs': len(results),
+        'pairs_with_gt': 0,
+        'pairs_with_majority_vote': 0,
+        'correct_predictions': 0,
+        'accuracy': 0.0,
+        'gt_positive_precision': 0.0,
+        'gt_negative_precision': 0.0,
+        'confusion_matrix': Counter(),
+        'by_level': {}
     }
-
-def plot_confusion_matrix(predictions: List[bool], ground_truth: List[bool], 
-                         output_dir: str, title: str = "Confusion Matrix"):
-    """Plot confusion matrix"""
-    # Filter out None values
-    valid_indices = [i for i, (p, gt) in enumerate(zip(predictions, ground_truth)) 
-                     if p is not None and gt is not None]
     
-    if not valid_indices:
-        print("No valid predictions for confusion matrix")
-        return
+    # Group by level for per-level analysis
+    by_level = defaultdict(lambda: {'correct': 0, 'total': 0})
     
-    valid_predictions = [predictions[i] for i in valid_indices]
-    valid_gt = [ground_truth[i] for i in valid_indices]
-    
-    # Calculate confusion matrix manually
-    cm = [[0, 0], [0, 0]]  # [[TN, FP], [FN, TP]]
-    for pred, gt in zip(valid_predictions, valid_gt):
-        if not pred and not gt:  # True Negative
-            cm[0][0] += 1
-        elif pred and not gt:  # False Positive
-            cm[0][1] += 1
-        elif not pred and gt:  # False Negative
-            cm[1][0] += 1
-        else:  # True Positive
-            cm[1][1] += 1
-    
-    # Calculate accuracy
-    correct = cm[0][0] + cm[1][1]
-    total = sum(sum(row) for row in cm)
-    accuracy = correct / total if total > 0 else 0
-    
-    plt.figure(figsize=(8, 6))
-    plt.imshow(cm, interpolation='nearest', cmap='Blues')
-    plt.title(f'{title}\nAccuracy: {accuracy:.3f}')
-    plt.colorbar()
-    
-    # Add text annotations
-    for i in range(2):
-        for j in range(2):
-            plt.text(j, i, str(cm[i][j]), ha='center', va='center', fontsize=16)
-    
-    plt.ylabel('Ground Truth')
-    plt.xlabel('LLM Prediction')
-    plt.xticks([0, 1], ['Predicted: NO', 'Predicted: YES'])
-    plt.yticks([0, 1], ['Actual: NO', 'Actual: YES'])
-    
-    output_path = os.path.join(output_dir, 'confusion_matrix.png')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"✅ Saved confusion matrix to {output_path}")
-
-def plot_prediction_distribution(predictions: List[bool], ground_truth: List[bool], 
-                                output_dir: str, title: str = "Prediction Distribution"):
-    """Plot prediction distribution comparison"""
-    # Filter out None values
-    valid_indices = [i for i, (p, gt) in enumerate(zip(predictions, ground_truth)) 
-                     if p is not None and gt is not None]
-    
-    if not valid_indices:
-        print("No valid predictions for distribution plot")
-        return
-    
-    valid_predictions = [predictions[i] for i in valid_indices]
-    valid_gt = [ground_truth[i] for i in valid_indices]
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    
-    # Ground Truth distribution
-    gt_counts = Counter(valid_gt)
-    ax1.bar(['NO', 'YES'], [gt_counts.get(False, 0), gt_counts.get(True, 0)], 
-            color=['red', 'green'], alpha=0.7)
-    ax1.set_title('Ground Truth Distribution')
-    ax1.set_ylabel('Count')
-    
-    # LLM Prediction distribution
-    pred_counts = Counter(valid_predictions)
-    ax2.bar(['NO', 'YES'], [pred_counts.get(False, 0), pred_counts.get(True, 0)], 
-            color=['red', 'green'], alpha=0.7)
-    ax2.set_title('LLM Prediction Distribution')
-    ax2.set_ylabel('Count')
-    
-    plt.suptitle(title)
-    plt.tight_layout()
-    
-    output_path = os.path.join(output_dir, 'prediction_distribution.png')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"✅ Saved distribution plot to {output_path}")
-
-def analyze_signal_types(metadata: List[Dict[str, Any]], predictions: List[bool], 
-                        ground_truth: List[bool]) -> Dict[str, Any]:
-    """Analyze performance by signal types"""
-    signal_analysis = {}
-    
-    for i, (meta, pred, gt) in enumerate(zip(metadata, predictions, ground_truth)):
-        if pred is None or gt is None:
-            continue
-            
-        signals = meta.get('gt_signals', {})
+    for result in results:
+        gt_positive = result.get('gt_positive')
+        majority_vote = result.get('majority_vote')
+        level = result.get('level', 'unknown')
         
-        # Analyze by signal levels
-        levels = signals.get('levels', [])
-        for level in levels:
-            if level not in signal_analysis:
-                signal_analysis[level] = {'correct': 0, 'total': 0, 'predictions': [], 'gt': []}
+        if gt_positive is not None and majority_vote:
+            metrics['pairs_with_gt'] += 1
+            metrics['pairs_with_majority_vote'] += 1
             
-            signal_analysis[level]['total'] += 1
-            signal_analysis[level]['predictions'].append(pred)
-            signal_analysis[level]['gt'].append(gt)
+            # Map judgment to binary
+            if majority_vote == 'YES':
+                predicted = True
+            elif majority_vote == 'NO':
+                predicted = False
+            else:
+                predicted = None  # UNSURE
             
-            if pred == gt:
-                signal_analysis[level]['correct'] += 1
+            if predicted is not None:
+                # Build confusion matrix
+                gt_str = 'positive' if gt_positive else 'negative'
+                pred_str = 'positive' if predicted else 'negative'
+                metrics['confusion_matrix'][(gt_str, pred_str)] += 1
+                
+                # Check accuracy
+                if predicted == gt_positive:
+                    metrics['correct_predictions'] += 1
+                    by_level[level]['correct'] += 1
+                
+                by_level[level]['total'] += 1
     
-    # Calculate accuracy for each signal type
-    for level, data in signal_analysis.items():
+    if metrics['pairs_with_majority_vote'] > 0:
+        metrics['accuracy'] = metrics['correct_predictions'] / metrics['pairs_with_majority_vote']
+        
+        # Precision for positive and negative
+        tp = metrics['confusion_matrix'][('positive', 'positive')]
+        fp = metrics['confusion_matrix'][('negative', 'positive')]
+        fn = metrics['confusion_matrix'][('positive', 'negative')]
+        tn = metrics['confusion_matrix'][('negative', 'negative')]
+        
+        if tp + fp > 0:
+            metrics['gt_positive_precision'] = tp / (tp + fp)
+        if tn + fn > 0:
+            metrics['gt_negative_precision'] = tn / (tn + fn)
+    
+    # Per-level metrics
+    for level, level_metrics in by_level.items():
+        if level_metrics['total'] > 0:
+            metrics['by_level'][level] = {
+                'accuracy': level_metrics['correct'] / level_metrics['total'],
+                'total': level_metrics['total']
+            }
+    
+    return metrics
+
+
+def compute_uncertainty_analysis(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Analyze uncertainty patterns"""
+    metrics = {
+        'unsure_responses': 0,
+        'unsure_rate': 0.0,
+        'unsure_pairs': 0,  # Pairs where majority vote is UNSURE
+        'by_model': defaultdict(lambda: {'unsure': 0, 'total': 0})
+    }
+    
+    total_responses = 0
+    
+    for result in results:
+        responses = result.get('model_responses', {})
+        for model_name, response in responses.items():
+            if 'related' in response:
+                total_responses += 1
+                metrics['by_model'][model_name]['total'] += 1
+                
+                if response['related'] == 'UNSURE':
+                    metrics['unsure_responses'] += 1
+                    metrics['by_model'][model_name]['unsure'] += 1
+        
+        # Check if majority vote is UNSURE
+        majority_vote = result.get('majority_vote')
+        if majority_vote == 'UNSURE':
+            metrics['unsure_pairs'] += 1
+    
+    if total_responses > 0:
+        metrics['unsure_rate'] = metrics['unsure_responses'] / total_responses
+    
+    # Compute per-model rates
+    for model_name in metrics['by_model']:
+        m = metrics['by_model'][model_name]
+        if m['total'] > 0:
+            m['unsure_rate'] = m['unsure'] / m['total']
+    
+    return metrics
+
+
+def compute_signal_agreement(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute agreement on structural and level signals (multi-label)"""
+    metrics = {
+        'structural_signals': {},
+        'level_signals': {}
+    }
+    
+    structural_signal_names = ['joinable', 'unionable', 'keyword_overlap', 'semantically_similar']
+    level_signal_names = ['paper_level', 'model_level', 'dataset_level']
+    
+    for signal in structural_signal_names:
+        metrics['structural_signals'][signal] = {
+            'total_pairs': 0,
+            'agreement_scores': [],
+            'majority_true': 0,
+            'majority_false': 0
+        }
+    
+    for signal in level_signal_names:
+        metrics['level_signals'][signal] = {
+            'total_pairs': 0,
+            'agreement_scores': [],
+            'majority_true': 0,
+            'majority_false': 0
+        }
+    
+    for result in results:
+        model_responses = result.get('model_responses', {})
+        
+        # Structural signals
+        for signal_name in structural_signal_names:
+            votes = []
+            for model_name, response in model_responses.items():
+                if 'structural_signals' in response and signal_name in response['structural_signals']:
+                    votes.append(response['structural_signals'][signal_name])
+            
+            if votes:
+                metrics['structural_signals'][signal_name]['total_pairs'] += 1
+                vote_counts = Counter(votes)
+                agreement = max(vote_counts.values()) / len(votes)
+                metrics['structural_signals'][signal_name]['agreement_scores'].append(agreement)
+                
+                majority = vote_counts.most_common(1)[0][0]
+                if majority:
+                    metrics['structural_signals'][signal_name]['majority_true'] += 1
+                else:
+                    metrics['structural_signals'][signal_name]['majority_false'] += 1
+        
+        # Level signals
+        for signal_name in level_signal_names:
+            votes = []
+            for model_name, response in model_responses.items():
+                if 'level_signals' in response and signal_name in response['level_signals']:
+                    votes.append(response['level_signals'][signal_name])
+            
+            if votes:
+                metrics['level_signals'][signal_name]['total_pairs'] += 1
+                vote_counts = Counter(votes)
+                agreement = max(vote_counts.values()) / len(votes)
+                metrics['level_signals'][signal_name]['agreement_scores'].append(agreement)
+                
+                majority = vote_counts.most_common(1)[0][0]
+                if majority:
+                    metrics['level_signals'][signal_name]['majority_true'] += 1
+                else:
+                    metrics['level_signals'][signal_name]['majority_false'] += 1
+    
+    # Compute averages
+    for signal, data in metrics['structural_signals'].items():
+        if data['agreement_scores']:
+            data['avg_agreement'] = np.mean(data['agreement_scores'])
+    
+    for signal, data in metrics['level_signals'].items():
+        if data['agreement_scores']:
+            data['avg_agreement'] = np.mean(data['agreement_scores'])
+    
+    return metrics
+
+
+def compute_signal_gt_alignment(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute how level signals align with GT labels"""
+    metrics = {
+        'level_signal_vs_gt': {
+            'paper': {'correct': 0, 'total': 0, 'false_pos': 0, 'false_neg': 0},
+            'modelcard': {'correct': 0, 'total': 0, 'false_pos': 0, 'false_neg': 0},
+            'dataset': {'correct': 0, 'total': 0, 'false_pos': 0, 'false_neg': 0}
+        }
+    }
+    
+    for result in results:
+        gt_labels = result.get('gt_labels', {})
+        model_responses = result.get('model_responses', {})
+        
+        # Get majority vote for each level signal
+        for level_name in ['paper_level', 'model_level', 'dataset_level']:
+            votes = []
+            for model_name, response in model_responses.items():
+                if 'level_signals' in response and level_name in response['level_signals']:
+                    votes.append(response['level_signals'][level_name])
+            
+            if votes:
+                majority = Counter(votes).most_common(1)[0][0]
+                
+                # Map to GT name
+                gt_name = level_name.replace('_level', '').replace('model', 'modelcard')
+                
+                if gt_name in gt_labels:
+                    gt_label = gt_labels[gt_name]
+                    m = metrics['level_signal_vs_gt'].get(gt_name, {'correct': 0, 'total': 0, 'false_pos': 0, 'false_neg': 0})
+                    
+                    m['total'] += 1
+                    if majority == (gt_label == 1):
+                        m['correct'] += 1
+                    elif majority and gt_label == 0:
+                        m['false_pos'] += 1
+                    elif not majority and gt_label == 1:
+                        m['false_neg'] += 1
+                    
+                    metrics['level_signal_vs_gt'][gt_name] = m
+    
+    # Compute metrics
+    for level, data in metrics['level_signal_vs_gt'].items():
         if data['total'] > 0:
             data['accuracy'] = data['correct'] / data['total']
+            data['precision'] = data['correct'] / max(1, data['correct'] + data['false_pos'])
+            data['recall'] = data['correct'] / max(1, data['correct'] + data['false_neg'])
+    
+    return metrics
+
+
+def compute_model_specific_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute per-model statistics"""
+    metrics = {
+        'models': defaultdict(lambda: {
+            'responses': 0,
+            'errors': 0,
+            'success_rate': 0.0,
+            'vote_distribution': Counter(),
+            'avg_elapsed_time': []
+        })
+    }
+    
+    for result in results:
+        responses = result.get('model_responses', {})
+        
+        for model_name, response in responses.items():
+            m = metrics['models'][model_name]
+            
+            if 'error' in response:
+                m['errors'] += 1
+            else:
+                m['responses'] += 1
+                
+                if 'elapsed_time' in response:
+                    m['avg_elapsed_time'].append(response['elapsed_time'])
+                
+                if 'related' in response:
+                    m['vote_distribution'][response['related']] += 1
+    
+    # Compute rates and averages
+    for model_name in metrics['models']:
+        m = metrics['models'][model_name]
+        total = m['responses'] + m['errors']
+        if total > 0:
+            m['success_rate'] = m['responses'] / total
+        
+        if m['avg_elapsed_time']:
+            m['avg_elapsed_time'] = np.mean(m['avg_elapsed_time'])
         else:
-            data['accuracy'] = 0.0
+            m['avg_elapsed_time'] = 0.0
     
-    return signal_analysis
+    return metrics
 
-def plot_signal_analysis(signal_analysis: Dict[str, Any], output_dir: str):
-    """Plot accuracy by signal types"""
-    if not signal_analysis:
-        print("No signal analysis data to plot")
-        return
-    
-    levels = list(signal_analysis.keys())
-    accuracies = [signal_analysis[level]['accuracy'] for level in levels]
-    totals = [signal_analysis[level]['total'] for level in levels]
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    
-    # Accuracy by signal type
-    bars = ax1.bar(levels, accuracies, color='skyblue', alpha=0.7)
-    ax1.set_title('Accuracy by Signal Type')
-    ax1.set_ylabel('Accuracy')
-    ax1.set_ylim(0, 1)
-    
-    # Add value labels on bars
-    for bar, acc in zip(bars, accuracies):
-        height = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                f'{acc:.3f}', ha='center', va='bottom')
-    
-    # Sample count by signal type
-    ax2.bar(levels, totals, color='lightcoral', alpha=0.7)
-    ax2.set_title('Sample Count by Signal Type')
-    ax2.set_ylabel('Count')
-    
-    plt.tight_layout()
-    
-    output_path = os.path.join(output_dir, 'signal_analysis.png')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"✅ Saved signal analysis to {output_path}")
 
-def generate_report(results: List[Dict[str, Any]], output_dir: str):
-    """Generate a comprehensive analysis report"""
-    predictions, ground_truth, metadata = extract_predictions_and_gt(results)
+def generate_report(agreement_metrics, gt_metrics, uncertainty_metrics, 
+                   model_metrics, signal_agreement, signal_gt_alignment, output_dir: str):
+    """Generate comprehensive report"""
     
-    # Basic metrics
-    metrics = compute_basic_metrics(predictions, ground_truth)
+    report_lines = []
+    report_lines.append("="*80)
+    report_lines.append("Multi-Model Crowdsourcing Evaluation Report")
+    report_lines.append("="*80)
+    report_lines.append("")
     
-    # Signal analysis
-    signal_analysis = analyze_signal_types(metadata, predictions, ground_truth)
+    # Inter-model agreement
+    report_lines.append("1. INTER-MODEL AGREEMENT")
+    report_lines.append("-"*80)
+    if agreement_metrics['consistency_scores']:
+        report_lines.append(f"Average consistency: {agreement_metrics['avg_consistency']:.3f}")
+        report_lines.append(f"Unanimity rate: {agreement_metrics['unanimity_rate']:.1%}")
+        report_lines.append(f"Pairs with unanimous agreement: {agreement_metrics['unanimity_count']}")
+    report_lines.append(f"\nMajority Vote Distribution:")
+    for vote, count in agreement_metrics['vote_distributions'].most_common():
+        report_lines.append(f"  {vote}: {count}")
+    report_lines.append("")
     
-    # Create plots
-    plot_confusion_matrix(predictions, ground_truth, output_dir)
-    plot_prediction_distribution(predictions, ground_truth, output_dir)
-    plot_signal_analysis(signal_analysis, output_dir)
+    # GT agreement
+    report_lines.append("2. AGREEMENT WITH GROUND TRUTH")
+    report_lines.append("-"*80)
+    report_lines.append(f"Pairs with GT labels: {gt_metrics['pairs_with_gt']}")
+    report_lines.append(f"Pairs with majority vote: {gt_metrics['pairs_with_majority_vote']}")
+    report_lines.append(f"Overall accuracy: {gt_metrics['accuracy']:.1%}")
+    report_lines.append(f"\nConfusion Matrix (GT → Prediction):")
+    for (gt, pred), count in sorted(gt_metrics['confusion_matrix'].items()):
+        report_lines.append(f"  {gt} → {pred}: {count}")
     
-    # Generate text report
-    report_path = os.path.join(output_dir, 'analysis_report.txt')
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write("=== GPT Evaluation Analysis Report ===\n\n")
-        f.write(f"Total samples: {len(results)}\n")
-        f.write(f"Valid samples: {metrics['total_samples']}\n")
-        f.write(f"Overall accuracy: {metrics['accuracy']:.3f}\n\n")
-        
-        f.write("Prediction distribution:\n")
-        f.write(f"  LLM YES: {metrics['llm_yes_count']}\n")
-        f.write(f"  LLM NO: {metrics['llm_no_count']}\n")
-        f.write(f"  GT YES: {metrics['gt_yes_count']}\n")
-        f.write(f"  GT NO: {metrics['gt_no_count']}\n\n")
-        
-        f.write("Signal type analysis:\n")
-        for level, data in signal_analysis.items():
-            f.write(f"  {level}: accuracy={data['accuracy']:.3f}, samples={data['total']}\n")
-        
-        f.write("\nDetailed results:\n")
-        for i, (result, pred, gt) in enumerate(zip(results, predictions, ground_truth)):
-            f.write(f"  {i+1}. ID: {result.get('id', 'unknown')}\n")
-            f.write(f"     LLM: {pred}, GT: {gt}, Correct: {pred == gt if pred is not None and gt is not None else 'N/A'}\n")
+    if gt_metrics['by_level']:
+        report_lines.append(f"\nPer-Level Accuracy:")
+        for level, metrics in gt_metrics['by_level'].items():
+            report_lines.append(f"  {level}: {metrics['accuracy']:.1%} ({metrics['total']} pairs)")
+    report_lines.append("")
     
-    print(f"✅ Generated analysis report at {report_path}")
-    return metrics, signal_analysis
+    # Uncertainty
+    report_lines.append("3. UNCERTAINTY ANALYSIS")
+    report_lines.append("-"*80)
+    report_lines.append(f"UNSURE responses: {uncertainty_metrics['unsure_responses']}")
+    report_lines.append(f"Overall UNSURE rate: {uncertainty_metrics['unsure_rate']:.1%}")
+    report_lines.append(f"Pairs with UNSURE majority: {uncertainty_metrics['unsure_pairs']}")
+    report_lines.append("")
+    
+    # Signal agreement
+    report_lines.append("4. SIGNAL AGREEMENT (MULTI-LABEL)")
+    report_lines.append("-"*80)
+    
+    if signal_agreement.get('structural_signals'):
+        report_lines.append("\nStructural Signals:")
+        for signal_name, data in signal_agreement['structural_signals'].items():
+            if 'avg_agreement' in data:
+                report_lines.append(f"  {signal_name}: avg_agreement={data['avg_agreement']:.2f}, majority_true={data['majority_true']}/{data['total_pairs']}")
+    
+    if signal_agreement.get('level_signals'):
+        report_lines.append("\nLevel Signals:")
+        for signal_name, data in signal_agreement['level_signals'].items():
+            if 'avg_agreement' in data:
+                report_lines.append(f"  {signal_name}: avg_agreement={data['avg_agreement']:.2f}, majority_true={data['majority_true']}/{data['total_pairs']}")
+    report_lines.append("")
+    
+    # Signal-GT alignment
+    report_lines.append("5. SIGNAL vs GT ALIGNMENT")
+    report_lines.append("-"*80)
+    
+    if signal_gt_alignment.get('level_signal_vs_gt'):
+        for level_name, metrics in signal_gt_alignment['level_signal_vs_gt'].items():
+            if metrics['total'] > 0:
+                report_lines.append(f"\n{level_name.upper()} Level Signal:")
+                report_lines.append(f"  Accuracy: {metrics['accuracy']:.1%} ({metrics['correct']}/{metrics['total']})")
+                report_lines.append(f"  Precision: {metrics['precision']:.1%}")
+                report_lines.append(f"  Recall: {metrics['recall']:.1%}")
+                report_lines.append(f"  False Positives: {metrics['false_pos']}")
+                report_lines.append(f"  False Negatives: {metrics['false_neg']}")
+    report_lines.append("")
+    
+    # Model-specific
+    report_lines.append("6. MODEL-SPECIFIC METRICS")
+    report_lines.append("-"*80)
+    for model_name, metrics in model_metrics['models'].items():
+        report_lines.append(f"\n{model_name}:")
+        report_lines.append(f"  Responses: {metrics['responses']}")
+        report_lines.append(f"  Errors: {metrics['errors']}")
+        report_lines.append(f"  Success rate: {metrics['success_rate']:.1%}")
+        report_lines.append(f"  Avg elapsed: {metrics['avg_elapsed_time']:.2f}s")
+        report_lines.append(f"  Vote distribution:")
+        for vote, count in metrics['vote_distribution'].most_common():
+            report_lines.append(f"    {vote}: {count}")
+    report_lines.append("")
+    
+    report_lines.append("="*80)
+    
+    report_text = "\n".join(report_lines)
+    
+    # Save report
+    report_file = os.path.join(output_dir, 'evaluation_report.txt')
+    with open(report_file, 'w', encoding='utf-8') as f:
+        f.write(report_text)
+    
+    print(report_text)
+    print(f"\n✓ Report saved to {report_file}")
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Analyze batch evaluation results")
-    parser.add_argument("--results", required=True, help="Results JSONL file")
-    parser.add_argument("--output", required=True, help="Output directory for analysis")
+    parser = argparse.ArgumentParser(description="Analyze multi-model evaluation results")
+    
+    parser.add_argument("--input", required=True,
+                       help="Input JSONL file with model responses")
+    parser.add_argument("--output", required=True,
+                       help="Output directory for analysis")
     
     args = parser.parse_args()
     
-    # Create output directory
+    print(f"{'='*60}")
+    print(f"Step 3: Analyze Results")
+    print(f"{'='*60}")
+    print(f"Input: {args.input}")
+    print(f"Output: {args.output}")
+    print(f"{'='*60}")
+    
     os.makedirs(args.output, exist_ok=True)
     
     # Load results
-    print(f"Loading results from {args.results}...")
-    results = load_results(args.results)
-    print(f"Loaded {len(results)} results")
+    print(f"\nLoading results...")
+    results = load_results(args.input)
+    print(f"✓ Loaded {len(results)} results")
     
-    # Generate analysis
-    metrics, signal_analysis = generate_report(results, args.output)
+    # Compute metrics
+    print(f"\nComputing metrics...")
     
-    print(f"\n=== Summary ===")
-    print(f"Overall accuracy: {metrics['accuracy']:.3f}")
-    print(f"Valid samples: {metrics['total_samples']}/{len(results)}")
-    print(f"Analysis saved to: {args.output}")
+    agreement_metrics = compute_inter_model_agreement(results)
+    print("✓ Inter-model agreement")
+    
+    gt_metrics = compute_gt_agreement(results)
+    print("✓ GT agreement")
+    
+    uncertainty_metrics = compute_uncertainty_analysis(results)
+    print("✓ Uncertainty analysis")
+    
+    model_metrics = compute_model_specific_metrics(results)
+    print("✓ Model-specific metrics")
+    
+    # NEW: Signal-specific metrics
+    signal_agreement = compute_signal_agreement(results)
+    print("✓ Signal agreement (multi-label)")
+    
+    signal_gt_alignment = compute_signal_gt_alignment(results)
+    print("✓ Level signal vs GT alignment")
+    
+    # Save metrics
+    all_metrics = {
+        'agreement': agreement_metrics,
+        'gt_agreement': gt_metrics,
+        'uncertainty': uncertainty_metrics,
+        'model_specific': model_metrics,
+        'signal_agreement': signal_agreement,
+        'signal_gt_alignment': signal_gt_alignment
+    }
+    
+    metrics_file = os.path.join(args.output, 'metrics.json')
+    with open(metrics_file, 'w') as f:
+        json.dump(all_metrics, f, indent=2, ensure_ascii=False)
+    print(f"✓ Saved metrics to {metrics_file}")
+    
+    # Generate report
+    print(f"\nGenerating report...")
+    generate_report(agreement_metrics, gt_metrics, uncertainty_metrics, 
+                   model_metrics, signal_agreement, signal_gt_alignment, args.output)
+    
+    print(f"\n{'='*60}")
+    print("Analysis Complete!")
+    print(f"{'='*60}")
+
 
 if __name__ == "__main__":
     main()

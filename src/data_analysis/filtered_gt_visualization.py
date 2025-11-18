@@ -112,7 +112,7 @@ def create_step_by_step_visualization(filtered_gt_tables,
                                        parquet_pattern='train-*-of-00004.parquet',
                                        step3_dedup_path='data/processed/modelcard_step3_dedup.parquet',
                                        gt_related_path='data/processed/modelcard_gt_related_model.parquet',
-                                       output_dir='.',
+                                       output_dir='data/analysis',
                                        output_suffix=''):
     """Create step-by-step filtering visualization with our agreed-upon steps.
     
@@ -292,7 +292,7 @@ def create_step_by_step_visualization(filtered_gt_tables,
     # Return actual counts and categories for step_data
     return counts, categories
 
-def create_table_frequency_distribution(filtered_gt_table_frequency, output_dir='.', output_suffix=''):
+def create_table_frequency_distribution(filtered_gt_table_frequency, output_dir='data/analysis', output_suffix=''):
     """Create table frequency distribution with rank on X-axis and frequency on Y-axis.
     
     Args:
@@ -373,8 +373,8 @@ def main():
                         help='Path to modelcard_gt_related_model parquet file')
     parser.add_argument('--gt-pkl', type=str, default='data/gt/csv_list_direct_label.pkl',
                         help='Path to GT tables pickle file')
-    parser.add_argument('--output-dir', type=str, default='.',
-                        help='Directory to save output files (default: current directory)')
+    parser.add_argument('--output-dir', type=str, default='data/analysis',
+                        help='Directory to save output files (default: data/analysis)')
     parser.add_argument('--output-suffix', type=str, default='',
                         help='Suffix to append to output filenames (e.g., _v2, _20250101)')
     parser.add_argument('--use-v2', action='store_true',

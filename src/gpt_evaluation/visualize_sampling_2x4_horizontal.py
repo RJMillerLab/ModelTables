@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 
 
-def create_horizontal_2x4_heatmap(stats, output_path, fig_dir="fig"):
+def create_horizontal_2x4_heatmap(stats, output_path, fig_dir="data/analysis"):
     """Create a horizontal 2×4 heatmap: 4 rows (ModelCard×Dataset) × 2 cols (Paper)"""
     os.makedirs(fig_dir, exist_ok=True)
     

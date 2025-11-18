@@ -206,9 +206,10 @@ plt.xlabel("Step by Step Filtering", fontsize=16)
 plt.xticks(rotation=0, ha="center", fontsize=14)
 plt.yticks(fontsize=14)
 plt.tight_layout()
-plt.savefig("hf_models_analysis.pdf", format='pdf', dpi=300, bbox_inches='tight')
-plt.savefig("hf_models_analysis.png", format='png', dpi=300, bbox_inches='tight')
-print("\nsave fig to hf_models_analysis.pdf and hf_models_analysis.png")
+os.makedirs("data/analysis", exist_ok=True)
+plt.savefig("data/analysis/hf_models_analysis.pdf", format='pdf', dpi=300, bbox_inches='tight')
+plt.savefig("data/analysis/hf_models_analysis.png", format='png', dpi=300, bbox_inches='tight')
+print("\nsave fig to data/analysis/hf_models_analysis.pdf and data/analysis/hf_models_analysis.png")
 plt.close()
 
 # ---------- plot cross analysis ----------
@@ -246,9 +247,9 @@ for bar in bars2:
              f'{int(height):,}', ha='center', va='bottom', fontweight='bold')
 
 plt.tight_layout()
-plt.savefig("hf_cross_analysis.pdf", format='pdf', dpi=300, bbox_inches='tight')
-plt.savefig("hf_cross_analysis.png", format='png', dpi=300, bbox_inches='tight')
-print("save cross analysis fig to hf_cross_analysis.pdf and hf_cross_analysis.png")
+plt.savefig("data/analysis/hf_cross_analysis.pdf", format='pdf', dpi=300, bbox_inches='tight')
+plt.savefig("data/analysis/hf_cross_analysis.png", format='png', dpi=300, bbox_inches='tight')
+print("save cross analysis fig to data/analysis/hf_cross_analysis.pdf and data/analysis/hf_cross_analysis.png")
 plt.close()
 
 # Close connections

@@ -130,7 +130,8 @@ if __name__ == '__main__':
     
     # Determine input/output paths based on tag
     uploaded_path = args.input or os.path.join(processed_base_path, f"modelcard_citation_all_matrices{suffix}.pkl.gz")
-    output_path = args.output or (f"overlap_violin_by_mode{suffix}.pdf" if tag else "overlap_violin_by_mode.pdf")
+    output_path = args.output or (f"data/analysis/overlap_violin_by_mode{suffix}.pdf" if tag else "data/analysis/overlap_violin_by_mode.pdf")
+    os.makedirs("data/analysis", exist_ok=True)
     
     print("📁 Paths in use:")
     print(f"   Input matrices:      {uploaded_path}")

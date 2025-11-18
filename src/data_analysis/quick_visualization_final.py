@@ -120,13 +120,14 @@ def create_combined_visualization():
     # ==============================================================
     # Save Figure
     # ==============================================================
-    plt.savefig("quick_visualization_combined.pdf", dpi=300, bbox_inches="tight")
-    plt.savefig("quick_visualization_combined.png", dpi=300, bbox_inches="tight")
+    os.makedirs("data/analysis", exist_ok=True)
+    plt.savefig("data/analysis/quick_visualization_combined.pdf", dpi=300, bbox_inches="tight")
+    plt.savefig("data/analysis/quick_visualization_combined.png", dpi=300, bbox_inches="tight")
     plt.close()
 
     print("✅ Minimalist visualization saved:")
-    print("• quick_visualization_combined.pdf")
-    print("• quick_visualization_combined.png")
+    print("• data/analysis/quick_visualization_combined.pdf")
+    print("• data/analysis/quick_visualization_combined.png")
 
 
 def main():

@@ -91,6 +91,7 @@ fig.colorbar(sm, cax=cbar_ax)
 plt.suptitle("GT Matrices: Heatmaps + Histograms (log scale)", fontsize=14)
 plt.tight_layout(rect=[0, 0, 0.91, 0.96])
 
-out_path = "gt_matrix_heatmap_histogram.png"
+out_path = "data/analysis/gt_matrix_heatmap_histogram.png"
+os.makedirs("data/analysis", exist_ok=True)
 plt.savefig(out_path)
 print(f"✅ Saved to {out_path}")
