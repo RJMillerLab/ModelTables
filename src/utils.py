@@ -166,8 +166,22 @@ def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", colu
         # Validate date directory exists and has parquet files (with helpful error message)
         validate_raw_date(date, base_path=base_path, raise_error=True)
         
-        # Find all parquet files matching the pattern train-*.parquet
-        all_files = [f for f in os.listdir(file_path) if f.endswith('.parquet') and f.startswith('train-')]
+        # Find all parquet files matching the pattern
+        # For modelcard: train-*.parquet
+        # For datasetcard: datasetcard-train-*.parquet (new format) or train-*.parquet (old format)
+        if data_type == "modelcard":
+            # Modelcard files: train-*.parquet (no prefix)
+            all_files = [f for f in os.listdir(file_path) if f.endswith('.parquet') and f.startswith('train-') and not f.startswith('datasetcard-')]
+        elif data_type == "datasetcard":
+            # Datasetcard files: datasetcard-train-*.parquet (new format with prefix)
+            # Fallback to train-*.parquet if no prefixed files found (old format)
+            prefixed_files = [f for f in os.listdir(file_path) if f.endswith('.parquet') and f.startswith('datasetcard-train-')]
+            if prefixed_files:
+                all_files = prefixed_files
+            else:
+                # Fallback to old format (for backward compatibility)
+                all_files = [f for f in os.listdir(file_path) if f.endswith('.parquet') and f.startswith('train-')]
+        
         if not all_files:
             # This should not happen if validate_raw_date passed, but keep as safety check
             validate_raw_date(date, base_path=base_path, raise_error=True)
@@ -176,7 +190,7 @@ def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", colu
         all_files.sort()
         file_names = all_files
         print(f"📁 Loading from date-specific directory: {file_path}")
-        print(f"   Found {len(file_names)} parquet file(s)")
+        print(f"   Found {len(file_names)} parquet file(s) for {data_type}")
     else:
         # Original logic: use predefined file names based on data_type
         if data_type == "modelcard":

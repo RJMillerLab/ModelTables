@@ -276,8 +276,24 @@ if __name__ == "__main__":
     ########################################################################
     # 0 )  LOAD DATA  ───────────────────────────────────────────────────────
     ########################################################################
-    # get all valid dataset IDs
-    valid_ds_df = load_combined_data(data_type="datasetcard", file_path=os.path.expanduser("~/Repo/CitationLake/data/raw/"), columns=["datasetId"])
+    # get all valid dataset IDs - use tag if provided
+    # IMPORTANT: modelcard reads from modelcard, datasetcard reads from datasetcard - they are separate!
+    # When date is provided, load_combined_data automatically loads from data/raw_<date> directory
+    if tag:
+        # Use tag to load from raw_<tag> directory
+        # load_combined_data will automatically construct the path from date parameter
+        try:
+            config = load_config('config.yaml')
+            base_path = config.get('base_path', 'data')
+        except:
+            base_path = 'data'
+        raw_base_path = os.path.dirname(base_path) if base_path.endswith('processed') else base_path
+        datasetcard_path = os.path.join(raw_base_path, 'raw')  # Base path, date will be used to construct full path
+        print(f"📁 Loading datasetcard with tag {tag} from: {os.path.join(raw_base_path, f'raw_{tag}')}")
+        valid_ds_df = load_combined_data(data_type="datasetcard", file_path=datasetcard_path, columns=["datasetId"], date=tag)
+    else:
+        # Fallback to default path (no date tag)
+        valid_ds_df = load_combined_data(data_type="datasetcard", file_path=os.path.expanduser("~/Repo/CitationLake/data/raw/"), columns=["datasetId"])
     valid_dataset_ids = set(valid_ds_df["datasetId"].str.lower())
     del valid_ds_df
     print(f"Loaded {len(valid_dataset_ids)} valid dataset IDs")

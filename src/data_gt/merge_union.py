@@ -211,8 +211,8 @@ if __name__ == '__main__':
     matrices = [primary_npz, model_processed_npz, ds_processed_npz]
     csvlists = [primary_lst, model_processed_lst, ds_processed_lst]
 
-    # Output prefix reflects primary level
-    output_prefix = _full(f"csv_pair_union_{primary_key}_processed")
+    # Output prefix reflects primary level (include tag if provided)
+    output_prefix = _full(f"csv_pair_union_{primary_key}{suffix}_processed")
 
     U, union_ids = build_union_matrix(matrices, csvlists)
 

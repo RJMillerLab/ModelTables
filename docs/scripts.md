@@ -8,14 +8,18 @@ This section outlines the workflow for processing data, building the ground trut
 
 ### 0\. Download Latest Hugging Face Snapshot
 
-Use `download_hf_dataset.py` (at repo root) to pull the newest `librarian-bots/model_cards_with_metadata` parquet shards into a date-tagged folder (for example, `data/raw_251117`). The script automatically enumerates the parquet shards available on Hugging Face Hub and stores them locally so downstream steps can point to a specific snapshot when re-running the pipeline.
+Use `download_hf_dataset.py` to pull the newest `librarian-bots/model_cards_with_metadata` or `librarian-bots/dataset_cards_with_metadata` parquet shards into a date-tagged folder (for example, `data/raw_251117`). The script automatically enumerates the parquet shards available on Hugging Face Hub and stores them locally so downstream steps can point to a specific snapshot when re-running the pipeline.
+
+**Important**: 
+- Model cards and dataset cards are stored in the same `data/raw_<date>` directory but with different filename prefixes to avoid conflicts:
+  - **Modelcard files**: `train-*.parquet` (no prefix, original format)
+  - **Datasetcard files**: `datasetcard-train-*.parquet` (with prefix to avoid conflict)
+- Both can use the same tag (e.g., `251117`) to keep them synchronized
+- The old `data/raw` directory (without date tag) maintains the original format for backward compatibility
 
 ```bash
-# Adjust OUTPUT_DIR (and DATASET_NAME if needed) in download_hf_dataset.py before running.
-# Example: save the Nov 17, 2025 snapshot to data/raw_251117
-python -m src.data_preprocess.download_hf_dataset --date 251117
-# Verify the downloaded shards
-#ls -lh data/raw_251117/*.parquet
+# Download modelcards
+python -m src.data_preprocess.download_hf_dataset --date 251117 --type modelcard/datasetcard
 ```
 
 ### 1\. Parse Initial Elements
