@@ -83,11 +83,26 @@ python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_d
 
 This step extracts tabular data from various sources and processes it.
 ```bash
-python -m src.data_preprocess.step2_gitcard_tab --tag 251117  # Extract tables from GitHub READMEs and Model Cards. Saves CSVs to local folder. Input: modelcard_step1_<tag>.parquet, github_readmes_info_<tag>.parquet, downloaded_github_readmes_<tag>/. Output: modelcard_step2_v2_<tag>.parquet, deduped_hugging_csvs_v2_<tag>/, hugging_deduped_mapping_v2_<tag>.json, deduped_github_csvs_v2_<tag>/, md_to_csv_mapping.json
-python -m src.data_preprocess.step2_md2text --tag 251117  # Process downloaded GitHub HTML files to Markdown. Input: downloaded_github_readmes_<tag>/. Output: downloaded_github_readmes_<tag>_processed/, md_parsing_results_v2_<tag>.parquet
-# python -m src.data_preprocess.step2_md2text_v2 --n_jobs 8 --output_dir data/processed/md_processed_v2 --save_mode csv/duckdb/sqlite
-python -m src.data_preprocess.step2_se_url_title --tag 251117  # Fetch titles from BibTeX entries and PDF URLs using Semantic Scholar. Input: modelcard_step1_<tag>.parquet, github_readme_cache_<tag>.parquet, downloaded_github_readmes_<tag>_processed/, PDF/GitHub URLs. Output: modelcard_all_title_list_<tag>.parquet, github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
-python -m src.data_preprocess.step2_se_url_save --tag 251117  # Save deduplicated titles for querying Semantic Scholar. Input: modelcard_all_title_list_<tag>.parquet. Output: modelcard_dedup_titles_<tag>.json, modelcard_title_query_results_<tag>.json, modelcard_all_title_list_mapped_<tag>.parquet
+# Extract tables from GitHub READMEs and Model Cards. Saves CSVs to local folder.
+# Versioning mode (with tag):
+# Input: data/processed/modelcard_step1_<tag>.parquet, github_readmes_info_<tag>.parquet, downloaded_github_readmes_<tag>/
+# Output: data/processed/modelcard_step2_v2_<tag>.parquet, data/processed/deduped_hugging_csvs_v2_<tag>/, data/processed/hugging_deduped_mapping_v2_<tag>.json, data/processed/deduped_github_csvs_v2_<tag>/, data/processed/deduped_github_csvs_v2_<tag>/md_to_csv_mapping.json
+python -m src.data_preprocess.step2_gitcard_tab --tag 251117
+
+# Process downloaded GitHub HTML files to Markdown.
+# Input: data/downloaded_github_readmes_<tag>/
+# Output: data/downloaded_github_readmes_<tag>_processed/, data/processed/md_parsing_results_v2_<tag>.parquet
+python -m src.data_preprocess.step2_md2text --tag 251117
+#python -m src.data_preprocess.step2_md2text_v2 --n_jobs 8 --output_dir data/processed/md_processed_v2 --save_mode csv/duckdb/sqlite
+# Fetch titles from BibTeX entries and PDF URLs using Semantic Scholar.
+# Input: modelcard_step1_<tag>.parquet, github_readme_cache_<tag>.parquet, downloaded_github_readmes_<tag>_processed/, PDF/GitHub URLs
+# Output: modelcard_all_title_list_<tag>.parquet, github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
+python -m src.data_preprocess.step2_se_url_title --tag 251117
+
+# Save deduplicated titles for querying Semantic Scholar.
+# Input: modelcard_all_title_list_<tag>.parquet
+# Output: modelcard_dedup_titles_<tag>.json, modelcard_title_query_results_<tag>.json, modelcard_all_title_list_mapped_<tag>.parquet
+python -m src.data_preprocess.step2_se_url_save --tag 251117
 
 <details>
 <summary>Optional: LLM/S2ORC pipelines (currently skipped)</summary>
