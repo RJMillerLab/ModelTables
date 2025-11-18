@@ -48,6 +48,11 @@ python -m src.data_preprocess.step1_query_giturl load --query "data/downloaded_g
 
 This step sets up local databases for efficient querying of Semantic Scholar data.
 
+I don't update this section anymore, as the semantic scholar dataset is too large to maintain.
+
+<details>
+<summary>Click to expand database setup commands</summary>
+
 ```bash
 # TODO: add command from privatecommonscript to here, for downloading the semantic scholar here
 # Requirement: cd to the path of downloaded dataset, e.g.: cd ~/shared_data/se_s2orc_250218
@@ -80,30 +85,32 @@ python -m src.data_localindexing.build_mini_s2orc_es --mode test --directory /u4
 python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles.json --cache_file data/processed/query_cache.json
 # getting full tables
 ```
+</details>
 
 ### 3\. Extract Tables to Local Folder
 
 This step extracts tabular data from various sources and processes it.
 ```bash
 # Extract tables from GitHub READMEs and Model Cards. Saves CSVs to local folder.
-# Input: data/processed/modelcard_step1.parquet, github_readmes_info.parquet, downloaded_github_readmes/
-# Output: data/processed/modelcard_step2.parquet, data/processed/deduped_hugging_csvs_v2/, data/processed/hugging_deduped_mapping_v2.json, data/processed/deduped_github_csvs_v2/, data/processed/deduped_github_csvs_v2/md_to_csv_mapping.json
-python -m src.data_preprocess.step2_gitcard_tab
+# Versioning mode (with tag):
+# Input: data/processed/modelcard_step1_<tag>.parquet, github_readmes_info_<tag>.parquet, downloaded_github_readmes_<tag>/
+# Output: data/processed/modelcard_step2_v2_<tag>.parquet, data/processed/deduped_hugging_csvs_v2_<tag>/, data/processed/hugging_deduped_mapping_v2_<tag>.json, data/processed/deduped_github_csvs_v2_<tag>/, data/processed/deduped_github_csvs_v2_<tag>/md_to_csv_mapping.json
+python -m src.data_preprocess.step2_gitcard_tab --tag 251117
 
 # Process downloaded GitHub HTML files to Markdown.
-# Input: data/downloaded_github_readmes/
-# Output: data/downloaded_github_readmes_processed/
-python -m src.data_preprocess.step2_md2text
+# Input: data/downloaded_github_readmes_<tag>/
+# Output: data/downloaded_github_readmes_<tag>_processed/, data/processed/md_parsing_results_v2_<tag>.parquet
+python -m src.data_preprocess.step2_md2text --tag 251117
 #python -m src.data_preprocess.step2_md2text_v2 --n_jobs 8 --output_dir data/processed/md_processed_v2 --save_mode csv/duckdb/sqlite
 # Fetch titles from BibTeX entries and PDF URLs using Semantic Scholar.
-# Input: modelcard_step1.parquet, github_readme_cache.parquet, github_readmes_processed/, PDF/GitHub URLs
-# Output: modelcard_all_title_list.parquet, github_readme_cache_update.parquet, github_extraction_cache.json, all_links_with_category.csv
-python -m src.data_preprocess.step2_se_url_title
+# Input: modelcard_step1_<tag>.parquet, github_readme_cache_<tag>.parquet, downloaded_github_readmes_<tag>_processed/, PDF/GitHub URLs
+# Output: modelcard_all_title_list_<tag>.parquet, github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
+python -m src.data_preprocess.step2_se_url_title --tag 251117
 
 # Save deduplicated titles for querying Semantic Scholar.
-# Input: modelcard_all_title_list.parquet
-# Output: modelcard_dedup_titles.json, modelcard_title_query_results.json, modelcard_all_title_list_mapped.parquet
-python -m src.data_preprocess.step2_se_url_save
+# Input: modelcard_all_title_list_<tag>.parquet
+# Output: modelcard_dedup_titles_<tag>.json, modelcard_title_query_results_<tag>.json, modelcard_all_title_list_mapped_<tag>.parquet
+python -m src.data_preprocess.step2_se_url_save --tag 251117
 
 #### Option1:
 # Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits).
