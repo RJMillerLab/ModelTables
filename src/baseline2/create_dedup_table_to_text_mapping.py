@@ -41,7 +41,7 @@ def remove_tables_from_text(text):
     if not isinstance(text, str):
         return text
     
-    # Pattern to match markdown tables (same as in step2_gitcard_tab.py)
+    # Pattern to match markdown tables (same as in step2_hugging_github_extract.py)
     markdown_table_pattern = r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+"
     
     # Pattern to match HTML tables

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Batch GPT evaluation for table and model relatedness
-Based on src/llm/batch.py and src/data_preprocess/step2_integration_order.py
+Based on src/llm/batch.py and src/data_preprocess/step2_integration_s2orc_llm.py
 """
 
 import os

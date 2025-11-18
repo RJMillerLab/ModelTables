@@ -12,23 +12,23 @@
   ↓
 [P] downloaded_github_readmes/*
   ↓
-[C] src.data_preprocess.step1_query_giturl
+[C] src.data_analysis.query_giturl
   ↓
 [P] github_readmes_info.parquet
   ↓
-[C] src.data_preprocess.step2_gitcard_tab
+[C] src.data_preprocess.step2_hugging_github_extract
   ↓
 [P] modelcard_step2.parquet
   ↓
-[C] src.data_preprocess.step2_md2text
+[C] src.data_preprocess.step2_git_md2text
   ↓
 [P] github_readmes_processed/
   ↓
-[C] src.data_preprocess.step2_se_url_title
+[C] src.data_preprocess.step2_arxiv_github_title
   ↓
 [P] modelcard_all_title_list.parquet
   ↓
-[C] src.data_preprocess.step2_se_url_save
+[C] src.data_preprocess.step2_s2orc_save
   ↓
 [P] modelcard_dedup_titles.json
   ↓
@@ -57,15 +57,15 @@
   ↓
 [P] extracted_annotations.parquet
   ↓
-[C] src.data_preprocess.step2_get_html
+[C] src.data_preprocess.step2_arxiv_get_html
   ↓
 [P] arxiv_html_cache.json
   ↓
-[C] src.data_preprocess.step2_html_parsing
+[C] src.data_preprocess.step2_arxiv_parse
   ↓
 [P] html_table.parquet
   ↓
-[C] src.data_preprocess.step2_integration_order
+[C] src.data_preprocess.step2_integration_s2orc_llm
   ↓
 [P] before_llm_output.parquet
   ↓
@@ -73,19 +73,19 @@
   ↓
 [P] final_integration_with_paths.parquet
   ↓
-[C] src.data_gt.step3_pre_merge
+[C] src.data_preprocess.step2_merge_tables
   ↓
 [P] modelcard_step3_merged.parquet
   ↓
-[C] src.data_gt.overlap_rate
+[C] src.data_gt.paper_citation_overlap
   ↓
 [P] modelcard_rate/label.pickle
   ↓
-[C] src.data_gt.overlap_fig
+[C] src.data_analysis.paper_relatedness_distribution
   ↓
-[C] src.data_gt.overlap
+[C] src.data_analysis.paper_relatedness_threshold
   ↓
-[C] src.data_analysis.qc_dedup
+[C] src.data_preprocess.step2_dedup_tables
   ↓
 [P] modelcard_step3_dedup.parquet
   ↓

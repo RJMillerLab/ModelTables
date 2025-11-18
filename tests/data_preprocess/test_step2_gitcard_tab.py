@@ -16,7 +16,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import the modules we need to test
-from src.data_preprocess.step2_gitcard_tab import detect_and_extract_markdown_tables
+from src.data_preprocess.step2_hugging_github_extract import detect_and_extract_markdown_tables
 from src.data_ingestion.readme_parser import MarkdownHandler
 
 def test_markdown_table_detection():
@@ -51,6 +51,48 @@ def test_markdown_table_detection():
     print("✓ Table with pipes in cells detected")
     
     return True
+
+def test_gfm_no_border_table_detection():
+    """Detect GitHub-style tables without leading/trailing pipes and weak/no separator."""
+    content = (
+        "Branch | Bits | GS | AWQ Dataset | Seq Len | Size\n"
+        "----- | ---- | -- | ------------ | ------- | -----\n"
+        "main | 4 | 128 | VMware Open Instruct | 4096 | 4.15 GB\n"
+    )
+    found, tables = detect_and_extract_markdown_tables(content)
+    assert found is True, "Should detect no-border table"
+    assert len(tables) >= 1
+    # Ensure normalization added borders for CSV conversion
+    normalized = tables[0]
+    assert normalized.split("\n")[0].startswith("|") and normalized.split("\n")[0].endswith("|"), "Rows should be normalized with border pipes"
+
+def test_metric_value_table_detection():
+    """Detect simple two-column Metric/Value table with decimals and parentheses."""
+    content = (
+        "Metric | Value\n"
+        "------ | -----\n"
+        "Avg. | 71.38\n"
+        "ARC (25-shot) | 68.09\n"
+        "HellaSwag (10-shot) | 86.2\n"
+        "MMLU (5-shot) | 64.26\n"
+        "TruthfulQA (0-shot) | 62.78\n"
+        "Winogrande (5-shot) | 79.16\n"
+        "GSM8K (5-shot) | 67.78\n"
+    )
+    found, tables = detect_and_extract_markdown_tables(content)
+    assert found is True, "Should detect Metric/Value table"
+    # Convert to CSV to ensure downstream compatibility
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        csvp = os.path.join(td, "metric_value.csv")
+        out = MarkdownHandler.markdown_to_csv(tables[0], csvp, verbose=True)
+        assert out is not None and os.path.exists(out), "CSV should be produced"
+
+def test_false_positive_single_line_pipe():
+    """Do not detect random lines with a single pipe as a table."""
+    content = "This line has a | but is not a table.\nAnd continues without tabular structure."
+    found, tables = detect_and_extract_markdown_tables(content)
+    assert found is False or len(tables) == 0, "Should not falsely detect non-table content"
 
 def test_html_table_detection():
     """Test HTML table detection."""

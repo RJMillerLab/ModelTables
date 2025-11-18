@@ -5,7 +5,7 @@ import pandas as pd
 import os
 import tempfile
 import shutil
-from src.data_preprocess.step2_gitcard_tab import (
+from src.data_preprocess.step2_hugging_github_extract import (
     detect_and_extract_markdown_tables,
     sanitize_markdown_table_separators,
     generate_csv_path_for_dedup,

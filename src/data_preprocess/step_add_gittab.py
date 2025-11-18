@@ -18,7 +18,7 @@ from joblib import Parallel, delayed
 from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
 from src.data_ingestion.bibtex_parser import BibTeXFactory
 from src.data_preprocess.step2 import save_markdown_to_csv, extract_bibtex, add_extracted_tuples
-from src.data_preprocess.step1 import extract_markdown
+from src.data_preprocess.step1_parse import extract_markdown
 from src.utils import load_config, to_parquet
 
 def extract_table_from_pdf(pdf_path):

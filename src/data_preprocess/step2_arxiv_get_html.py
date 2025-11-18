@@ -12,7 +12,7 @@ import argparse
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from src.data_preprocess.step2_se_url_title import extract_arxiv_id
+from src.data_preprocess.step2_arxiv_github_title import extract_arxiv_id
 from urllib.parse import quote
 import requests
 import xml.etree.ElementTree as ET

@@ -4,7 +4,7 @@ Created: 2025-03-11
 Last Modified: 2025-09-21
 Description: Merge tables from df2 and df based on query and title.
 Usage:
-    python -m src.data_gt.step3_pre_merge
+    python -m src.data_preprocess.step2_merge_tables
 """
 
 import ast  ########

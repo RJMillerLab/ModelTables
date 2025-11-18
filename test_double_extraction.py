@@ -1,7 +1,7 @@
 """
 Test if markdown extraction and HTML extraction might extract the same table twice
 """
-from src.data_preprocess.step2_gitcard_tab import detect_and_extract_markdown_tables
+from src.data_preprocess.step2_hugging_github_extract import detect_and_extract_markdown_tables
 
 # Test case 1: Pure HTML table (no markdown)
 html_only = """

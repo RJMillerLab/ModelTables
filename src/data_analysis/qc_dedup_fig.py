@@ -3,7 +3,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-11
-Description: Split saving heatmap from qc_dedup.py to a separate script.
+Description: Split saving heatmap from step2_dedup_tables.py to a separate script.
 Usage: 
     python -m src.data_analysis.qc_dedup_fig --tag 251117
 """
@@ -17,14 +17,14 @@ import seaborn as sns
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 
-from src.data_analysis.qc_dedup import save_heatmap, save_heatmap_percentage
+from src.data_preprocess.step2_dedup_tables import save_heatmap, save_heatmap_percentage
 from src.utils import load_config
 
 OUTPUT_DIR = "data/deduped"
 FIG_DIR = "data/analysis"
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate heatmaps from qc_dedup results")
+    parser = argparse.ArgumentParser(description="Generate heatmaps from step2_dedup_tables results")
     parser.add_argument('--tag', dest='tag', default=None,
                         help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     parser.add_argument('--input-dir', dest='input_dir', default=None,

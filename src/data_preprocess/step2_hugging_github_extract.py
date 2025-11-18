@@ -4,7 +4,7 @@ Created: 2025-03-11
 Last Modified: 2025-04-02
 Description: Extract markdown tables from GitHub | Huggingface html, modelcards, readme files, and save them to CSV files.
 Usage:
-    python -m src.data_preprocess.step2_gitcard_tab
+    python -m src.data_preprocess.step2_hugging_github_extract
 Tips: We deduplicate the card content, and use the symlink to save data storage later.
 """
 

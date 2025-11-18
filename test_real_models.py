@@ -4,7 +4,7 @@ Test table extraction on real modelcards
 import pandas as pd
 import os
 from src.utils import load_config
-from src.data_preprocess.step2_gitcard_tab import detect_and_extract_markdown_tables
+from src.data_preprocess.step2_hugging_github_extract import detect_and_extract_markdown_tables
 
 config = load_config('config.yaml')
 processed_base_path = os.path.join(config.get('base_path'), 'processed')

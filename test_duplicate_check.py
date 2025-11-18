@@ -1,7 +1,7 @@
 """
 Test if HTML and markdown tables might be duplicated
 """
-from src.data_preprocess.step2_gitcard_tab import detect_and_extract_markdown_tables
+from src.data_preprocess.step2_hugging_github_extract import detect_and_extract_markdown_tables
 
 # Test case: Content with BOTH markdown and HTML versions of the same table
 mixed_content = """

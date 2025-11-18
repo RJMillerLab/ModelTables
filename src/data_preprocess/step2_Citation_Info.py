@@ -8,7 +8,7 @@ from src.data_ingestion.readme_parser import BibTeXExtractor, MarkdownHandler
 from src.data_ingestion.bibtex_parser import BibTeXFactory
 from src.data_ingestion.citation_fetcher import search_and_fetch_info
 from src.utils import load_config, get_statistics_table, clean_title, to_parquet
-from src.data_preprocess.step2_se_url_title import load_cache, save_cache
+from src.data_preprocess.step2_arxiv_github_title import load_cache, save_cache
 
 tqdm.pandas()
 

@@ -1,5 +1,5 @@
 """Test General rowspan extraction"""
-from src.data_preprocess.step2_gitcard_tab import detect_and_extract_markdown_tables
+from src.data_preprocess.step2_hugging_github_extract import detect_and_extract_markdown_tables
 import pandas as pd
 import re
 

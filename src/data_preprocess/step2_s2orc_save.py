@@ -9,7 +9,7 @@ Description:
   3. Simulate querying each unique title (or load existing query results).
   4. Map query results back to the DataFrame and save the final output.
 Usage:
-    python -m src.data_preprocess.step2_se_url_save
+    python -m src.data_preprocess.step2_s2orc_save
 """
 
 import os
@@ -20,7 +20,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from src.utils import load_config, to_parquet  # Ensure this function is available
-from src.data_preprocess.step2_se_url_title import load_cache, save_cache  # if needed
+from src.data_preprocess.step2_arxiv_github_title import load_cache, save_cache  # if needed
 
 def main():
     parser = argparse.ArgumentParser(description='Save deduplicated titles for querying Semantic Scholar')

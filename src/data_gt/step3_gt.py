@@ -243,10 +243,10 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True, t
     if len(paper2rows) == 0:
         print("  ⚠️  WARNING: paper2rows is empty! No valid tables found.")
         print("  This usually means:")
-        print("    1. qc_dedup.py filtered out all paths (check if directories exist)")
-        print("    2. step3_pre_merge.py did not generate table lists correctly")
+        print("    1. step2_dedup_tables.py filtered out all paths (check if directories exist)")
+        print("    2. step2_merge_tables.py did not generate table lists correctly")
         print("    3. Paths in step3_merged do not match actual file locations")
-        raise ValueError("Cannot proceed: paper2rows is empty. Please check qc_dedup.py output and ensure table directories exist.")
+        raise ValueError("Cannot proceed: paper2rows is empty. Please check step2_dedup_tables.py output and ensure table directories exist.")
     
     sample_papers = list(paper2rows.keys())[:3]
     print(f"  - First 3 paper2rows keys: {sample_papers}")

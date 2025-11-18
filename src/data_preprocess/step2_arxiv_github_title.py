@@ -30,7 +30,7 @@ import hashlib
 import argparse
 from src.data_ingestion.readme_parser import BibTeXExtractor
 from src.data_ingestion.bibtex_parser import BibTeXFactory
-from src.data_preprocess.step1 import process_bibtex_tuple, parse_bibtex_entries
+from src.data_preprocess.step1_parse import process_bibtex_tuple, parse_bibtex_entries
 from joblib import parallel_backend 
 from PyPDF2 import PdfReader
 import pyarrow as pa

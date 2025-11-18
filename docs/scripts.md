@@ -30,14 +30,14 @@ This step extracts key metadata from model cards and associated links.
 # Output: ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
 # (Optional)
 #python -m src.data_preprocess.load_raw_to_db sqlite/duckdb # save raw to DuckDB, but will explode the memory
-python -m src.data_preprocess.step1 --raw-date 251117 --versioning --baseline-step1 data/processed/modelcard_step1.parquet
+python -m src.data_preprocess.step1_parse --raw-date 251117 --versioning --baseline-step1 data/processed/modelcard_step1.parquet
 # or 
-python -m src.data_preprocess.step1 --raw-date 251117
+python -m src.data_preprocess.step1_parse --raw-date 251117
 python -m src.data_preprocess.step1_down_giturl --tag 251117 --versioning --baseline-cache data/processed/github_readme_cache.parquet # Download GitHub READMEs and HTMLs from extracted URLs; Input: modelcard_step1.parquet, Output: giturl_info.parquet, downloaded_github_readmes/
 #python -m src.data_preprocess.step1_down_giturl_fake # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
 find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' # some readme files are too large
 # Query specific GitHub URL content (example). Input: local path to a downloaded README, Output: URL content
-python -m src.data_preprocess.step1_query_giturl load --query "data/downloaded_github_readmes/0a0c3d247213c087eb2472c3fe387292.md" # sql. # (Optional)
+python -m src.data_analysis.query_giturl load --query "data/downloaded_github_readmes/0a0c3d247213c087eb2472c3fe387292.md" # sql. # (Optional)
 ```
 
 ### 2\. Download and Build Database for Faster Querying
@@ -87,26 +87,26 @@ python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_d
 
 This step extracts tabular data from various sources and processes it.
 ```bash
-# Extract tables from GitHub READMEs and Model Cards. Saves CSVs to local folder.
+# Extract tables from Hugging Face Model Cards and GitHub READMEs. Saves CSVs to local folder.
 # Versioning mode (with tag):
 # Input: data/processed/modelcard_step1_<tag>.parquet, github_readmes_info_<tag>.parquet, downloaded_github_readmes_<tag>/
 # Output: data/processed/modelcard_step2_v2_<tag>.parquet, data/processed/deduped_hugging_csvs_v2_<tag>/, data/processed/hugging_deduped_mapping_v2_<tag>.json, data/processed/deduped_github_csvs_v2_<tag>/, data/processed/deduped_github_csvs_v2_<tag>/md_to_csv_mapping.json
-python -m src.data_preprocess.step2_gitcard_tab --tag 251117
+python -m src.data_preprocess.step2_hugging_github_extract --tag 251117
 
 # Process downloaded GitHub HTML files to Markdown.
 # Input: data/downloaded_github_readmes_<tag>/
 # Output: data/downloaded_github_readmes_<tag>_processed/, data/processed/md_parsing_results_v2_<tag>.parquet
-python -m src.data_preprocess.step2_md2text --tag 251117
-#python -m src.data_preprocess.step2_md2text_v2 --n_jobs 8 --output_dir data/processed/md_processed_v2 --save_mode csv/duckdb/sqlite
-# Fetch titles from BibTeX entries and PDF URLs using Semantic Scholar.
+python -m src.data_preprocess.step2_git_md2text --tag 251117
+#python -m src.data_preprocess.step2_git_md2text_v2 --n_jobs 8 --output_dir data/processed/md_processed_v2 --save_mode csv/duckdb/sqlite
+# Extract titles from arXiv and GitHub URLs (not S2ORC). For BibTeX entries and PDF URLs.
 # Input: modelcard_step1_<tag>.parquet, github_readme_cache_<tag>.parquet, downloaded_github_readmes_<tag>_processed/, PDF/GitHub URLs
 # Output: modelcard_all_title_list_<tag>.parquet, github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
-python -m src.data_preprocess.step2_se_url_title --tag 251117
+python -m src.data_preprocess.step2_arxiv_github_title --tag 251117
 
-# Save deduplicated titles for querying Semantic Scholar.
+# Save deduplicated titles for querying Semantic Scholar (S2ORC).
 # Input: modelcard_all_title_list_<tag>.parquet
 # Output: modelcard_dedup_titles_<tag>.json, modelcard_title_query_results_<tag>.json, modelcard_all_title_list_mapped_<tag>.parquet
-python -m src.data_preprocess.step2_se_url_save --tag 251117
+python -m src.data_preprocess.step2_s2orc_save --tag 251117
 
 <details>
 <summary>Optional: LLM/S2ORC pipelines (currently skipped)</summary>
@@ -135,23 +135,23 @@ python -m src.data_localindexing.extract_full_records_to_merge
 # I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_merged_df.parquet, tmp_extracted_lines.parquet
 </details>
 
-# Download HTML content for table extraction.
+# Download arXiv HTML content for table extraction.
 # Input: extracted_annotations_<tag>.parquet, arxiv_titles_cache_<tag>.json
 # Output: title2arxiv_new_cache_<tag>.json, arxiv_html_cache_<tag>.json, missing_titles_tmp_<tag>.txt, arxiv_fulltext_html_<tag>/*.html
 # cp -r /Users/doradong/Repo/CitationLake/data/processed/extracted_annotations.parquet /Users/doradong/Repo/CitationLake/data/processed/extracted_annotations_251117.parquet
-python -m src.data_preprocess.step2_get_html --tag 251117
+python -m src.data_preprocess.step2_arxiv_get_html --tag 251117
 
-# Extract tables from HTML files.
+# Extract tables from arXiv HTML files.
 # Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional)
 # Output: html_table.parquet, tables_output/*.csv
-python -m src.data_preprocess.step2_html_parsing --tag 251117
-python -m src.data_preprocess.step2_html_parsing_v2 --n_jobs 16 --output_dir data/processed/tables_output_v2_251117 --tag 251117 --save_mode csv  #/duckdb/sqlite 
+python -m src.data_preprocess.step2_arxiv_parse --tag 251117
+python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --output_dir data/processed/tables_output_v2_251117 --tag 251117 --save_mode csv  #/duckdb/sqlite 
 
 mkdir logs
-# Integrate all processed table data (HTML, potentially LLM-polished text).
+# Integrate all processed table data (arXiv HTML + S2ORC extracted annotations) and process with LLM.
 # Input: title2arxiv_new_cache_<tag>.json, html_table_<tag>.parquet/html_parsing_results_v2_<tag>.parquet, extracted_annotations_<tag>.parquet, pdf_download_cache_<tag>.json
 # Output: batch_input_<tag>.jsonl, batch_output_<tag>.jsonl, llm_markdown_table_results_<tag>.parquet
-python -m src.data_preprocess.step2_integration_order --tag 251117 > logs/step2_integration_order_251117.log
+python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 > logs/step2_integration_s2orc_llm_251117.log
 # (Optional) Check OpenAI batch job status (if using LLM for table processing)
 bash src/data_preprocess/openai_batchjob_status.sh
 
@@ -170,10 +170,10 @@ python -m src.data_preprocess.step2_llm_save --tag 251117 > logs/step2_llm_save_
 
 This section details the process of generating ground truth labels for table unionability.
 ```bash
-python -m src.data_gt.step3_pre_merge --tag 251117  # Merge all table lists into a unified model ID file. Input: final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_v2_<tag>.parquet. Output: modelcard_step3_merged_v2_<tag>.parquet
-python -m src.data_gt.overlap_rate --tag 251117  # Compute paper-pair overlap scores for citation analysis. Input: extracted_annotations_<tag>.parquet. Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
-python -m src.data_gt.overlap_fig --tag 251117  # (Optional) Plot violin figures of overlap rates. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: overlap_violin_by_mode_<tag>.pdf
-python -m src.data_gt.overlap --tag 251117  # (Optional) Determine overlap thresholds. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: score_*.pdf files in data/analysis/
+python -m src.data_preprocess.step2_merge_tables --tag 251117  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file. Input: final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_v2_<tag>.parquet. Output: modelcard_step3_merged_v2_<tag>.parquet
+python -m src.data_gt.paper_citation_overlap --tag 251117  # Compute paper-pair citation overlap scores for ground truth. Input: extracted_annotations_<tag>.parquet. Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
+python -m src.data_analysis.paper_relatedness_distribution --tag 251117  # (Optional) Plot violin figures of paper relatedness distribution. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: overlap_violin_by_mode_<tag>.pdf
+python -m src.data_analysis.paper_relatedness_threshold --tag 251117  # (Optional) Determine paper relatedness thresholds. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: score_*.pdf files in data/analysis/
 ```
 
 ### Quality Control \!\!\! | Run some analysis
@@ -181,8 +181,8 @@ python -m src.data_gt.overlap --tag 251117  # (Optional) Determine overlap thres
 Ensure data quality and consistency before generating final ground truth.
 
 ```bash
-python -m src.data_analysis.qc_dedup --tag 251117 > logs/qc_dedup_251117.log  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet
-python -m src.data_analysis.qc_dedup_fig --tag 251117  # Generate heatmaps from qc_dedup results. Input: deduped_<tag>/dup_matrix.pkl, deduped_<tag>/stats.json. Output: heatmaps in data/analysis/
+python -m src.data_preprocess.step2_dedup_tables --tag 251117 > logs/step2_dedup_tables_251117.log  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet
+python -m src.data_analysis.qc_dedup_fig --tag 251117  # Generate heatmaps from dedup results. Input: deduped_<tag>/dup_matrix.pkl, deduped_<tag>/stats.json. Output: heatmaps in data/analysis/
 python -m src.data_analysis.qc_stats --tag 251117 > logs/qc_stats_251117.log  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet
 python -m src.data_analysis.qc_stats_fig --tag 251117  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
 python -m src.data_analysis.qc_anomaly --recursive #(Optional)

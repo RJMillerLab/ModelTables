@@ -1,7 +1,7 @@
 """
 Quick verification that optimizations work correctly
 """
-from src.data_preprocess.step2_gitcard_tab import detect_and_extract_markdown_tables
+from src.data_preprocess.step2_hugging_github_extract import detect_and_extract_markdown_tables
 import time
 
 test_cases = [
