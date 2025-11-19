@@ -220,11 +220,30 @@ python -m src.data_gt.create_csvlist_variants --level direct --tag 251117  # Upd
 
 Prepare data and augmentations for integration with the Starmie benchmark framework.
 
+**Two main steps:**
+
+1. **Create augmented table folders (tr/str)**: Generate transpose and string-augmented versions of tables
+2. **Create symlinks**: Link CitationLake tables to starmie_internal/data/scilake_final_<tag>/datalake
+
 ```bash
-# go to starmie folder, and copy this sh file to run 
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str/tr/str_tr # trick: header-str(value)
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base/str/tr/tr_str --dir-name scilake_final_v2/_str/tr/tr_str# symlink csvs to the target folder
-# bash src/data_analysis/count_files.sh check whether the symlink path include some files
+# Step 1: Create augmented table folders (tr/str/str_tr)
+# This creates folders like: deduped_hugging_csvs_v2_251117_tr, deduped_hugging_csvs_v2_251117_str
+python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --mode tr --tag 251117   # Create transpose augmented folders
+python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --mode str --tag 251117  # Create string augmented folders
+# Or process all modes:
+python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --mode str_tr --tag 251117  # Create both str and tr augmented folders
+
+# Step 2: Create symlinks from CitationLake to starmie_internal
+# This creates symlinks in starmie_internal/data/scilake_final_<tag>/datalake
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base --dir-name scilake_final_251117  # Base mode
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str --dir-name scilake_final_251117_str  # Str mode
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode tr --dir-name scilake_final_251117_tr  # Tr mode
+# Or process all modes at once:
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode all --dir-name scilake_final_251117  # All modes (base, str, tr, tr_str)
+
+# Note: For default v2 version (no tag), omit --tag and use scilake_final_v2 as dir-name
+python -m src.data_symlink.trick_aug --repo_root /u4/z6dong/Repo --mode tr  # No tag, uses v2 folders
+python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base --dir-name scilake_final_v2  # No tag, uses v2
 ```
 
 ### 6\. Run Updated Starmie Scripts

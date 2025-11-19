@@ -221,13 +221,17 @@ def main():
     parser = argparse.ArgumentParser(description="Process CSV files in different modes")
     parser.add_argument("--mode", type=str, choices=["tr", "str", "str_tr"], default="tr", help="Processing mode")
     parser.add_argument("--repo_root", type=str, default="/u4/z6dong/Repo", help="Repository root directory.")
+    parser.add_argument("--tag", type=str, default=None, help="Tag suffix for versioning (e.g., 251117). If provided, uses tagged folders like deduped_hugging_csvs_v2_<tag>")
     args = parser.parse_args()
     
+    # Determine folder suffix based on tag
+    tag_suffix = f"_{args.tag}" if args.tag else ""
+    
     folders = [
-        "CitationLake/data/processed/deduped_hugging_csvs_v2",
-        "CitationLake/data/processed/deduped_github_csvs_v2",
-        "CitationLake/data/processed/tables_output_v2",
-        #"CitationLake/data/processed/llm_tables"
+        f"CitationLake/data/processed/deduped_hugging_csvs_v2{tag_suffix}",
+        f"CitationLake/data/processed/deduped_github_csvs_v2{tag_suffix}",
+        f"CitationLake/data/processed/tables_output_v2{tag_suffix}",
+        f"CitationLake/data/processed/llm_tables{tag_suffix}" if args.tag else "CitationLake/data/processed/llm_tables"
     ]
     for folder in folders:
         full_folder = os.path.join(args.repo_root, folder)
