@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
-from src.utils import to_parquet, load_config
+from src.utils import to_parquet, load_config, is_list_like, to_list_safe
 
 FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths_v2.parquet"
 ALL_TITLE_PATH              = "data/processed/modelcard_all_title_list.parquet"
@@ -29,8 +29,8 @@ def _combine_lists(series):
     """
     all_items = []
     for x in series.dropna():
-        if isinstance(x, (list, tuple, np.ndarray)):
-            all_items.extend(x)
+        if is_list_like(x):
+            all_items.extend(to_list_safe(x))
         else:
             pass
     return list(set(all_items))
@@ -40,12 +40,12 @@ def _safe_parse_list(val):
     if isinstance(val, str) and val.startswith("[") and val.endswith("]"):
         try:
             parsed = ast.literal_eval(val.replace('\n', '').replace('\r', ''))
-            if isinstance(parsed, (list, tuple, np.ndarray)):
-                return list(parsed)
+            if is_list_like(parsed):
+                return to_list_safe(parsed)
         except Exception:
             return []
-    elif isinstance(val, (list, tuple, np.ndarray)):
-        return list(val)
+    elif is_list_like(val):
+        return to_list_safe(val)
     else:
         return []
 
@@ -114,13 +114,13 @@ def populate_github_table_list(df_merged, processed_base_path, tag=None):
         readme_paths = row['readme_path']
         # Handle different types: str, list, tuple, numpy.ndarray, or None
         # Check numpy array first to avoid ValueError with pd.isna() on empty arrays
-        if isinstance(readme_paths, np.ndarray):
-            readme_paths = readme_paths.tolist() if readme_paths.size > 0 else []
-        elif pd.isna(readme_paths):
+        if pd.isna(readme_paths):
             readme_paths = []
         elif isinstance(readme_paths, str):
             readme_paths = [readme_paths]
-        elif not isinstance(readme_paths, (list, tuple)):
+        elif is_list_like(readme_paths):
+            readme_paths = to_list_safe(readme_paths)
+        else:
             readme_paths = []
         combined_csvs = []
         for md_file in readme_paths:
@@ -153,11 +153,8 @@ def map_tables_by_dict(df2, df):
     for row in df.itertuples(index=False):
         # row: query, html_table_list, llm_table_list
         # Handle both list and numpy.ndarray types
-        html_list = row.html_table_list if isinstance(row.html_table_list, (list, np.ndarray)) else []
-        llm_list = row.llm_table_list if isinstance(row.llm_table_list, (list, np.ndarray)) else []
-        # Convert numpy.ndarray to list if needed
-        html_list = html_list.tolist() if isinstance(html_list, np.ndarray) else html_list
-        llm_list = llm_list.tolist() if isinstance(llm_list, np.ndarray) else llm_list
+        html_list = to_list_safe(row.html_table_list) if is_list_like(row.html_table_list) else []
+        llm_list = to_list_safe(row.llm_table_list) if is_list_like(row.llm_table_list) else []
         df_lookup[row.query] = (html_list, llm_list)
     # add col to df2：html_table_list_mapped, llm_table_list_mapped
     df2["html_table_list_mapped"] = [[] for _ in range(len(df2))]
@@ -165,8 +162,9 @@ def map_tables_by_dict(df2, df):
     # loop through df2, for each row, check all_title_list
     for i, row in df2.iterrows():
         title_list = row["all_title_list"]
-        if not isinstance(title_list, list):
+        if not is_list_like(title_list):
             continue
+        title_list = to_list_safe(title_list)
         combined_html = []
         combined_llm  = []
         for title in title_list:
@@ -198,7 +196,7 @@ def merge_table_list_to_df2(final_integration_path, all_title_path, merge_path, 
         df2_merged = map_tables_by_dict(df2, df)
     else:
         all_title_list_key = "all_title_list"
-        df2[all_title_list_key] = df2[all_title_list_key].apply(lambda x: list(dict.fromkeys(x)) if isinstance(x, (list, tuple, np.ndarray)) else x)
+        df2[all_title_list_key] = df2[all_title_list_key].apply(lambda x: list(dict.fromkeys(to_list_safe(x))) if is_list_like(x) else x)
         df2_exploded = df2.explode(all_title_list_key).rename(columns={all_title_list_key: 'explode_title'})
         merged = pd.merge(
             df2_exploded,
@@ -220,10 +218,10 @@ def merge_table_list_to_df2(final_integration_path, all_title_path, merge_path, 
         print("Step 3: Merging the grouped columns back into df2...")
         df2_merged = pd.merge(df2, grouped, on='modelId', how='left')
         df2_merged['html_table_list_mapped'] = df2_merged['html_table_list_mapped'].apply(
-            lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else []
+            lambda v: to_list_safe(v) if is_list_like(v) else []
         )
         df2_merged['llm_table_list_mapped'] = df2_merged['llm_table_list_mapped'].apply(
-            lambda v: v if isinstance(v, (list, tuple, np.ndarray)) else []
+            lambda v: to_list_safe(v) if is_list_like(v) else []
         )
     # load side data and merge to df with modelId
     # Try v2 first, fallback to v1

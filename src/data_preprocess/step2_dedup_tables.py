@@ -21,7 +21,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from tqdm_joblib import tqdm_joblib
 from datetime import datetime
-from src.utils import to_parquet, load_config
+from src.utils import to_parquet, load_config, is_list_like, to_list_safe
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -86,8 +86,8 @@ def get_linked_set_from_parquet(df, cols):
     for col in cols:
         if col in df.columns:
             for paths in df[col]:
-                if isinstance(paths, (list, tuple, np.ndarray)):
-                    linked_set.extend([p for p in paths if isinstance(p, str)])
+                if is_list_like(paths):
+                    linked_set.extend([p for p in to_list_safe(paths) if isinstance(p, str)])
                 elif isinstance(paths, str):
                     linked_set.append(paths)
     return linked_set
@@ -279,7 +279,7 @@ def update_row(row, duplicate_mapping, resource_priority):
     ordered_canonical = []
     seen = set()
     for col in resource_of_col:
-        lst = row[col] if isinstance(row[col], (list, tuple, np.ndarray)) else []
+        lst = to_list_safe(row[col]) if is_list_like(row[col]) else []
         for f in lst:
             canonical = duplicate_mapping.get(f, f)
             if canonical not in seen:
@@ -292,7 +292,7 @@ def update_row(row, duplicate_mapping, resource_priority):
         #     we keep it under that column's resource.
         target_resource = None
         for col, res in resource_of_col.items():
-            lst = row[col] if isinstance(row[col], (list, tuple, np.ndarray)) else []
+            lst = to_list_safe(row[col]) if is_list_like(row[col]) else []
             if canonical in lst:
                 target_resource = res
                 break
@@ -305,7 +305,7 @@ def update_row(row, duplicate_mapping, resource_priority):
             dup_resources = {resource_of_col[c]
                              for c in resource_of_col
                              if any(duplicate_mapping.get(p, p) == canonical
-                                    for p in (row[c] if isinstance(row[c], (list, tuple, np.ndarray)) else []))}
+                                    for p in (to_list_safe(row[c]) if is_list_like(row[c]) else []))}
             target_resource = (min(dup_resources, key=lambda r: resource_priority[r])
                                if dup_resources else "hugging")
         designated[canonical] = target_resource
@@ -411,7 +411,7 @@ def save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=False):
             "HTML": "html_table_list_mapped",
             "S2ORC": "llm_table_list_mapped"
         }.items():
-            total_files[res] = df[col].apply(lambda x: len(x) if isinstance(x, (list, tuple, np.ndarray)) else 0).sum()
+            total_files[res] = df[col].apply(lambda x: len(to_list_safe(x)) if is_list_like(x) else 0).sum()
         
         # Calculate percentages based on total files
         dup_matrix_plot = dup_matrix.copy()
@@ -656,10 +656,10 @@ def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None,
     # filter out invalid paths (qc remove)
     VALID_PATHS = set(fi['file_path'] for fi in filtered_files_info)
     for col in cols:
-        total_before = df[col].apply(lambda x: len(x) if isinstance(x, (list, tuple, np.ndarray)) else 0).sum()
+        total_before = df[col].apply(lambda x: len(to_list_safe(x)) if is_list_like(x) else 0).sum()
         print(f"Filtering {col}... Before: {total_before}")
-        df[col] = df[col].apply(lambda x: [p for p in x if p in VALID_PATHS])
-        total_after = df[col].apply(lambda x: len(x) if isinstance(x, (list, tuple, np.ndarray)) else 0).sum()
+        df[col] = df[col].apply(lambda x: [p for p in to_list_safe(x) if p in VALID_PATHS] if is_list_like(x) else [])
+        total_after = df[col].apply(lambda x: len(to_list_safe(x)) if is_list_like(x) else 0).sum()
         print(f"After: {total_after}")
     # map the file path to the canonical file path
     new_cols = {col + "_dedup": [] for col in cols}

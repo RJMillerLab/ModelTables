@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from matplotlib.patches import Patch
-from src.utils import to_parquet, load_config
+from src.utils import to_parquet, load_config, is_list_like, to_list_safe
 import csv
 
 V2_MODE = True  # Set to True to use v2 versions
@@ -279,21 +279,63 @@ def compute_resource_stats(df, resource, tag=None):
     valid_title_paths = list()
     # iterate over rows
     for p_list, ht, hvt in zip(df[col], df['has_title'], df['has_valid_title']):
-        #if isinstance(p_list, (list, tuple, np.ndarray)):
+        # Check if p_list is a valid list/array and not NaN
+        if pd.isna(p_list) or not is_list_like(p_list):
+            continue
+        
+        # Convert to list safely
+        p_list = to_list_safe(p_list)
+        
+        # Extract valid string paths
         if ht:
-            title_paths.extend([p for p in p_list if isinstance(p, str)])
+            title_paths.extend([p for p in p_list if isinstance(p, str) and pd.notna(p)])
         if hvt:
-            valid_title_paths.extend([p for p in p_list if isinstance(p, str)])
+            valid_title_paths.extend([p for p in p_list if isinstance(p, str) and pd.notna(p)])
     title_paths_set = set(title_paths)
     valid_title_paths_set = set(valid_title_paths)
+    
+    print(f"  📋 {resource}: Collected {len(title_paths)} title paths ({len(title_paths_set)} unique)")
+    print(f"  📋 {resource}: Collected {len(valid_title_paths)} valid_title paths ({len(valid_title_paths_set)} unique)")
 
     #title_count = sum(1 for p in unique_paths if p in title_paths_set)
     #valid_title_count = sum(1 for p in unique_paths if p in valid_title_paths_set)
     title_count_dedup = len(title_paths_set & set(unique_paths))
     valid_title_count_dedup = len(valid_title_paths_set & set(unique_paths))
+    
+    print(f"  📋 {resource}: After dedup matching - title: {title_count_dedup}, valid_title: {valid_title_count_dedup}")
 
-    title_valid_files = [f for f in dedup_valid_files if f['path'] in title_paths_set]  ########
-    valid_title_valid_files = [f for f in dedup_valid_files if f['path'] in valid_title_paths_set]  ########
+    # Normalize paths for comparison (handle both absolute and relative paths)
+    # Create a mapping from normalized paths to original paths
+    def normalize_path(p):
+        """Normalize path for comparison (resolve to absolute if possible)"""
+        if not isinstance(p, str):
+            return None
+        try:
+            # Try to resolve to absolute path, fallback to original if fails
+            abs_path = os.path.abspath(p) if os.path.exists(p) else p
+            return os.path.normpath(abs_path)
+        except:
+            return os.path.normpath(p)
+    
+    # Normalize all paths in the sets for comparison
+    title_paths_normalized = {normalize_path(p): p for p in title_paths_set if normalize_path(p)}
+    valid_title_paths_normalized = {normalize_path(p): p for p in valid_title_paths_set if normalize_path(p)}
+    
+    # Match files using normalized paths
+    title_valid_files = []
+    for f in dedup_valid_files:
+        normalized = normalize_path(f['path'])
+        if normalized and normalized in title_paths_normalized:
+            title_valid_files.append(f)
+    
+    valid_title_valid_files = []
+    for f in dedup_valid_files:
+        normalized = normalize_path(f['path'])
+        if normalized and normalized in valid_title_paths_normalized:
+            valid_title_valid_files.append(f)
+    
+    print(f"  📋 {resource}: Matched {len(title_valid_files)} title_valid files from {len(dedup_valid_files)} dedup files")
+    print(f"  📋 {resource}: Matched {len(valid_title_valid_files)} valid_title_valid files from {len(dedup_valid_files)} dedup files")
     
     # Filter out tables that are too long or too wide (v2 filtering) - using already computed data
     original_valid_count = len(valid_title_valid_files)
@@ -618,10 +660,10 @@ def main(input_file=None, input_file_dedup=None, integration_file=None, output_d
 
     valid_titles = set(df_integration['query'].dropna().str.strip())
     df['all_title_list_valid'] = df['all_title_list'].apply(
-        lambda x: [t for t in x if t in valid_titles] if isinstance(x, (list, tuple, np.ndarray)) else []
+        lambda x: [t for t in to_list_safe(x) if t in valid_titles] if is_list_like(x) else []
     )
-    df['has_title'] = df['all_title_list'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
-    df['has_valid_title'] = df['all_title_list_valid'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0)
+    df['has_title'] = df['all_title_list'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0)
+    df['has_valid_title'] = df['all_title_list_valid'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0)
     
     # Only save modelId and the 3 new attributes to reduce file size
     df_optimized = df[['modelId', 'all_title_list', 'all_title_list_valid', 'has_title', 'has_valid_title']].copy()

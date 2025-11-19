@@ -25,6 +25,7 @@ import numpy as np
 from collections import defaultdict
 from itertools import combinations
 from scipy.sparse import csr_matrix, coo_matrix, save_npz
+from src.utils import is_list_like, to_list_safe
 
 
 # === Configuration ===
@@ -97,8 +98,8 @@ def load_table_source():
         lambda row: [
             x
             for arr in row.tolist()
-            if isinstance(arr, (list, tuple, np.ndarray))
-            for x in list(arr)
+            if is_list_like(arr)
+            for x in to_list_safe(arr)
         ],
         axis=1
     )
@@ -108,10 +109,10 @@ def load_table_source():
     print("before filtering invalid rows: ", len(df_tables))
     mask = (
         df_tables['all_title_list_valid'].apply(
-            lambda x: isinstance(x, (list, np.ndarray)) and len(x) > 0
+            lambda x: is_list_like(x) and len(to_list_safe(x)) > 0
         ) &
         df_tables['all_table_list_dedup'].apply(
-            lambda x: isinstance(x, (list, np.ndarray)) and len(x) > 0
+            lambda x: is_list_like(x) and len(to_list_safe(x)) > 0
         )
     )
     df_tables = df_tables.loc[mask, ['modelId', 'all_table_list_dedup', 'all_title_list_valid']]

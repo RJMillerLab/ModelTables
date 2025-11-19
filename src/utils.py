@@ -304,7 +304,7 @@ def get_statistics_table(unique_by_markdown, key_csv_path = "csv_path", use_v2=F
     return benchmark_df
 
 def extract_title_from_parsed(parsed_list):
-    if isinstance(parsed_list, (list, tuple, np.ndarray)):  
+    if is_list_like(parsed_list):  
         title_list = []
         for entry in parsed_list:
             if isinstance(entry, dict) and "title" in entry and entry["title"]:
@@ -327,12 +327,44 @@ def save_analysis_results(df, returnResults, file_name="retrieval_results.csv"):
             matched_rows = matched_rows.assign(Sample=sample_name)
             matched_rows.loc[matched_rows['csv_path'] == query_csv, 'Type'] = "Query"
             matched_rows.loc[matched_rows['csv_path'] != query_csv, 'Type'] = "Retrieved"
-            matched_rows['title'] = matched_rows['parsed_bibtex_tuple_list'].apply(lambda x: extract_title_from_parsed(x) if isinstance(x, (list, tuple, np.ndarray)) else "Unknown title")
+            matched_rows['title'] = matched_rows['parsed_bibtex_tuple_list'].apply(lambda x: extract_title_from_parsed(x) if is_list_like(x) else "Unknown title")
             all_rows.extend(matched_rows.to_dict(orient='records'))
     final_df = pd.DataFrame(all_rows, columns=['Sample', 'Type', 'modelId','title', 'parsed_bibtex_tuple_list', 'csv_path'])
     final_df.to_csv(file_name, index=False)
     return final_df
 
+
+def is_list_like(x):
+    """
+    Check if x is a list-like type (list, tuple, or np.ndarray).
+    This is a unified function to check parquet attribute types.
+    
+    Args:
+        x: Value to check
+        
+    Returns:
+        bool: True if x is a list, tuple, or np.ndarray
+    """
+    return isinstance(x, (list, tuple, np.ndarray))
+
+def to_list_safe(x):
+    """
+    Convert x to a list safely, handling list, tuple, np.ndarray, and other types.
+    
+    Args:
+        x: Value to convert (can be list, tuple, np.ndarray, or other)
+        
+    Returns:
+        list: x converted to a list, or empty list if x is None/NaN
+    """
+    if x is None or (hasattr(pd, 'isna') and pd.isna(x)):
+        return []
+    if isinstance(x, np.ndarray):
+        return x.tolist()
+    elif isinstance(x, (list, tuple)):
+        return list(x)
+    else:
+        return [x] if x is not None else []
 
 def safe_json_dumps(x):
     if isinstance(x, np.ndarray):

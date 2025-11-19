@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 import requests
 from tqdm import tqdm
-from src.utils import load_config, to_parquet
+from src.utils import load_config, to_parquet, is_list_like, to_list_safe
 import urllib.parse
 import html2text
 import hashlib
@@ -112,15 +112,15 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
                 readme_paths = row.get('readme_path', [])
                 
                 # Handle different data types: list, array, single value, or None
-                if isinstance(github_links, (list, tuple, np.ndarray)):
-                    github_links = list(github_links)
+                if is_list_like(github_links):
+                    github_links = to_list_safe(github_links)
                 elif pd.isna(github_links) or github_links is None:
                     github_links = []
                 else:
                     github_links = [github_links]
                 
-                if isinstance(readme_paths, (list, tuple, np.ndarray)):
-                    readme_paths = list(readme_paths)
+                if is_list_like(readme_paths):
+                    readme_paths = to_list_safe(readme_paths)
                 elif pd.isna(readme_paths) or readme_paths is None:
                     readme_paths = []
                 else:
@@ -197,8 +197,8 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
 
         if isinstance(raw_links, str):
             raw_links = [raw_links]
-        elif isinstance(raw_links, (list, tuple, np.ndarray)):
-            raw_links = list(raw_links)
+        elif is_list_like(raw_links):
+            raw_links = to_list_safe(raw_links)
 
         readme_paths = []
         for g_link in raw_links:

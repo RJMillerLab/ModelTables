@@ -25,7 +25,7 @@ INTENTS = ["methodology_or_result"] # "background", "methodology", "result",
 COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"
 
 import argparse
-from src.utils import load_config
+from src.utils import load_config, is_list_like, to_list_safe
 
 THRESHOLD = 0.1
 SAVE_THRESHOLD_OVERLAP = True
@@ -57,7 +57,7 @@ def load_Id_lists(df, mode, influential=False, intent=None):   ########
             ids  = list(set(ids1) | set(ids2))                ########
         else:                                                                              ########
             ids = row[col] 
-        if not isinstance(ids, (list, tuple, np.ndarray)):
+        if not is_list_like(ids):
             ids = []
         Id_to_ids[pid] = set(map(str, ids))
     return {pid: list(v) for pid, v in Id_to_ids.items()}

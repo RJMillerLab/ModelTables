@@ -19,7 +19,7 @@ import pandas as pd
 import numpy as np                                              
 import pickle
 from tqdm import tqdm                            
-from src.utils import load_combined_data, to_parquet, load_config
+from src.utils import load_combined_data, to_parquet, load_config, is_list_like, to_list_safe
 from itertools import combinations
 from collections import defaultdict
 from itertools import product
@@ -94,22 +94,14 @@ def load_model_with_valid_table(data_path=None, data_2_path=None, data_3_path=No
     # this data 2 path don't have all title list, please load all title list from DATA_3_PATH, and get modelId and all_title_list, then merge this to df_full_2 please!
     df_full_3 = pd.read_parquet(data_3_path, columns=['modelId', 'all_title_list'])
     df_full_2 = pd.merge(df_full_2, df_full_3, on='modelId', how='left')
-    def _to_list_safe(x):
-        if isinstance(x, list):
-            return x
-        if isinstance(x, tuple):
-            return list(x)
-        if isinstance(x, np.ndarray):
-            return x.tolist()
-        return []
     df_full_2['all_table_list_dedup'] = (
-        df_full_2['hugging_table_list_dedup'].apply(_to_list_safe)
-        + df_full_2['github_table_list_dedup'].apply(_to_list_safe)
-        + df_full_2['html_table_list_mapped_dedup'].apply(_to_list_safe)
-        + df_full_2['llm_table_list_mapped_dedup'].apply(_to_list_safe)
+        df_full_2['hugging_table_list_dedup'].apply(to_list_safe)
+        + df_full_2['github_table_list_dedup'].apply(to_list_safe)
+        + df_full_2['html_table_list_mapped_dedup'].apply(to_list_safe)
+        + df_full_2['llm_table_list_mapped_dedup'].apply(to_list_safe)
     )
     df = pd.merge(df_full, df_full_2[['modelId', 'all_table_list_dedup', 'all_title_list']], on='modelId', how='left')
-    mask = (df['all_table_list_dedup'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0) & df['all_title_list'].apply(lambda x: isinstance(x, (list, tuple, np.ndarray)) and len(x) > 0))
+    mask = (df['all_table_list_dedup'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0) & df['all_title_list'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0))
     df = df.loc[mask, ['modelId', 'all_table_list_dedup', 'all_title_list', CARD_TAGS_KEY, CARD_README_KEY, 'downloads']]
     return df
 
@@ -326,10 +318,8 @@ if __name__ == "__main__":
     df["tag_dataset_list"]      = df[CARD_TAGS_KEY].apply(lambda txt: extract_datasets_from_tags(txt, valid_dataset_ids))
     print(f"Updated tag_dataset_list")
     def to_list(x):
-        if isinstance(x, (list,)):
-            return x
-        if isinstance(x, np.ndarray):
-            return x.tolist()
+        if is_list_like(x):
+            return to_list_safe(x)
         # skip Pandas 的 NaN、None、pd.NaT
         if pd.isna(x):
             return []

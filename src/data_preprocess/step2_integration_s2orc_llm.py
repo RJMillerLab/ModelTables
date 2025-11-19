@@ -16,7 +16,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 from typing import Tuple, List
 from src.llm.model import LLM_response
-from src.utils import to_parquet, load_config
+from src.utils import to_parquet, load_config, is_list_like, to_list_safe
 
 
 # --------------- Fixed Path Constants --------------- #
@@ -97,8 +97,10 @@ def safe_scalar(value):
     return value
 
 def non_empty(x):
-    if isinstance(x, (list, pd.Series, np.ndarray)):
+    if isinstance(x, pd.Series):
         return len(x) > 0
+    elif is_list_like(x):
+        return len(to_list_safe(x)) > 0
     if pd.isna(x):
         return False
     if isinstance(x, str):
@@ -295,10 +297,8 @@ def main():
         if 'csv_paths' in df_html.columns and 'table_list' not in df_html.columns:
             # Handle both list and numpy.ndarray types
             def convert_to_list(x):
-                if isinstance(x, list):
-                    return x
-                elif isinstance(x, np.ndarray):
-                    return x.tolist()
+                if is_list_like(x):
+                    return to_list_safe(x)
                 elif x is None or pd.isna(x):
                     return []
                 else:

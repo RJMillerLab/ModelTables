@@ -24,7 +24,7 @@ from collections import defaultdict
 from xml.etree import ElementTree as ET
 from bs4 import BeautifulSoup
 from joblib import Parallel, delayed 
-from src.utils import load_config, to_parquet
+from src.utils import load_config, to_parquet, is_list_like, to_list_safe
 import html2text
 import hashlib
 import argparse
@@ -54,7 +54,7 @@ def get_cache_paths(base_path, tag=None):
 
 
 def extract_titles(bibtex_list):
-    if not isinstance(bibtex_list, (list, tuple, np.ndarray)):
+    if not is_list_like(bibtex_list):
         return []
     return [
         d.get("title", "")
@@ -139,8 +139,8 @@ def is_invalid_extension(url):
 def extract_links_from_columns(df, cols):
     def process_cell(x):
         cleaned_links = []
-        if isinstance(x, (list, tuple, np.ndarray)):
-            for s in x:
+        if is_list_like(x):
+            for s in to_list_safe(x):
                 cs = clean_url(s)
                 if cs:
                     cleaned_links.append(cs)
@@ -856,14 +856,14 @@ def main():
         pdf_link_val = row.get("pdf_link")
         if isinstance(pdf_link_val, str) and pdf_link_val.strip():
             links.extend([x.strip() for x in pdf_link_val.split(",") if x.strip()])
-        elif isinstance(pdf_link_val, (list, tuple, np.ndarray)) and len(pdf_link_val) > 0:
-            links.extend(pdf_link_val)
+        elif is_list_like(pdf_link_val) and len(to_list_safe(pdf_link_val)) > 0:
+            links.extend(to_list_safe(pdf_link_val))
             
         github_link_val = row.get("github_link")
         if isinstance(github_link_val, str) and github_link_val.strip():
             links.extend([x.strip() for x in github_link_val.split(",") if x.strip()])
-        elif isinstance(github_link_val, (list, tuple, np.ndarray)) and len(github_link_val) > 0:
-            links.extend(github_link_val)
+        elif is_list_like(github_link_val) and len(to_list_safe(github_link_val)) > 0:
+            links.extend(to_list_safe(github_link_val))
             
         title_arxiv = []
         title_rxiv = []

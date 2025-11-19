@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from src.utils import load_config, to_parquet  # Ensure this function is available
+from src.utils import load_config, to_parquet, is_list_like, to_list_safe  # Ensure this function is available
 from src.data_preprocess.step2_arxiv_github_title import load_cache, save_cache  # if needed
 
 def main():
@@ -64,8 +64,8 @@ def main():
     print("Step 3: Extracting and deduplicating all titles...")
     all_titles = []
     for titles in df_final["all_title_list"]: # all_bibtex_titles: reliable, all_title_list: need to be cleaned ...
-        if isinstance(titles, (list, tuple, np.ndarray)):
-            all_titles.extend(titles)
+        if is_list_like(titles):
+            all_titles.extend(to_list_safe(titles))
         elif isinstance(titles, str):
             all_titles.append(titles.strip())
 

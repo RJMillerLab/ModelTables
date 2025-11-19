@@ -18,7 +18,7 @@ import shutil
 from bs4 import BeautifulSoup
 import argparse
 from src.data_ingestion.readme_parser import MarkdownHandler
-from src.utils import load_config, to_parquet
+from src.utils import load_config, to_parquet, is_list_like, to_list_safe
 
 tqdm.pandas()
 
@@ -383,7 +383,7 @@ def process_github_readmes(row, output_folder, config):
     #print('readme_paths: ', readme_paths)
     #print('type:', type(readme_paths))
     csv_files = []
-    if not isinstance(readme_paths, (list, np.ndarray, tuple)) or len(readme_paths) == 0:
+    if not is_list_like(readme_paths) or len(to_list_safe(readme_paths)) == 0:
         print(f"Skipping {model_id} due to missing or empty readme paths.")
         return csv_files
     # Process each file (with index starting at 1 for naming)

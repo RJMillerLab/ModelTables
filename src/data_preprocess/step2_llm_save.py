@@ -11,7 +11,7 @@ import numpy as np
 import json
 from tqdm import tqdm
 from src.data_ingestion.readme_parser import MarkdownHandler
-from src.utils import to_parquet, load_config
+from src.utils import to_parquet, load_config, is_list_like, to_list_safe
 
 # Flag: Virtual mode - generate paths but don't actually create CSV files
 VIRTUAL_CSV_GENERATION = True  ######## Set to True to generate llm_table_list paths without creating actual CSV files
@@ -45,7 +45,7 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
 
             has_valid_html_path = pd.notna(html_path) and str(html_path).strip()
             has_valid_table_list = (
-                isinstance(html_tables, (list, tuple, np.ndarray)) and len(html_tables) > 0
+                is_list_like(html_tables) and len(to_list_safe(html_tables)) > 0
             ) or (
                 isinstance(html_tables, str) and html_tables.strip() not in ["[]", ""]
             )
