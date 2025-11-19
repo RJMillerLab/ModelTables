@@ -9,3 +9,6 @@ feedparser
 html2text
 tiktoken
 suitesparse-graphblass
+datasets
+pyarrow
+huggingface_hub

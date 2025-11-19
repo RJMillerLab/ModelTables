@@ -216,9 +216,12 @@ def process_csv_file(csv_file):
         print(f"Error processing {csv_file}: {e}")
         return None, str(e)
 
-def compute_resource_stats(df, resource):
+def compute_resource_stats(df, resource, tag=None):
     col = RESOURCES[resource][0]
     paths = df[col].explode()
+    
+    # Determine suffix for output files (use tag if provided)
+    suffix = f"_{tag}" if tag else ""
     
     # Debug: Check path existence
     total_paths = len(paths.dropna())
@@ -300,7 +303,7 @@ def compute_resource_stats(df, resource):
     ]
     filtered_count = original_valid_count - len(valid_title_valid_files)
     if filtered_count > 0:
-        print(f"  Filtered {filtered_count} tables (too long/wide) from {resource}_valid_title_valid.txt")
+        print(f"  Filtered {filtered_count} tables (too long/wide) from {resource}_valid_title_valid{suffix}.txt")
     
     title_valid_metrics = calculate_metrics(title_valid_files)
     valid_title_valid_metrics = calculate_metrics(valid_title_valid_files)
@@ -313,9 +316,9 @@ def compute_resource_stats(df, resource):
     print(f"Found {len(title_valid_paths_set)} valid titles in {resource} files")
     print(f"Found {len(valid_title_valid_paths_set)} valid titles in {resource} files")
     
-    # save to txt files
-    title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_title_valid.txt")
-    valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid.txt")
+    # save to txt files (with tag suffix if provided)
+    title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_title_valid{suffix}.txt")
+    valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid{suffix}.txt")
     with open(title_valid_file, 'w') as f:
         for path in title_valid_paths_set:
             f.write(f"{path}\n")
@@ -629,7 +632,7 @@ def main(input_file=None, input_file_dedup=None, integration_file=None, output_d
     resource_stats = {}
     for resource in RESOURCES:
         print(f"\nProcessing {resource}...")
-        stats = compute_resource_stats(df, resource)
+        stats = compute_resource_stats(df, resource, tag=tag)
         resource_stats.update(stats)
 
     results_df = create_combined_results(benchmark_data, resource_stats)
@@ -649,7 +652,8 @@ def main(input_file=None, input_file_dedup=None, integration_file=None, output_d
     try:
         combined_paths = set()
         for resource in RESOURCES:
-            valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid.txt")
+            # Read from tag-specific file if tag is provided
+            valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid{suffix}.txt")
             if os.path.exists(valid_title_valid_file):
                 with open(valid_title_valid_file, 'r') as f:
                     for line in f:
@@ -657,14 +661,14 @@ def main(input_file=None, input_file_dedup=None, integration_file=None, output_d
                         if line:
                             combined_paths.add(line)
         
-        all_valid_title_valid_file = os.path.join(OUTPUT_DIR, "all_valid_title_valid.txt")
+        all_valid_title_valid_file = os.path.join(OUTPUT_DIR, f"all_valid_title_valid{suffix}.txt")
         with open(all_valid_title_valid_file, 'w') as f:
             for path in sorted(combined_paths):
                 f.write(path + "\n")
         print(f"Saved concatenated valid-title list to {all_valid_title_valid_file} ({len(combined_paths)})")
         print(f"  (Tables already filtered by size thresholds: max_cols={MAX_COLS}, max_rows={MAX_ROWS})")
     except Exception as e:
-        print(f"Warning: failed to generate all_valid_title_valid.txt: {e}")
+        print(f"Warning: failed to generate all_valid_title_valid{suffix}.txt: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Get statistics of tables in CSV files from different resources")
