@@ -311,10 +311,14 @@ def create_enhanced_mapping():
     # First load valid titles
     print("Step1: Loading valid titles list...")
     valid_titles = set()
-    with open('data/analysis/all_valid_title_valid.txt', 'r') as f:
+    # Support tag via environment variable
+    tag = os.environ.get('TAG', '')
+    suffix = f"_{tag}" if tag else ""
+    mask_file = f'data/analysis/all_valid_title_valid{suffix}.txt'
+    with open(mask_file, 'r') as f:
         for line in f:
             valid_titles.add(os.path.basename(line.strip()))
-    print(f"Loaded {len(valid_titles)} valid titles")
+    print(f"Loaded {len(valid_titles)} valid titles from {mask_file}")
     
     df_raw = pd.read_parquet(os.path.join('data', 'processed', 'raw_csv_to_text_mapping.parquet'))
     df_raw['csv_path'] = df_raw['csv_path'].apply(lambda x: os.path.basename(x))

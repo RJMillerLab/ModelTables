@@ -222,9 +222,8 @@ Prepare data and augmentations for integration with the Starmie benchmark framew
 
 ```bash
 # go to starmie folder, and copy this sh file to run 
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str/transpose/str_transpose # trick: header-str(value)
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str/tr/tr_str --dir-name scilake_final_v2_str/tr/tr_str
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --dir-name scilake_final_v2 # symlink csvs to the target folder
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str/tr/str_tr # trick: header-str(value)
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base/str/tr/tr_str --dir-name scilake_final_v2/_str/tr/tr_str# symlink csvs to the target folder
 # bash src/data_analysis/count_files.sh check whether the symlink path include some files
 ```
 
@@ -232,48 +231,77 @@ python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --
 
 Execute Starmie's pipeline for contrastive learning, embedding extraction, and search
 
+**Versioning with TAG:**
+All Starmie scripts support a `TAG` environment variable for versioning:
+- `TAG=v2` (or omit TAG) for the default v2 version
+- `TAG=<date>` (e.g., `TAG=251117`) for date-based versions
+- `TAG=` (empty) will default to `v2`
+
 ```bash
 # bash prepare_sample.sh  # Sample 1000 tables from each resource folder for evaluation
 # python -m src.data_symlink.prepare_sample_server --root_dir /u4/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42  # Alternative for server
 python -m src.data_symlink.prepare_sample --root_dir /u1/z6dong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42  # Another substitution
-# python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt  # Create file lists for trick-augmented files (Input: scilake_final_filelist.txt, Output: scilake_final_filelist_{tricks}_filelist.txt)
-python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt  # Create validation file lists
+# (deprecated) python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt  # Create file lists for trick-augmented files (Input: scilake_final_filelist.txt, Output: scilake_final_filelist_{tricks}_filelist.txt)
+# (deprecated) python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt  # Create validation file lists
 # bash check_empty.sh  # (deprecate) (already processed in QC step) filter out empty files (or low quality files later)
 bash scripts/step1_pretrain.sh  # Fine-tune contrastive learning model
+
+# Using default v2 version (backward compatible)
 bash scripts/step2_extractvectors.sh  # Encode embeddings for query and datalake items
-bash scripts/step3_search_hnsw.sh  # Perform data lake search (retrieval)
+bash scripts/step3_hnsw_search.sh  # Perform data lake search (retrieval)
 bash scripts/step3_processmetrics.sh  # Extract metrics based on ground truth and retrieval results; plot figures
 bash eval_per_resource.sh  # Run ablation study on different resources (after getting results)
+
+# Using date-based tag (e.g., 251117)
+TAG=251117 bash scripts/step2_extractvectors.sh
+TAG=251117 bash scripts/step3_hnsw_search.sh
+TAG=251117 bash scripts/step3_processmetrics.sh
+TAG=251117 bash scripts/step3_processmetrics_all.sh <EXPERIMENT_INDEX>
+TAG=251117 bash eval_per_resource.sh
 # bash eval_per_resource.sh  # (Alternatively, run before getting results)
 # bash scripts/step4_discovery.sh  # (Optional)
 ```
 
-### 7\. Baseline1: Dense Search
+### 7\. Baseline: Dense Search, Sparse Search, Hybrid Search
 
-Run baseline table embedding and retrieval methods for comparison.
+Run baseline table embedding and retrieval methods for comparison, for faiss cpu/gpu installation, see [FAISS GitHub repository](https://github.com/facebookresearch/faiss).
+
+**Tag Support**: All baseline scripts support `TAG` environment variable for versioning:
+- Use `TAG=251117` (or any date/tag) to use tagged versions of input/output files
+- All file paths automatically include the tag suffix when TAG is set
+- Example: `all_valid_title_valid.txt` → `all_valid_title_valid_251117.txt` when `TAG=251117`
 
 ```bash
-bash src/baseline1/table_retrieval_pipeline.sh  # build corpus jsonl/encode(SBERT)/build faiss/search/postprocess
-bash src/baseline1/table_retrieval_pipeline_str.sh  # for augmented tables: step1 get embedding
-bash src/baseline1/table_retrieval_pipeline_tr.sh  # for augmented tables: step1 get embedding
-bash src/baseline1/combine_embedding.sh  # for augmented ablation studies: step2 combine embedding and jsonl for ori+tr, ori+str, ori+tr+str
-bash src/baseline1/build_aug_faiss.sh  # step3: build faiss
-bash src/baseline1/augment_search.sh  # step4: search
-bash src/baseline1/postprocess_general.sh  # step5: postprocess: split into ori / tr / str json
-bash src/baseline1/standardize_filenames.sh  # step6: postprocess: all files back to ori csv name
-bash scripts/step3_processmetrics_all.sh <index>  # compute metrics under starmie: run baseline metrics computation
-```
-for faiss cpu/gpu installation, see [FAISS GitHub repository](https://github.com/facebookresearch/faiss).
+### 1. Baseline1: Dense Search
+# Unified script - supports base/str/tr modes
+# Note: All three modes use the same Python script (table_retrieval_pipeline.py) with different --mode arguments
+# The unified script replaces the separate pipeline_str.sh and pipeline_tr.sh scripts
+TAG=251117 bash src/baseline1/table_retrieval_pipeline_unified.sh base  # base mode: full pipeline (filter + encode + build_faiss + search + postprocess)
+TAG=251117 bash src/baseline1/table_retrieval_pipeline_unified.sh str --skip-search  # str mode: filter + encode only (for mixed experiments)
+TAG=251117 bash src/baseline1/table_retrieval_pipeline_unified.sh tr --skip-search   # tr mode: filter + encode only (for mixed experiments)
+TAG=251117 bash src/baseline1/combine_embedding.sh  # for augmented ablation studies: step2 combine embedding and jsonl for ori+tr, ori+str, ori+tr+str
+TAG=251117 bash src/baseline1/build_aug_faiss.sh  # step3: build faiss
+TAG=251117 bash src/baseline1/augment_search.sh  # step4: search
+TAG=251117 bash src/baseline1/postprocess_general.sh  # step5: postprocess: split into ori / tr / str json
+TAG=251117 bash src/baseline1/standardize_filenames.sh  # step6: postprocess: all files back to ori csv name
+TAG=251117 bash scripts/step3_processmetrics_all.sh <index>  # compute metrics under starmie: run baseline metrics computation
 
-____
-### 8. Baseline2: Sparse search, Baseline3: Hybrid (Sparse + Dense search)
-```bash
-bash src/baseline2/get_metadata.sh # Baseline2: Sparse search get metadata
-bash src/baseline2/sparse_search.sh # Baseline2: Sparse search
-bash src/baseline2/hybrid_search.sh # Baseline3: Hybrid (Sparse + Dense search)
+### 2. Baseline2: Sparse search
+TAG=251117 bash src/baseline2/get_metadata.sh # Baseline2: Sparse search get metadata
+TAG=251117 bash src/baseline2/sparse_search.sh # Baseline2: Sparse search
+
+### 3. Baseline3: Hybrid (Sparse + Dense search)
+# Note: Hybrid search uses Python scripts with command-line arguments
+# Use tagged file paths when calling the scripts
+python src/baseline2/search_with_pyserini_hybrid.py \
+  --sparse-index data/tmp/index_251117 \
+  --dense-index data/tmp/index_dense_251117 \
+  --queries data/tmp/queries_table.tsv \
+  --mapping data/tmp/queries_table_mapping.json \
+  --k 11 --alpha 0.45 --device cpu
 ```
 
-<!-- ### 10. Model Search - Dense first: 
+<!-- ### 8. Model Search - Dense first: 
 ```bash
 bash src/modelsearch/base_densesearch.sh
 python -m src.modelsearch.compare_baselines \
@@ -287,7 +315,7 @@ python -m src.modelsearch.compare_baselines \
 ``` -->
 
 <details>
-<summary><strong>11. GPT Evaluation of Table Relatedness and Model Relatedness</strong></summary>
+<summary><strong>9. GPT Evaluation of Table Relatedness and Model Relatedness</strong></summary>
 
 **Script**: `src/gpt_evaluation/step1_table_sampling.py`
 **Purpose**: Sample balanced table pairs for GPT evaluation across three ground truth levels (Paper, ModelCard, Dataset).
@@ -350,7 +378,7 @@ python -m src.gpt_evaluation.visualize_crowdsourcing_metrics_full # generate fig
 
 ---
 
-### 2. Model Relatedness Sampling
+### (Deprecated)Model Relatedness Sampling
 
 **Script**: `src/gpt_evaluation/step1_model_sampling.py`
 
@@ -362,7 +390,7 @@ python src/gpt_evaluation/step1_model_sampling.py --n-samples 200 --seed 42
 ```
 
 
-### 12. Table Integration:
+### 10. Table Integration:
 ```bash
 
 ```

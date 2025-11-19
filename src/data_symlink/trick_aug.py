@@ -4,9 +4,9 @@ Author: Zhengyuan Dong
 Created: 2025-04-15
 Last Modified: 2025-04-15
 Description: This script processes CSV files in a specified folder using different modes:
-- "transpose": Transposes the CSV data.
+- "tr": Transposes the CSV data.
 - "str": Converts each cell to the string format "colname-value".
-- "str_transpose": Converts each cell to "colname-value" and then transposes the data.
+- "str_tr": Converts each cell to "colname-value" and then transposes the data.
 Usage: python -m src.data_symlink.trick_aug --mode str --repo_root /u4/z6dong/Repo
 """
 
@@ -42,7 +42,7 @@ def get_processed_bases(target_folder):
 
 def process_file_transpose(csv_in, csv_out):
     """
-    Mode: "transpose"
+    Mode: "tr"
     1. Moves the header to the first row of data,
     2. Normalizes row lengths,
     3. Transposes the CSV data.
@@ -107,7 +107,7 @@ def process_file_str(csv_in, csv_out):
 
 def process_file_str_transpose(csv_in, csv_out):
     """
-    Mode: "str_transpose"
+    Mode: "str_tr"
     Converts each cell to the "colname-value" format and then transposes the processed data.
     """
     try:
@@ -154,11 +154,11 @@ def process_folder(mode, folder, repo_root):
     - Prints out statistical information.
     """
     input_folder = os.path.join(repo_root, folder)
-    if mode == "transpose":
+    if mode == "tr":
         output_folder = input_folder + "_tr"
     elif mode == "str":
         output_folder = input_folder + "_str"
-    elif mode == "str_transpose":
+    elif mode == "str_tr":
         output_folder = input_folder + "_tr_str"
     else:
         return f"Invalid mode: {mode}"
@@ -194,13 +194,13 @@ def process_folder(mode, folder, repo_root):
     print(f"  To process (update): {num_to_process}")
 
     # Choose processing function and file suffix based on mode
-    if mode == "transpose":
+    if mode == "tr":
         process_func = process_file_transpose
         suffix = "_t.csv"
     elif mode == "str":
         process_func = process_file_str
         suffix = "_s.csv"
-    elif mode == "str_transpose":
+    elif mode == "str_tr":
         process_func = process_file_str_transpose
         suffix = "_s_t.csv"
     else:
@@ -219,7 +219,7 @@ def process_folder(mode, folder, repo_root):
 def main():
     # Parse command-line arguments to choose the processing mode
     parser = argparse.ArgumentParser(description="Process CSV files in different modes")
-    parser.add_argument("--mode", type=str, choices=["transpose", "str", "str_transpose"], default="transpose", help="Processing mode")
+    parser.add_argument("--mode", type=str, choices=["tr", "str", "str_tr"], default="tr", help="Processing mode")
     parser.add_argument("--repo_root", type=str, default="/u4/z6dong/Repo", help="Repository root directory.")
     args = parser.parse_args()
     
