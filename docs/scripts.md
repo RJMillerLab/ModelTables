@@ -452,3 +452,11 @@ python -m src.data_analysis.quick_visualization_final
 python src/data_analysis/table_model_counts_over_time.py --use-v2 --output-dir data/analysis
 # TODO: top-10!
 ```
+
+```bash
+# periodically upload to hugging face : Files: modelcard_step3_dedup_v2_<tag>.parquet, hugging, github, html, llm.zip
+# huggingface-cli login
+# huggingface-cli repo create your-username/your-dataset --type dataset
+python -m src.data_preprocess.upload_to_hf_dataset --tag 251117 --dataset-name your-username/your-dataset --no-dry-run
+# TODO: versioning for zip
+```

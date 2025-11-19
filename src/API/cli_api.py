@@ -9,47 +9,80 @@ def run_shell(cmd):
     return out.stdout
 
 # ===== Corresponds to download call in pipeline.py =====
-def download(resource, mode='scratch', dest='./data/'):
-    """Corresponds to: modellake.download('modelcard/github/arxiv') in pipeline.py"""
+def download(resource, mode='scratch', dest='./data/', tag=None):
+    """Corresponds to: modellake.download('modelcard/github/arxiv') in pipeline.py
+    
+    Args:
+        resource: 'modelcard', 'github', or 'arxiv'
+        mode: 'scratch' (unused, kept for compatibility)
+        dest: destination directory (unused, kept for compatibility)
+        tag: Tag suffix for versioning (e.g., '251117'). Required for most scripts.
+    """
+    tag_arg = f" --tag {tag}" if tag else ""
     if resource == 'modelcard':
-        cmd = "python -m src.data_preprocess.step1_parse"
+        # step1_parse uses --raw-date instead of --tag
+        if tag:
+            cmd = f"python -m src.data_preprocess.step1_parse --raw-date {tag}"
+        else:
+            cmd = "python -m src.data_preprocess.step1_parse"
     elif resource == 'github':
-        cmd = "python -m src.data_preprocess.step1_down_giturl"
+        cmd = f"python -m src.data_preprocess.step1_down_giturl{tag_arg}"
     elif resource == 'arxiv':
-        cmd = "python -m src.data_preprocess.step2_arxiv_get_html"
+        cmd = f"python -m src.data_preprocess.step2_arxiv_get_html{tag_arg}"
     else:
         raise ValueError("resource not supported")
     return run_shell(cmd)
 
 # ===== Corresponds to extract_table call in pipeline.py =====
-def extract_table(resource, mode='scratch', dest='./data/'):
-    """Corresponds to: modellake.extract_table('modelcard/github/arxiv') in pipeline.py"""
+def extract_table(resource, mode='scratch', dest='./data/', tag=None):
+    """Corresponds to: modellake.extract_table('modelcard/github/arxiv') in pipeline.py
+    
+    Args:
+        resource: 'modelcard', 'github', or 'arxiv'
+        mode: 'scratch' (unused, kept for compatibility)
+        dest: destination directory (unused, kept for compatibility)
+        tag: Tag suffix for versioning (e.g., '251117'). Required for most scripts.
+    """
+    tag_arg = f" --tag {tag}" if tag else ""
     if resource in ['modelcard', 'github']:
-        cmd = "python -m src.data_preprocess.step2_hugging_github_extract"
+        cmd = f"python -m src.data_preprocess.step2_hugging_github_extract{tag_arg}"
     elif resource == 'arxiv':
-        cmd = "python -m src.data_preprocess.step2_arxiv_parse"
+        cmd = f"python -m src.data_preprocess.step2_arxiv_parse{tag_arg}"
     else:
         raise ValueError("resource not supported")
     return run_shell(cmd)
 
 # ===== Corresponds to quality_control call in pipeline.py =====
-def quality_control(mode='intra', dest='./data/'):
-    """Corresponds to: modellake.quality_control('intra/inter') in pipeline.py"""
+def quality_control(mode='intra', dest='./data/', tag=None):
+    """Corresponds to: modellake.quality_control('intra/inter') in pipeline.py
+    
+    Args:
+        mode: 'intra' (dedup) or 'inter' (merge)
+        dest: destination directory (unused, kept for compatibility)
+        tag: Tag suffix for versioning (e.g., '251117'). Required for most scripts.
+    """
+    tag_arg = f" --tag {tag}" if tag else ""
     if mode == 'intra':
-        cmd = "python -m src.data_preprocess.step2_dedup_tables"
+        cmd = f"python -m src.data_preprocess.step2_dedup_tables{tag_arg}"
     elif mode == 'inter':
-        cmd = "python -m src.data_preprocess.step2_merge_tables"
+        cmd = f"python -m src.data_preprocess.step2_merge_tables{tag_arg}"
     else:
         raise ValueError("mode must be 'intra' or 'inter'")
     return run_shell(cmd)
 
 # ===== Corresponds to extract_relatedness call in pipeline.py =====
-def extract_relatedness(resource='paper'):
-    """Corresponds to: modellake.extract_relatedness('paper') in pipeline.py"""
+def extract_relatedness(resource='paper', tag=None):
+    """Corresponds to: modellake.extract_relatedness('paper') in pipeline.py
+    
+    Args:
+        resource: 'paper', 'model', 'dataset', or 'all'
+        tag: Tag suffix for versioning (e.g., '251117'). Required for most scripts.
+    """
+    tag_arg = f" --tag {tag}" if tag else ""
     if resource == 'paper':
-        cmd = "python -m src.data_gt.paper_citation_overlap"
+        cmd = f"python -m src.data_gt.paper_citation_overlap{tag_arg}"
     elif resource in ['model', 'dataset', 'all']:
-        cmd = "python -m src.data_gt.modelcard_matrix"
+        cmd = f"python -m src.data_gt.modelcard_matrix{tag_arg}"
     else:
         raise ValueError("resource not supported")
     return run_shell(cmd)
@@ -68,11 +101,16 @@ def table_search(input_table, method='dense', directory='./data/'):
     return run_shell(cmd)
 
 # ===== Corresponds to plot_analysis call in pipeline.py =====
-def plot_analysis():
-    """Corresponds to: modellake.plot_analysis() in pipeline.py"""
+def plot_analysis(tag=None):
+    """Corresponds to: modellake.plot_analysis() in pipeline.py
+    
+    Args:
+        tag: Tag suffix for versioning (e.g., '251117'). Required for most scripts.
+    """
+    tag_arg = f" --tag {tag}" if tag else ""
     cmds = [
-        "python -m src.data_analysis.qc_stats_fig",
-        "python -m src.data_analysis.gt_distri"
+        f"python -m src.data_analysis.qc_stats_fig{tag_arg}",
+        f"python -m src.data_analysis.gt_distri{tag_arg}"
     ]
     for cmd in cmds:
         run_shell(cmd)
