@@ -10,7 +10,7 @@ Description: Directly load CSV files from specified directories, deduplicate bas
 Tips: Better save a copy of the four folders, to avoid QC control will affect the original files.
 """
 
-import os, shutil, json, time
+import os, shutil, json, time, re
 import argparse
 import pandas as pd
 import numpy as np
@@ -81,14 +81,40 @@ def is_generic_table(path):
     filename = os.path.basename(path)
     return any(pattern in filename for pattern in GENERIC_TABLE_PATTERNS)
 
+def normalize_path_to_relative(path):
+    """
+    Normalize a path to relative path format.
+    Converts absolute paths under data/processed to relative paths.
+    """
+    if not isinstance(path, str):
+        return path
+    if os.path.isabs(path):
+        try:
+            # Get the absolute path of data/processed
+            data_processed_abs = os.path.abspath('data/processed')
+            if path.startswith(data_processed_abs):
+                # Convert to relative path
+                return os.path.relpath(path, os.getcwd())
+        except:
+            pass
+    return path
+
 def get_linked_set_from_parquet(df, cols):
+    """
+    Extract file paths from parquet columns and normalize them to relative paths.
+    Handles both absolute and relative paths by converting to relative paths.
+    """
     linked_set = []
     for col in cols:
         if col in df.columns:
             for paths in df[col]:
                 if is_list_like(paths):
-                    linked_set.extend([p for p in to_list_safe(paths) if isinstance(p, str)])
+                    for p in to_list_safe(paths):
+                        if isinstance(p, str):
+                            p = normalize_path_to_relative(p)
+                            linked_set.append(p)
                 elif isinstance(paths, str):
+                    paths = normalize_path_to_relative(paths)
                     linked_set.append(paths)
     return linked_set
 
@@ -257,6 +283,21 @@ def remove_invalid_paths_from_list(path_list, invalid_set):
     """
     return [p for p in path_list if p not in invalid_set]
 
+def normalize_path_for_mapping(path):
+    """
+    Normalize path to match duplicate_mapping format.
+    Handles tag differences (e.g., deduped_hugging_csvs_v2_251117 -> deduped_hugging_csvs_v2)
+    """
+    if not isinstance(path, str):
+        return path
+    # Remove tag suffix from directory names if present
+    # Pattern: deduped_*_csvs_v2_<tag> -> deduped_*_csvs_v2
+    # Match patterns like: deduped_hugging_csvs_v2_251117, deduped_github_csvs_v2_251117, etc.
+    normalized = re.sub(r'(deduped_(?:hugging|github)_csvs_v2)_\d+', r'\1', path)
+    normalized = re.sub(r'(tables_output_v2)_\d+', r'\1', normalized)
+    normalized = re.sub(r'(llm_tables)_\d+', r'\1', normalized)
+    return normalized
+
 def update_row(row, duplicate_mapping, resource_priority):
     """
     For a single row, update the file lists across resources using the following process:
@@ -281,7 +322,38 @@ def update_row(row, duplicate_mapping, resource_priority):
     for col in resource_of_col:
         lst = to_list_safe(row[col]) if is_list_like(row[col]) else []
         for f in lst:
-            canonical = duplicate_mapping.get(f, f)
+            # Normalize the path first (relative/absolute conversion)
+            normalized_f = normalize_path_to_relative(f)
+            # Try multiple lookup strategies to find canonical path:
+            canonical = None
+            # 1. Direct lookup with original path
+            if f in duplicate_mapping:
+                canonical = duplicate_mapping[f]
+            # 2. Try with normalized (relative) path
+            elif normalized_f in duplicate_mapping:
+                canonical = duplicate_mapping[normalized_f]
+            # 3. Try with absolute path (if normalized is relative)
+            elif not os.path.isabs(normalized_f):
+                abs_f = os.path.abspath(normalized_f)
+                if abs_f in duplicate_mapping:
+                    canonical = duplicate_mapping[abs_f]
+            # 4. Try original path as absolute (if it's relative)
+            elif not os.path.isabs(f):
+                abs_f_orig = os.path.abspath(f)
+                if abs_f_orig in duplicate_mapping:
+                    canonical = duplicate_mapping[abs_f_orig]
+            # 5. Try normalized path for tag differences
+            if canonical is None:
+                tag_normalized = normalize_path_for_mapping(f)
+                if tag_normalized in duplicate_mapping:
+                    canonical = duplicate_mapping[tag_normalized]
+                elif not os.path.isabs(tag_normalized):
+                    abs_tag_normalized = os.path.abspath(tag_normalized)
+                    if abs_tag_normalized in duplicate_mapping:
+                        canonical = duplicate_mapping[abs_tag_normalized]
+            # If still not found, use normalized path as canonical (keep original if it exists)
+            if canonical is None:
+                canonical = normalized_f
             if canonical not in seen:
                 seen.add(canonical)
                 ordered_canonical.append(canonical)
@@ -304,8 +376,10 @@ def update_row(row, duplicate_mapping, resource_priority):
         if target_resource is None:
             dup_resources = {resource_of_col[c]
                              for c in resource_of_col
-                             if any(duplicate_mapping.get(p, p) == canonical
-                                    for p in (to_list_safe(row[c]) if is_list_like(row[c]) else []))}
+                             if any(
+                                 (duplicate_mapping.get(p) or duplicate_mapping.get(normalize_path_for_mapping(p)) or p) == canonical
+                                 for p in (to_list_safe(row[c]) if is_list_like(row[c]) else [])
+                             )}
             target_resource = (min(dup_resources, key=lambda r: resource_priority[r])
                                if dup_resources else "hugging")
         designated[canonical] = target_resource
@@ -583,14 +657,33 @@ def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None,
     resource_totals = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     resource_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     resource_generic_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
+    # Normalize linked_set paths for comparison
+    def normalize_path_for_comparison(path):
+        """Normalize path to relative path for consistent comparison."""
+        if not isinstance(path, str):
+            return path
+        if os.path.isabs(path):
+            try:
+                data_processed_abs = os.path.abspath('data/processed')
+                if path.startswith(data_processed_abs):
+                    return os.path.relpath(path, os.getcwd())
+            except:
+                pass
+        return path
+    
+    linked_set_normalized = {normalize_path_for_comparison(p) for p in linked_set}
+    
     filtered_files_info = []
     for fi in tqdm(files_info, desc="Filtering files"):
         res = fi["resource"]
         resource_totals[res] += 1
         
+        # Normalize file_path for comparison
+        normalized_file_path = normalize_path_for_comparison(fi["file_path"])
+        
         # Filter 1: Must be in linked_set
         # Filter 2: Must not be a generic table
-        if fi["file_path"] in linked_set:
+        if normalized_file_path in linked_set_normalized:
             if not is_generic_table(fi["file_path"]):
                 resource_filtered[res] += 1
                 filtered_files_info.append(fi)
@@ -654,11 +747,16 @@ def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None,
     # --- Step 6: Update the original parquet file with deduplicated file paths across resources ---
     print("Updating file paths in DataFrame using cross-resource duplicate mapping...")
     # filter out invalid paths (qc remove)
-    VALID_PATHS = set(fi['file_path'] for fi in filtered_files_info)
+    # Normalize all VALID_PATHS to relative paths for consistent matching
+    VALID_PATHS = set(normalize_path_to_relative(fi['file_path']) for fi in filtered_files_info)
     for col in cols:
         total_before = df[col].apply(lambda x: len(to_list_safe(x)) if is_list_like(x) else 0).sum()
         print(f"Filtering {col}... Before: {total_before}")
-        df[col] = df[col].apply(lambda x: [p for p in to_list_safe(x) if p in VALID_PATHS] if is_list_like(x) else [])
+        # Normalize paths in df[col] to match VALID_PATHS format (relative paths)
+        df[col] = df[col].apply(
+            lambda x: [normalize_path_to_relative(p) for p in to_list_safe(x) if normalize_path_to_relative(p) in VALID_PATHS] 
+            if is_list_like(x) else []
+        )
         total_after = df[col].apply(lambda x: len(to_list_safe(x)) if is_list_like(x) else 0).sum()
         print(f"After: {total_after}")
     # map the file path to the canonical file path
