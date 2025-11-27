@@ -21,6 +21,7 @@ Usage:
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode all
+    python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base --tag 251117
 """
 
 import os
@@ -87,9 +88,14 @@ def main():
                         help="Mode for folder and file suffix. Use 'all' to run every mode.")
     parser.add_argument("--dir-name", type=str, default=None,
                         help="Override target directory name (default: scilake_final{suffix}). E.g., scilake_final_v2")
+    parser.add_argument("--tag", type=str, default=None,
+                        help="Tag suffix for versioning (e.g., 251117). If provided, uses tagged folders like deduped_hugging_csvs_v2_<tag>")
     args = parser.parse_args()
 
     modes = [args.mode] if args.mode != "all" else list(MODE_SUFFIX.keys())
+
+    # Determine tag suffix for source folders
+    tag_suffix = f"_{args.tag}" if args.tag else ""
 
     for mode in modes:
         dir_suffix, file_suffix = MODE_SUFFIX[mode]
@@ -100,12 +106,13 @@ def main():
             "html":    "tables_output_v2",
             "llm":     "llm_tables"
         }
-        # Apply dir_suffix to create augmented folder names next to v2 dirs
+        # Apply tag_suffix and dir_suffix to create augmented folder names
+        # Note: llm_tables only gets tag_suffix if tag is provided, otherwise stays as "llm_tables"
         src_folders = [
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['hugging']}{dir_suffix}"),
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['github']}{dir_suffix}"),
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['html']}{dir_suffix}"),
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['llm']}{dir_suffix}")
+            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['hugging']}{tag_suffix}{dir_suffix}"),
+            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['github']}{tag_suffix}{dir_suffix}"),
+            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['html']}{tag_suffix}{dir_suffix}"),
+            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['llm']}{tag_suffix}{dir_suffix}" if args.tag else f"{base_dirs['llm']}{dir_suffix}")
         ]
         dir_name = args.dir_name if args.dir_name else f"scilake_final{dir_suffix}"
         target_dir = os.path.join(
@@ -116,6 +123,14 @@ def main():
         )  ######## build correct target directory
 
         print(f"\nMode={mode}, target_dir={target_dir}, file_suffix={file_suffix}")
+        if args.tag:
+            print(f"Using tag: {args.tag}")
+        print(f"Source folders to scan:")
+        for src in src_folders:
+            exists = os.path.isdir(src)
+            status = "✓ EXISTS" if exists else "✗ MISSING"
+            print(f"  {status}: {src}")
+        
         os.makedirs(target_dir, exist_ok=True)
         cache = {f for f in os.listdir(target_dir) if f.lower().endswith('.csv')}
 
