@@ -16,12 +16,19 @@ Script Description:
         - str      -> dir_suffix="_str",     file_suffix="_s"
         - tr       -> dir_suffix="_tr",      file_suffix="_t"
         - tr_str   -> dir_suffix="_tr_str",  file_suffix="_s_t"
+    
+    Mask file support:
+        If --mask-file is provided (or auto-loaded when --tag is used), only files listed in the mask
+        file will be linked. The mask file should contain full paths, and the script extracts basenames
+        to match against source files. This allows filtering to only link valid/processed tables.
 
 Usage:
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode all
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base --tag 251117
+    python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base --tag 251117 --mask-file data/analysis/all_valid_title_valid_251117.txt
+    # Note: When --tag is provided, mask file is auto-loaded from data/analysis/all_valid_title_valid_{tag}.txt if it exists
 """
 
 import os
@@ -61,9 +68,57 @@ def create_symlink(src, target_dir, cache, file_suffix=""):
     return True
 
 
-def process_folder(source_folder, target_dir, cache, file_suffix):
+def load_mask_file(mask_file_path):
+    """
+    Load mask file and return a set of allowed base filenames (without file_suffix).
+    The mask file contains full paths, we extract basenames and normalize them.
+    Returns a set of base names (e.g., 'file.csv' for both 'file.csv' and 'file_s.csv').
+    """
+    if not mask_file_path or not os.path.exists(mask_file_path):
+        return None
+    
+    allowed_base_names = set()
+    with open(mask_file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            # Extract basename from full path
+            basename = os.path.basename(line)
+            if basename.endswith('.csv'):
+                name, ext = os.path.splitext(basename)
+                # Remove file_suffix if present (e.g., 'file_s' -> 'file', 'file_t' -> 'file')
+                for suffix in ['_s_t', '_t_s', '_s', '_t']:
+                    if name.endswith(suffix):
+                        name = name[:-len(suffix)]
+                        break
+                # Store the base name (without suffix)
+                allowed_base_names.add(f"{name}{ext}")
+    
+    return allowed_base_names
+
+
+def process_folder(source_folder, target_dir, cache, file_suffix, mask_set=None):
     csvs = [os.path.join(source_folder, f) for f in os.listdir(source_folder)
             if f.lower().endswith('.csv') and os.path.isfile(os.path.join(source_folder, f))]
+    
+    # Apply mask filter if provided
+    if mask_set is not None:
+        # Check if file's base name (without file_suffix) is in mask
+        filtered_csvs = []
+        for csv_path in csvs:
+            basename = os.path.basename(csv_path)
+            name, ext = os.path.splitext(basename)
+            # Remove file_suffix to get base name
+            base_name = name
+            if file_suffix and name.endswith(file_suffix):
+                base_name = name[:-len(file_suffix)]
+            # Check if base name is in mask
+            base_filename = f"{base_name}{ext}"
+            if base_filename in mask_set:
+                filtered_csvs.append(csv_path)
+        csvs = filtered_csvs
+    
     to_link = [p for p in csvs if os.path.basename(p) not in cache]   ########
     if not to_link:
         print(f"{source_folder}: no new files to link.")
@@ -90,12 +145,34 @@ def main():
                         help="Override target directory name (default: scilake_final{suffix}). E.g., scilake_final_v2")
     parser.add_argument("--tag", type=str, default=None,
                         help="Tag suffix for versioning (e.g., 251117). If provided, uses tagged folders like deduped_hugging_csvs_v2_<tag>")
+    parser.add_argument("--mask-file", type=str, default=None,
+                        help="Path to mask file (e.g., data/analysis/all_valid_title_valid_<tag>.txt). If provided, only links files listed in this file.")
     args = parser.parse_args()
 
     modes = [args.mode] if args.mode != "all" else list(MODE_SUFFIX.keys())
 
     # Determine tag suffix for source folders
     tag_suffix = f"_{args.tag}" if args.tag else ""
+    
+    # Load mask file if provided
+    mask_set = None
+    if args.mask_file:
+        mask_file_path = args.mask_file
+        # If relative path, make it relative to CitationLake root
+        if not os.path.isabs(mask_file_path):
+            mask_file_path = os.path.join(args.repo_root, "CitationLake", mask_file_path)
+        mask_set = load_mask_file(mask_file_path)
+        if mask_set:
+            print(f"Loaded mask file: {mask_file_path} ({len(mask_set)} allowed files)")
+        else:
+            print(f"Warning: Mask file {mask_file_path} is empty or invalid")
+    elif args.tag:
+        # Auto-detect mask file based on tag
+        mask_file_path = os.path.join(args.repo_root, "CitationLake", "data", "analysis", f"all_valid_title_valid_{args.tag}.txt")
+        if os.path.exists(mask_file_path):
+            mask_set = load_mask_file(mask_file_path)
+            if mask_set:
+                print(f"Auto-loaded mask file: {mask_file_path} ({len(mask_set)} allowed files)")
 
     for mode in modes:
         dir_suffix, file_suffix = MODE_SUFFIX[mode]
@@ -138,7 +215,7 @@ def main():
             if not os.path.isdir(src):
                 print(f"Skip missing source folder {src}")
                 continue
-            process_folder(src, target_dir, cache, file_suffix)
+            process_folder(src, target_dir, cache, file_suffix, mask_set)
 
         total = len([f for f in os.listdir(target_dir) if f.lower().endswith('.csv')])
         print(f"Done mode={mode}: total CSV in {target_dir} = {total}\n")
