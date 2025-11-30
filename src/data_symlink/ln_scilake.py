@@ -27,7 +27,7 @@ Usage:
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode all
     python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base --tag 251117
-    python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base --tag 251117 --mask-file data/analysis/all_valid_title_valid_251117.txt
+    python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --dir-name scilake_final_251117 --mask-file data/analysis/all_valid_title_valid_251117.txt
     # Note: When --tag is provided, mask file is auto-loaded from data/analysis/all_valid_title_valid_{tag}.txt if it exists
 """
 
@@ -147,6 +147,8 @@ def main():
                         help="Tag suffix for versioning (e.g., 251117). If provided, uses tagged folders like deduped_hugging_csvs_v2_<tag>")
     parser.add_argument("--mask-file", type=str, default=None,
                         help="Path to mask file (e.g., data/analysis/all_valid_title_valid_<tag>.txt). If provided, only links files listed in this file.")
+    parser.add_argument("--no-mask", action="store_true", default=False,
+                        help="Disable mask file filtering even if mask file exists. Links all files from source folders.")
     args = parser.parse_args()
 
     modes = [args.mode] if args.mode != "all" else list(MODE_SUFFIX.keys())
@@ -154,9 +156,11 @@ def main():
     # Determine tag suffix for source folders
     tag_suffix = f"_{args.tag}" if args.tag else ""
     
-    # Load mask file if provided
+    # Load mask file if provided (unless --no-mask is specified)
     mask_set = None
-    if args.mask_file:
+    if args.no_mask:
+        print("Mask file filtering disabled (--no-mask). Will link all files from source folders.")
+    elif args.mask_file:
         mask_file_path = args.mask_file
         # If relative path, make it relative to CitationLake root
         if not os.path.isabs(mask_file_path):
@@ -191,7 +195,13 @@ def main():
             os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['html']}{tag_suffix}{dir_suffix}"),
             os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['llm']}{tag_suffix}{dir_suffix}" if args.tag else f"{base_dirs['llm']}{dir_suffix}")
         ]
-        dir_name = args.dir_name if args.dir_name else f"scilake_final{dir_suffix}"
+        # Default dir_name: include tag if provided, otherwise just use suffix
+        if args.dir_name:
+            dir_name = args.dir_name
+        elif args.tag:
+            dir_name = f"scilake_final_{args.tag}{dir_suffix}"
+        else:
+            dir_name = f"scilake_final{dir_suffix}"
         target_dir = os.path.join(
             args.repo_root,
             "starmie_internal", "data",
