@@ -130,21 +130,38 @@ def apply_mode_transformation(csv_path: str, mode: str) -> str:
         return csv_path
     
     # Transform directory path to look in augmented folders
+    # Note: Directory structure is like: tables_output_v2_251117_str (suffix at the end)
+    # So we need to append the suffix to the directory name, not replace in the middle
+    # Examples:
+    #   tables_output_v2_251117 -> tables_output_v2_251117_str
+    #   deduped_hugging_csvs_v2_251117 -> deduped_hugging_csvs_v2_251117_str
+    
+    # Determine the suffix to append
     if mode == 'str':
-        dir_path = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_str')
-        dir_path = dir_path.replace('deduped_github_csvs', 'deduped_github_csvs_str')
-        dir_path = dir_path.replace('llm_tables', 'llm_tables_str')
-        dir_path = dir_path.replace('tables_output', 'tables_output_str')
+        mode_suffix = '_str'
     elif mode == 'tr':
-        dir_path = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_tr')
-        dir_path = dir_path.replace('deduped_github_csvs', 'deduped_github_csvs_tr')
-        dir_path = dir_path.replace('llm_tables', 'llm_tables_tr')
-        dir_path = dir_path.replace('tables_output', 'tables_output_tr')
+        mode_suffix = '_tr'
     elif mode == 'tr_str':
-        dir_path = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_tr_str')
-        dir_path = dir_path.replace('deduped_github_csvs', 'deduped_github_csvs_tr_str')
-        dir_path = dir_path.replace('llm_tables', 'llm_tables_tr_str')
-        dir_path = dir_path.replace('tables_output', 'tables_output_tr_str')
+        mode_suffix = '_tr_str'
+    else:
+        mode_suffix = ''
+    
+    # Check if directory already has the suffix (avoid double appending)
+    if mode_suffix and not dir_path.endswith(mode_suffix):
+        # Append suffix to the directory name
+        # Handle both patterns: with v2_tag and without
+        if '_v2_' in dir_path:
+            # Pattern: ..._v2_251117 -> ..._v2_251117_str
+            dir_path = dir_path + mode_suffix
+        elif dir_path.endswith('_v2'):
+            # Pattern: ..._v2 -> ..._v2_str
+            dir_path = dir_path + mode_suffix
+        else:
+            # Old pattern without v2: replace in the middle
+            dir_path = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs' + mode_suffix)
+            dir_path = dir_path.replace('deduped_github_csvs', 'deduped_github_csvs' + mode_suffix)
+            dir_path = dir_path.replace('llm_tables', 'llm_tables' + mode_suffix)
+            dir_path = dir_path.replace('tables_output', 'tables_output' + mode_suffix)
     
     return os.path.join(dir_path, new_basename)
 
