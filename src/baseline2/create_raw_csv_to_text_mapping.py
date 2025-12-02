@@ -1,19 +1,32 @@
 import pandas as pd
 import os
+import sys
 import json
 import numpy as np
+
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from src.utils import to_parquet
 
 def load_mappings():
     """
     Load all mapping files and return a list of (csv_path, readme_path, source)
+    Supports TAG environment variable for versioning (e.g., TAG=251117)
     """
+    # Support TAG environment variable for versioning
+    tag = os.environ.get('TAG', '')
+    suffix = f"_{tag}" if tag else ""
+    v2_suffix = f"_v2{suffix}" if suffix else "_v2"  # For files with _v2 pattern
+    
     records = []
 
     # GitHub
     print("\nLoading GitHub mapping...")
-    github_info_path = os.path.join('data', 'processed', 'github_readmes_info.parquet')
-    md_map_path = os.path.join('data', 'processed', 'deduped_github_csvs', 'md_to_csv_mapping.json')
+    github_info_path = os.path.join('data', 'processed', f'github_readmes_info{suffix}.parquet')
+    md_map_path = os.path.join('data', 'processed', f'deduped_github_csvs_v2{suffix}', 'md_to_csv_mapping.json')
     
     if os.path.exists(github_info_path) and os.path.exists(md_map_path):
         # Load the mapping files
@@ -37,7 +50,7 @@ def load_mappings():
                             csv_paths = []
                         for csv_path in csv_paths:
                             records.append({
-                                'csv_path': os.path.join('data', 'processed', 'deduped_github_csvs', csv_path),
+                                'csv_path': os.path.join('data', 'processed', f'deduped_github_csvs_v2{suffix}', csv_path),
                                 'readme_path': path,
                                 'source': 'github'
                             })
@@ -50,7 +63,7 @@ def load_mappings():
                     csv_paths = []
                 for csv_path in csv_paths:
                     records.append({
-                        'csv_path': os.path.join('data', 'processed', 'deduped_github_csvs', csv_path),
+                        'csv_path': os.path.join('data', 'processed', f'deduped_github_csvs_v2{suffix}', csv_path),
                         'readme_path': readme_paths,
                         'source': 'github'
                     })
@@ -73,7 +86,13 @@ def load_mappings():
 
     # arXiv
     print("\nLoading arXiv mapping...")
-    html_table_path = os.path.join('data', 'processed', 'html_table.parquet')
+    html_table_path = os.path.join('data', 'processed', f'html_table{suffix}.parquet')
+    # Fallback to non-tagged version if tagged version doesn't exist
+    if not os.path.exists(html_table_path) and suffix:
+        html_table_path_fallback = os.path.join('data', 'processed', 'html_table.parquet')
+        if os.path.exists(html_table_path_fallback):
+            print(f"Tagged file not found, using fallback: {html_table_path_fallback}")
+            html_table_path = html_table_path_fallback
     if os.path.exists(html_table_path):
         html = pd.read_parquet(html_table_path)
         print("arXiv columns:", html.columns.tolist())
@@ -89,6 +108,9 @@ def load_mappings():
                     if isinstance(table_list, (list, np.ndarray)):
                         for csv_path in list(table_list):
                             if isinstance(csv_path, str) and csv_path.endswith('.csv'):
+                                # Convert path from old format (tables_output/) to new format (tables_output_v2_<tag>/)
+                                if 'tables_output/' in csv_path and suffix:
+                                    csv_path = csv_path.replace('tables_output/', f'tables_output_v2{suffix}/')
                                 records.append({
                                     'csv_path': csv_path,
                                     'readme_path': row['html_path'],
@@ -103,10 +125,14 @@ def load_mappings():
 
     # Huggingface
     print("\nLoading Huggingface mapping...")
-    step2_path = os.path.join('data', 'processed', 'modelcard_step2.parquet')
-    hugging_map_path = os.path.join('data', 'processed', 'hugging_deduped_mapping.json')
+    step2_path = os.path.join('data', 'processed', f'modelcard_step2_v2{suffix}.parquet')
+    hugging_map_path = os.path.join('data', 'processed', f'hugging_deduped_mapping_v2{suffix}.json')
+    if not os.path.exists(step2_path):
+        print(f"Warning: Step2 file not found at {step2_path}")
+    if not os.path.exists(hugging_map_path):
+        print(f"Warning: Huggingface mapping file not found at {hugging_map_path}")
     if os.path.exists(step2_path) and os.path.exists(hugging_map_path):
-        tmp_step1 = pd.read_parquet(os.path.join('data', 'processed', 'modelcard_step1.parquet'), columns=['modelId', 'card_readme'])
+        tmp_step1 = pd.read_parquet(os.path.join('data', 'processed', f'modelcard_step1{suffix}.parquet'), columns=['modelId', 'card_readme'])
         step2 = pd.read_parquet(step2_path, columns=['modelId', 'readme_hash'])
         step2 = pd.merge(step2, tmp_step1, on='modelId', how='left')
         with open(hugging_map_path, 'r') as f:
@@ -127,6 +153,9 @@ def load_mappings():
                     pair_key = (csv_path, row['card_readme'])
                     if pair_key not in hugging_unique_pairs:
                         hugging_unique_pairs.add(pair_key)
+                        # Ensure csv_path uses the correct directory with tag
+                        if not csv_path.startswith('data/processed/'):
+                            csv_path = os.path.join('data', 'processed', f'deduped_hugging_csvs_v2{suffix}', os.path.basename(csv_path))
                         hugging_records.append({
                             'csv_path': csv_path,
                             'readme_path': row['card_readme'],
@@ -151,11 +180,45 @@ def get_file_size(file_path):
     return f"{size_mb:.2f} MB"
 
 def main():
+    # Support TAG environment variable for versioning
+    tag = os.environ.get('TAG', '')
+    suffix = f"_{tag}" if tag else ""
+    
+    # Load mask file to filter only valid files
+    mask_file = f'data/analysis/all_valid_title_valid{suffix}.txt'
+    valid_csv_basenames = set()
+    if os.path.exists(mask_file):
+        print(f"\nLoading mask file: {mask_file}")
+        with open(mask_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    # Extract basename from full path
+                    basename = os.path.basename(line)
+                    valid_csv_basenames.add(basename)
+        print(f"Loaded {len(valid_csv_basenames)} valid CSV files from mask file")
+    else:
+        print(f"Warning: Mask file not found at {mask_file}, will process all records")
+    
     df = load_mappings()
-    print(f"\nTotal records: {len(df)}")
-    print("\nRecords by source:")
+    print(f"\nTotal records before filtering: {len(df)}")
+    print("\nRecords by source (before filtering):")
     print(df['source'].value_counts())
-    output_path = os.path.join('data', 'processed', 'raw_csv_to_text_mapping.parquet')
+    
+    # Filter by mask file if available
+    if valid_csv_basenames:
+        # Extract basename from csv_path for comparison
+        df['csv_basename'] = df['csv_path'].apply(lambda x: os.path.basename(x))
+        df_filtered = df[df['csv_basename'].isin(valid_csv_basenames)].copy()
+        df_filtered = df_filtered.drop(columns=['csv_basename'])
+        print(f"\nTotal records after filtering by mask file: {len(df_filtered)}")
+        print("\nRecords by source (after filtering):")
+        print(df_filtered['source'].value_counts())
+        df = df_filtered
+    else:
+        print("No mask file filtering applied")
+    
+    output_path = os.path.join('data', 'processed', f'raw_csv_to_text_mapping{suffix}.parquet')
     to_parquet(df, output_path)
     
     df = pd.read_parquet(output_path)

@@ -16,6 +16,6 @@ python src/baseline2/create_queries_from_table.py
 # or python batch_search.py
 python src/baseline2/search_with_pyserini.py --hits 11
 python src/baseline2/postprocess.py \
-  --input  data/tmp/search_result.json \
+  --input  data/tmp/search_result${SUFFIX}.json \
   --output data/tmp/baseline2_sparse_results${SUFFIX}.json \
-  --top1-list data/tmp/queries_with_top1_matches.txt
+  --top1-list data/tmp/queries_with_top1_matches${SUFFIX}.txt

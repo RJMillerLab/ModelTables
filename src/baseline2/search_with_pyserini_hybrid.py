@@ -62,12 +62,24 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sparse-index", required=True)
     ap.add_argument("--dense-index", required=True)
-    ap.add_argument("--queries", required=True)
-    ap.add_argument("--mapping", required=True)
+    ap.add_argument("--queries", default=None,
+                    help="Path to queries TSV file. If not specified, uses queries_table.tsv or queries_table_<TAG>.tsv if TAG env var is set.")
+    ap.add_argument("--mapping", default=None,
+                    help="Path to ID mapping JSON file. If not specified, uses queries_table_mapping.json or queries_table_<TAG>_mapping.json if TAG env var is set.")
     ap.add_argument("--k", type=int, default=11)
     ap.add_argument("--alpha", type=float, default=0.45)
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--output", type=str, default=None,
+                    help="Output JSON file path. If not specified, uses search_result_hybrid.json or search_result_hybrid_<TAG>.json if TAG env var is set.")
     args = ap.parse_args()
+    
+    # Support TAG environment variable for versioning
+    tag = os.environ.get('TAG', '')
+    suffix = f"_{tag}" if tag else ""
+    
+    # Set default paths with tag support if not provided
+    queries_path = args.queries or f'data/tmp/queries_table{suffix}.tsv'
+    mapping_path = args.mapping or f'data/tmp/queries_table{suffix}_mapping.json'
 
     # ---------------------------------------------------------------------
     # 1. dense side
@@ -121,10 +133,10 @@ def main():
     # ---------------------------------------------------------------------
     # 4. data
     # ---------------------------------------------------------------------
-    queries = load_queries(args.queries)
-    id_map = load_mapping(args.mapping)
-
-    debug_log = Path(args.queries).parent / "hybrid_debug.log"
+    queries = load_queries(queries_path)
+    id_map = load_mapping(mapping_path)
+    
+    debug_log = Path(queries_path).parent / "hybrid_debug.log"
     if debug_log.exists():
         debug_log.unlink()
 
@@ -158,7 +170,10 @@ def main():
     # ---------------------------------------------------------------------
     # 5. output
     # ---------------------------------------------------------------------
-    out_file = Path(args.queries).parent / "search_result_hybrid.json"
+    if args.output:
+        out_file = Path(args.output)
+    else:
+        out_file = Path(queries_path).parent / f"search_result_hybrid{suffix}.json"
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     print(f"✅  Saved {len(results)} hybrid results → {out_file}")

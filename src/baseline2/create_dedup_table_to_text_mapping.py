@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import sys
 import json
 import numpy as np
 from pathlib import Path
@@ -8,6 +9,12 @@ import re
 import pickle
 from joblib import Parallel, delayed
 from tqdm import tqdm
+
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from src.utils import to_parquet
 
 def create_tmp_folders():
@@ -320,7 +327,7 @@ def create_enhanced_mapping():
             valid_titles.add(os.path.basename(line.strip()))
     print(f"Loaded {len(valid_titles)} valid titles from {mask_file}")
     
-    df_raw = pd.read_parquet(os.path.join('data', 'processed', 'raw_csv_to_text_mapping.parquet'))
+    df_raw = pd.read_parquet(os.path.join('data', 'processed', f'raw_csv_to_text_mapping{suffix}.parquet'))
     df_raw['csv_path'] = df_raw['csv_path'].apply(lambda x: os.path.basename(x))
 
     print(f"Step1: Loaded raw mapping with {len(df_raw)} rows")

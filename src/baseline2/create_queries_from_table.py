@@ -195,6 +195,10 @@ def create_queries_tsv(entries, output_file):
         print("TSV format verification passed!")
 
 def main():
+    # Support TAG environment variable for versioning
+    tag = os.environ.get('TAG', '')
+    suffix = f"_{tag}" if tag else ""
+    
     parser = argparse.ArgumentParser(description='Create queries.tsv from local table data')
     parser.add_argument('--corpus', default='data/tmp/corpus/collection.jsonl',
                         help='Path to corpus jsonl file')
@@ -212,7 +216,7 @@ def main():
     print(f"🔄 Maximum number of tokens per query: {args.max_tokens}")
     entries = load_table_data(args.corpus, args.base_dir, args.max_tokens)
 
-    queries_file = os.path.join(args.output_dir, 'queries_table.tsv')
+    queries_file = os.path.join(args.output_dir, f'queries_table{suffix}.tsv')
     create_queries_tsv(entries, queries_file)
 
 if __name__ == "__main__":
