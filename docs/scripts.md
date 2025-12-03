@@ -306,18 +306,38 @@ TAG=251117 bash src/baseline1/standardize_filenames.sh > logs/baseline1_standard
 TAG=251117 bash scripts/step3_processmetrics_all.sh <index> > logs/baseline1_processmetrics_251117.log 2>&1  # compute metrics under starmie: run baseline metrics computation
 
 ### 2. Baseline2: Sparse search
+# Note: Requires pyserini and Java/JDK (for pyserini to work)
+# Recommended conda environment: faiss_gpu_env (or any environment with pyserini installed)
+# Output: data/tmp/baseline2_sparse_results_251117.json
 TAG=251117 bash src/baseline2/get_metadata.sh > logs/baseline2_get_metadata_251117.log 2>&1 # Baseline2: Sparse search get metadata
 TAG=251117 bash src/baseline2/sparse_search.sh > logs/baseline2_sparse_search_251117.log 2>&1 # Baseline2: Sparse search
 
 ### 3. Baseline3: Hybrid (Sparse + Dense search)
 # Note: Hybrid search uses Python scripts with command-line arguments
-# Use tagged file paths when calling the scripts
-python src/baseline2/search_with_pyserini_hybrid.py \
+# Requires: 
+#   - Sparse index from Baseline2: data/tmp/index_251117
+#   - Dense index directory: data/tmp/index_dense_251117/ (must contain index.faiss or index file)
+#   - To create dense index, first encode corpus and build faiss index:
+#     mkdir -p data/tmp/index_dense_251117
+#     python src/baseline1/table_retrieval_pipeline.py encode \
+#       --jsonl data/tmp/corpus/collection.jsonl \
+#       --model_name sentence-transformers/all-MiniLM-L6-v2 \
+#       --batch_size 256 --output_npz data/tmp/index_dense_251117/embeddings.npz --device cuda
+#     python src/baseline1/table_retrieval_pipeline.py build_faiss \
+#       --emb_npz data/tmp/index_dense_251117/embeddings.npz \
+#       --output_index data/tmp/index_dense_251117/index.faiss
+# Output: data/tmp/search_result_hybrid_251117.json (then postprocess to baseline3_hybrid_results_251117.json)
+TAG=251117 python src/baseline2/search_with_pyserini_hybrid.py \
   --sparse-index data/tmp/index_251117 \
   --dense-index data/tmp/index_dense_251117 \
   --queries data/tmp/queries_table.tsv \
   --mapping data/tmp/queries_table_mapping.json \
   --k 11 --alpha 0.45 --device cpu > logs/baseline2_hybrid_search_251117.log 2>&1
+# Postprocess hybrid results (if postprocess.py supports hybrid results)
+# TAG=251117 python src/baseline2/postprocess.py \
+#   --input data/tmp/search_result_hybrid_251117.json \
+#   --output data/tmp/baseline3_hybrid_results_251117.json \
+#   --top1-list data/tmp/hybrid_queries_with_top1_matches.txt
 ```
 
 <!-- ### 8. Model Search - Dense first: 

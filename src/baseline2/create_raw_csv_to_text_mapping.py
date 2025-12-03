@@ -25,8 +25,18 @@ def load_mappings():
 
     # GitHub
     print("\nLoading GitHub mapping...")
+    # Require TAG environment variable
+    if not tag:
+        raise ValueError("TAG environment variable is required. Please set TAG=251117 (or your tag)")
+    
     github_info_path = os.path.join('data', 'processed', f'github_readmes_info{suffix}.parquet')
-    md_map_path = os.path.join('data', 'processed', f'deduped_github_csvs_v2{suffix}', 'md_to_csv_mapping.json')
+    if not os.path.exists(github_info_path):
+        raise FileNotFoundError(f"GitHub info file not found: {github_info_path}")
+    
+    # For md_to_csv_mapping, use v2_tag directory
+    md_map_path = os.path.join('data', 'processed', f'deduped_github_csvs_v2_{tag}', 'md_to_csv_mapping.json')
+    if not os.path.exists(md_map_path):
+        raise FileNotFoundError(f"GitHub mapping file not found: {md_map_path}")
     
     if os.path.exists(github_info_path) and os.path.exists(md_map_path):
         # Load the mapping files
@@ -86,18 +96,30 @@ def load_mappings():
 
     # arXiv
     print("\nLoading arXiv mapping...")
-    html_table_path = os.path.join('data', 'processed', f'html_table{suffix}.parquet')
-    # Fallback to non-tagged version if tagged version doesn't exist
-    if not os.path.exists(html_table_path) and suffix:
-        html_table_path_fallback = os.path.join('data', 'processed', 'html_table.parquet')
-        if os.path.exists(html_table_path_fallback):
-            print(f"Tagged file not found, using fallback: {html_table_path_fallback}")
-            html_table_path = html_table_path_fallback
-    if os.path.exists(html_table_path):
+    # Use v2 format with tag (required)
+    html_table_path = os.path.join('data', 'processed', f'html_parsing_results_v2{suffix}.parquet')
+    if not os.path.exists(html_table_path):
+        raise FileNotFoundError(f"arXiv HTML parsing results file not found: {html_table_path}")
+    
+    print(f"Using v2 format: {html_table_path}")
+    if True:  # Keep indentation structure
         html = pd.read_parquet(html_table_path)
         print("arXiv columns:", html.columns.tolist())
-        print("First row of arXiv data:")
-        print(html.iloc[0])
+        if len(html) > 0:
+            print("First row of arXiv data:")
+            print(html.iloc[0])
+        
+        # Handle both v2 format (csv_paths) and v1 format (table_list)
+        if 'csv_paths' in html.columns and 'table_list' not in html.columns:
+            # Convert csv_paths to table_list for compatibility
+            def convert_to_list(x):
+                if isinstance(x, (list, np.ndarray)):
+                    return list(x) if isinstance(x, np.ndarray) else x
+                elif pd.isna(x) or x is None:
+                    return []
+                else:
+                    return [x] if isinstance(x, str) else []
+            html['table_list'] = html['csv_paths'].apply(convert_to_list)
         
         if 'html_path' in html.columns and 'table_list' in html.columns:
             arxiv_count = 0
@@ -119,20 +141,23 @@ def load_mappings():
                                 arxiv_count += 1
             print(f"Added {arxiv_count} arXiv mappings")
         else:
-            print("Warning: Missing required columns in arXiv data")
-    else:
-        print(f"Warning: arXiv file not found at {html_table_path}")
+            raise ValueError(f"Missing required columns in arXiv data. Expected 'html_path' and 'table_list', got: {html.columns.tolist()}")
 
     # Huggingface
     print("\nLoading Huggingface mapping...")
     step2_path = os.path.join('data', 'processed', f'modelcard_step2_v2{suffix}.parquet')
-    hugging_map_path = os.path.join('data', 'processed', f'hugging_deduped_mapping_v2{suffix}.json')
     if not os.path.exists(step2_path):
-        print(f"Warning: Step2 file not found at {step2_path}")
+        raise FileNotFoundError(f"ModelCard step2 file not found: {step2_path}")
+    
+    hugging_map_path = os.path.join('data', 'processed', 'hugging_deduped_mapping.json')
     if not os.path.exists(hugging_map_path):
-        print(f"Warning: Huggingface mapping file not found at {hugging_map_path}")
+        raise FileNotFoundError(f"Huggingface mapping file not found: {hugging_map_path}")
+    
     if os.path.exists(step2_path) and os.path.exists(hugging_map_path):
-        tmp_step1 = pd.read_parquet(os.path.join('data', 'processed', f'modelcard_step1{suffix}.parquet'), columns=['modelId', 'card_readme'])
+        step1_path = os.path.join('data', 'processed', f'modelcard_step1{suffix}.parquet')
+        if not os.path.exists(step1_path):
+            raise FileNotFoundError(f"ModelCard step1 file not found: {step1_path}")
+        tmp_step1 = pd.read_parquet(step1_path, columns=['modelId', 'card_readme'])
         step2 = pd.read_parquet(step2_path, columns=['modelId', 'readme_hash'])
         step2 = pd.merge(step2, tmp_step1, on='modelId', how='left')
         with open(hugging_map_path, 'r') as f:

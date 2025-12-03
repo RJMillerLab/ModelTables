@@ -327,7 +327,13 @@ def create_enhanced_mapping():
             valid_titles.add(os.path.basename(line.strip()))
     print(f"Loaded {len(valid_titles)} valid titles from {mask_file}")
     
-    df_raw = pd.read_parquet(os.path.join('data', 'processed', f'raw_csv_to_text_mapping{suffix}.parquet'))
+    # Support tag for raw_csv_to_text_mapping file
+    raw_mapping_path = os.path.join('data', 'processed', f'raw_csv_to_text_mapping{suffix}.parquet')
+    # Fallback to default if tag version doesn't exist
+    if not os.path.exists(raw_mapping_path):
+        raw_mapping_path = os.path.join('data', 'processed', 'raw_csv_to_text_mapping.parquet')
+    
+    df_raw = pd.read_parquet(raw_mapping_path)
     df_raw['csv_path'] = df_raw['csv_path'].apply(lambda x: os.path.basename(x))
 
     print(f"Step1: Loaded raw mapping with {len(df_raw)} rows")
