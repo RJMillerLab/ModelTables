@@ -14,7 +14,6 @@ downloaded_pdfs/
 pdf_downloads/
 github_html/
 github_readmes/
-fig/
 *.pdf
 *.png
 tmp/
