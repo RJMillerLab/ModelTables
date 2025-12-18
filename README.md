@@ -64,7 +64,13 @@ Here we provide steps for quick inference. The script start from scratch will be
 
 ### Downloading data
 
-For double-blind requirement, we will release the dataset after decision.
+**Data Access via Google Drive:**
+
+The dataset is available through Google Drive for users with access:
+
+* **Full Dataset**: [Google Drive Folder](https://drive.google.com/drive/folders/1YLfkknrFuE9pWFJuarb4kyX1o5NtN-Y8?usp=sharing) - Contains the complete dataset with all processed tables, ground truth files, and intermediate results.
+
+* **Updated Tables**: [Google Drive Folder](https://drive.google.com/drive/folders/1h3gG8iRFgNZQV2K8z_ZdaZv3MUEJocRY?usp=sharing) - Contains the updated version of processed tables. We will release other files with the newest version with paper soon.
 
 The crawled tables from different resources are stored at
 
