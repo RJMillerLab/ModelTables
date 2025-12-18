@@ -16,6 +16,7 @@ github_html/
 github_readmes/
 *.pdf
 *.png
+!fig/*.png
 tmp/
 *.json
 *.csv
