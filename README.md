@@ -1,13 +1,14 @@
 
-# 📚 Semantic Table Discovery in Model Lakes:  a Benchmark
+# 📚 ModelTables: A Corpus of Tables about Models
 
 ## Motivation
 
 <img src="fig/idea_page1.png" alt="IdeaDiagram" width="450"/>
 
-ModelLake is a benchmark framework that bridges traditional Data Lake table discovery techniques with Model Lake challenges by leveraging citation graphs and semantic table search to enable efficient discovery and comparison of pre-trained machine learning models based on their performance and configuration data.
+We present ModelTables, a benchmark of tables in Model Lakes that captures the structured semantics of performance and configuration tables often overlooked by text-only retrieval. The corpus is built from Hugging Face model cards, GitHub READMEs, and referenced papers, linking each table to its surrounding model and publication context. Compared with open data–lake tables, model tables are smaller yet exhibit denser inter-table relationships, reflecting tightly coupled model and benchmark evolution. The current release covers over 60K models and 90K tables. To evaluate model and table relatedness, we construct a multi-source ground truth using three complementary signals: (1) paper citation links, (2) explicit model-card links and inheritance, and (3) shared training datasets. We present one extensive empirical use case for the benchmark which is table search. We compare canonical Data Lake search operators (unionable, joinable, keyword) and Information Retrieval baselines (dense, sparse, hybrid retrieval) on this benchmark. Union-based semantic table retrieval attains 54.8% P@1 overall (54.6% on citation, 31.3% on inheritance, 30.6% on shared-dataset signals); table-based dense retrieval reaches 66.5% P@1, and metadata-hybrid retrieval achieves 54.1%. This evaluation indicates clear room for developing better table search methods. By releasing ModelTables and its creation protocol, we provide the first large-scale benchmark of structured data describing AI model. Our use case of table discovery in Model Lakes, provides intuition and evidence for developing more accurate semantic retrieval, structured comparison, and principled organization of structured model knowledge.
 
 ## Contents
+
 - [Motivation](#motivation)
 - [Example](#example)
 - [Overview](#overview)
@@ -18,58 +19,21 @@ ModelLake is a benchmark framework that bridges traditional Data Lake table disc
 
 ## Example
 
-In our Model Lake benchmark, we apply a Semantic Unionable Search strategy to retrieve semantically compatible tables from a large table lake given a query table. The retrieved tables are unionable, meaning they share similar schema and semantics and can be meaningfully aligned for comparison.
-
-<table width="100%">
-  <colgroup>
-    <col width="40%" />
-    <col width="60%" />
-  </colgroup>
-  <tr>
-    <td>
-      <img
-        src="fig/analy_0531_2027_page1.png"
-        alt="Example 1"
-        width="100%"
-      />
-    </td>
-    <td>
-      <img
-        src="fig/analy_1_page1.png"
-        alt="Example 2"
-        width="100%"
-      />
-    </td>
-  </tr>
-  <tr>
-    <td>
-      **Example 1 (Performance Tables):** Starting from a query table that reports BERT’s performance on GLUE and SQuAD, the system retrieves other model performance tables such as RoBERTa, BART, ELECTRA, and Uni-Perceive…
-    </td>
-    <td>
-      **Example 2 (Configuration Tables):** Given a configuration table for a specific model (e.g., MicroRWKV), the system retrieves model spec tables like TokenFormer, TiroBERTa, DAT variants, IndoBERT, and Flaubert…
-    </td>
-  </tr>
-</table>
-
-Together, these examples demonstrate that our method retrieves semantically aligned, task-relevant, and unionable tables that support both performance benchmarking and model configuration analysis under shared topics and structures.
+<img src="fig/example_1_page1.png" alt="Example" width="100%"/>
 
 ## Overview
 
-ModelLake provides a comprehensive framework for collecting, processing, and enabling semantic search over model-related tabular data. Our pipeline leverages diverse sources like Hugging Face Model Cards, GitHub repositories, and academic papers to construct a rich, interconnected benchmark.
+Our research on semantic table discovery in Model Lakes consists of three primary sub-tasks. This repository focus on data collection and ground-truth generation for model relatedness. The table discovery methods are developed based on other already published repositories.
 
-### How to get Citation Graph
-We construct multi-level citation graphs (paper, model card, dataset) to infer relationships between models and their associated tables.
+### How to get tables and citation graph
 
-<img src="fig/gt_copy2_page1.png" alt="CitationGraphPipeline" width="700"/>
+We construct multi-level citation graphs (paper, model card, dataset) to infer relationships between models and their associated tables. We extract tabular data from diverse sources via a crawling pipeline that parses tables from Hugging Face model cards, GitHub READMEs, and academic paper HTML.
 
-### How to get Tables
-We extract tabular data from diverse sources via a crawling pipeline that parses tables from Hugging Face model cards, GitHub READMEs, and academic paper HTML.
+<img src="fig/pipeline_mini_short_all.png" alt="Pipeline" width="1000"/>
 
-<img src="fig/pipeline_page1.png" alt="TableCrawlingPipeline" width="1000"/>
+### How to do table search
 
-### How to do semantic table union-able search
-
-We select [starmie](https://github.com/megagonlabs/starmie) as our semantic table union-able search technique. We put the refined code we used under `./starmie/` folder.
+Refer to the baselines we mentioned in paper.
 
 Following these workflows, ModelLake enables robust data ingestion, citation graph construction, and semantic table discovery.
 
@@ -80,34 +44,30 @@ Following these workflows, ModelLake enables robust data ingestion, citation gra
 Install and setup the environment:
 
 ```bash
-git clone https://github.com/DoraDong-2023/ModelLake.git
-cd ModelLake/
+git clone https://github.com/RJMillerLab/ModelTables.git
+cd ModelTables/
 pip install -r requirements.txt
 ```
 
 Set environment variables:
 
-Please create a `.env` file in the root directory to store sensitive information such as your OpenAI API key and Semantic Scholar API key. These variables are only needed when running from scratch. 
+Please create a `.env` file in the root directory to store sensitive information such as your OpenAI API key and Semantic Scholar API key. These variables are only needed when running from scratch.
 
 ```bash
-echo "OPENAI_API_KEY='your_api_key'" > .env
-echo "SEMANTIC_SCHOLAR_API_KEY='your_api_key'" > .env # Optional, use this to download semantic scholar dataset, or faster querying 
+echo "OPENAI_API_KEY='your_api_key'" > .env # Optional, if necessary
+echo "SEMANTIC_SCHOLAR_API_KEY='your_api_key'" > .env # Optional, if necessary
 ```
 
 ## QuickInference
-### Downloading data 
 
-This project utilizes datasets hosted on Hugging Face and Semantic Scholar. Use the following commands to download our processed data:
-```bash
-mkdir data
-mkdir data/processed
-# Downloading processed data
-pip install gdown
-gdown --folder 1xHbcv01VQ2RG8zmxo0w6y4kRtqxZoAO0 -O data/processed/ # tables
-gdown --folder 1UJKEEqKZXYB1v4alGyWo7Ut7Anjub0Kg -O data/gt/ # ground truth
-```
+Here we provide steps for quick inference. The script start from scratch will be at the scripts section.
 
-The tables from different resources are stored at
+### Downloading data
+
+For double-blind requirement, we will release the dataset after decision.
+
+The crawled tables from different resources are stored at
+
 ```bash
 data/
 └── processed/
@@ -117,7 +77,8 @@ data/
     └── llm_tables/               # Tables extracted from Semantic Scholar dataset and reformalized by GPT.
 ```
 
-The groundtruth from different level are stored at
+The groundtruth from different level (paper v.s. model v.s. dataset) are stored at
+
 ```bash
 data/
 └── gt/
@@ -129,34 +90,16 @@ data/
     ├── csv_pair_union_direct_csv_list.pkl # csv name for above matrix, all GT
 ```
 
-Or process raw data from scratch
-```bash
-mkdir data/raw
-# Downloading huggingface model card dataset
-git lfs install
-git clone https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata data/raw/model_cards_with_metadata
-git clone https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata data/raw/dataset_cards_with_metadata
-# Downloading Semantic Scholar data if you need to setup local database
-# Alternatively, refer to Semantic Scholar API documentation for bulk data access.
+**Tips:** Unlike traditional table discovery ground-truths (e.g., csv1:[csv2, csv3]), we optimize storage by representing relatedness as binary matrices with corresponding CSV name lists. Each matrix entry indicates if two tables are related by our ground-truth.
 
-# Check https://drive.google.com/drive/folders/1YLfkknrFuE9pWFJuarb4kyX1o5NtN-Y8?usp=drive_link for intermediate data checkpoints
-```
+### Trained models/vectors/results file for table discovery methods
 
-### Demo on Starmie
-```bash
-cd <starmie_repo_path>
-# download files
-gdown --folder 1RiadO0E-IARYi_ukT0qaxSyyiK2Xozro -O <starmie_repo_path>/
-# run inference scripts
-bash scripts/step3_processmetrics.sh # run main scripts for comparing gt and predicted results
-bash scripts/step3_processmetrics_<baseline_1,2,3>.sh # run on comparing gt and baseline results
-bash eval_per_resource.sh # run results on each resource (Hugging/Github/arXiv/Semantic Scholar)
-```
+For double-blind requirement, we will release these files after decision.
 
 The Model/Vectors/Metrics/Results will located at
 
 ```bash
-<starmie_repo_path>/
+<table discovery method repo>/
 └── data/
     ├── <benchmark_name>
         ├── datalake # where tables located
@@ -166,27 +109,28 @@ The Model/Vectors/Metrics/Results will located at
 ├── metrics/ # where computed metrics located
 ```
 
----
+-----
 
 ## Scripts
 
 Refer to scripts [section](docs/scripts.md) for crawling/training from scratch
 
-
 ## Acknowledgements
 
-We would like to thank the following repositories and projects for their invaluable contributions and inspiration:
+We would like to thank the following repositories and projects for their invaluable contributions:
 
-* **[megagonlabs/starmie](https://github.com/megagonlabs/starmie)**: For the original Semantic Table Discovery framework and evaluation setup that formed a basis for our work.
+* **[megagonlabs/starmie](https://github.com/megagonlabs/starmie)**: Semantic Table Discovery framework and evaluation setup.
 
-* **[Table Union Search Benchmark](https://github.com/RJMillerLab/table-union-search-benchmark/tree/master)**: For providing benchmark datasets and tasks related to table union search.
+* **[Table Union Search Benchmark](https://github.com/RJMillerLab/table-union-search-benchmark/tree/master)**: Benchmark datasets and tasks for table union search.
 
-* **[SANTOS Dataset](https://github.com/northeastern-datalab/santos/tree/main/groundtruth)**: For the ground truth data used in table discovery evaluations.
+* **[SANTOS Dataset](https://github.com/northeastern-datalab/santos/tree/main/groundtruth)**: Ground truth data for table discovery evaluations.
 
 * **[LUH-DBS/Blend](https://github.com/LUH-DBS/Blend)**: Unified table discovery system.
 
-* The **Hugging Face** team and community for providing open-source access to crucial datasets, including:
+* **[castorini/pyserini](https://github.com/castorini/pyserini)**: Python toolkit for reproducible information retrieval research with sparse and dense representations.
+
+* **Hugging Face** for open-source datasets:
     * [librarian-bots/model_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata)
     * [librarian-bots/dataset_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata)
 
-* The **Semantic Scholar** API for their comprehensive [academic graph and datasets](https://www.semanticscholar.org/product/api/tutorial), which were essential for building our citation network.
+* **Semantic Scholar** API for their [academic graph and datasets](https://www.semanticscholar.org/product/api/tutorial), essential for building our citation network.
