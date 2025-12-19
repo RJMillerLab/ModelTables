@@ -100,8 +100,6 @@ data/
 
 ### Trained models/vectors/results file for table discovery methods
 
-For double-blind requirement, we will release these files after decision.
-
 The Model/Vectors/Metrics/Results will located at
 
 ```bash
