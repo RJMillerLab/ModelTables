@@ -673,7 +673,6 @@ def main():
         step1_suffix = f"_{tag}" if tag else ""
         step1_file = os.path.join(processed_base_path, f"{data_type}_step1{step1_suffix}.parquet")
     
-    # Determine output file based on tag
     output_suffix = f"_{tag}" if tag else ""
     output_file = os.path.join(processed_base_path, f"{data_type}_all_title_list{output_suffix}.parquet")
     

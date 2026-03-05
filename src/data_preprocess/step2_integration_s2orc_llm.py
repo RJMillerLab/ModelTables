@@ -101,8 +101,15 @@ def non_empty(x):
         return len(x) > 0
     elif is_list_like(x):
         return len(to_list_safe(x)) > 0
-    if pd.isna(x):
+    if x is None:
         return False
+    if hasattr(pd, "isna"):
+        try:
+            if pd.isna(x):
+                return False
+        except Exception:
+            # If pd.isna(x) returns an array or errors, treat as non-empty fallback
+            pass
     if isinstance(x, str):
         return len(x.strip()) > 0
     return False
@@ -299,10 +306,16 @@ def main():
             def convert_to_list(x):
                 if is_list_like(x):
                     return to_list_safe(x)
-                elif x is None or pd.isna(x):
+                if x is None:
                     return []
-                else:
-                    return []
+                if hasattr(pd, "isna"):
+                    try:
+                        if pd.isna(x):
+                            return []
+                    except Exception:
+                        # For unexpected container types, fall back to empty
+                        return []
+                return []
             df_html['table_list'] = df_html['csv_paths'].apply(convert_to_list)
     else:
         print(f"📦 Loading HTML tables from v1: {HTML_TABLE_PARQUET}")

@@ -40,7 +40,7 @@ def load_model_cards_from_raw(model_a: str, model_b: str) -> Dict[str, str]:
 	"""Load raw card texts from combined raw data by modelId with case-insensitive match."""
 	df_raw = load_combined_data(
 		data_type="modelcard",
-		file_path="~/Repo/CitationLake/data/raw",
+		file_path="~/Repo/ModelTables/data/raw",
 		columns=["modelId", "card"],
 	)
 	if df_raw is None or len(df_raw) == 0:

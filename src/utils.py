@@ -30,7 +30,7 @@ def list_available_raw_dates(base_path=None):
             config = load_config('config.yaml')
             base_path = config.get('base_path', 'data')
         except:
-            base_path = os.path.expanduser("~/Repo/CitationLake/data")
+            base_path = os.path.expanduser("~/Repo/ModelTables/data")
     
     base_path = os.path.expanduser(base_path)
     base_path = os.path.dirname(base_path) if base_path.endswith('raw') else base_path
@@ -76,7 +76,7 @@ def validate_raw_date(date, base_path=None, raise_error=True):
             config = load_config('config.yaml')
             base_path = config.get('base_path', 'data')
         except:
-            base_path = os.path.expanduser("~/Repo/CitationLake/data")
+            base_path = os.path.expanduser("~/Repo/ModelTables/data")
     
     base_path = os.path.expanduser(base_path)
     base_path = os.path.dirname(base_path) if base_path.endswith('raw') else base_path
@@ -129,13 +129,13 @@ def validate_raw_date(date, base_path=None, raise_error=True):
     else:
         return True, None
 
-def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", columns=[], date=None):
+def load_combined_data(data_type, file_path="~/Repo/ModelTables/data/raw", columns=[], date=None):
     """
     Load combined data from parquet files.
     
     Args:
         data_type: "modelcard" or "datasetcard"
-        file_path: Base path for raw data (default: "~/Repo/CitationLake/data/raw")
+        file_path: Base path for raw data (default: "~/Repo/ModelTables/data/raw")
         columns: List of columns to load (empty list means load all)
         date: Optional date string (e.g., "251116"). If provided, loads from data/raw_日期 directory
               and automatically detects the number of parquet files.
@@ -154,10 +154,10 @@ def load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw", colu
         except:
             # If config doesn't exist or fails, try to infer from file_path or use default
             if 'data' in file_path:
-                # Extract base path from file_path (e.g., "~/Repo/CitationLake/data/raw" -> "~/Repo/CitationLake/data")
+                # Extract base path from file_path (e.g., "~/Repo/ModelTables/data/raw" -> "~/Repo/ModelTables/data")
                 base_path = os.path.dirname(os.path.expanduser(file_path))
             else:
-                base_path = os.path.expanduser("~/Repo/CitationLake/data")
+                base_path = os.path.expanduser("~/Repo/ModelTables/data")
         
         # Construct path to raw_日期 directory
         file_path = os.path.join(base_path, f"raw_{date}")
@@ -349,22 +349,23 @@ def is_list_like(x):
 
 def to_list_safe(x):
     """
-    Convert x to a list safely, handling list, tuple, np.ndarray, and other types.
-    
-    Args:
-        x: Value to convert (can be list, tuple, np.ndarray, or other)
-        
-    Returns:
-        list: x converted to a list, or empty list if x is None/NaN
+    Convert x to a list safely, handling list, tuple, np.ndarray, and other types,
+    while avoiding ambiguous truth-value checks on numpy arrays.
     """
-    if x is None or (hasattr(pd, 'isna') and pd.isna(x)):
+    if x is None:
         return []
     if isinstance(x, np.ndarray):
         return x.tolist()
-    elif isinstance(x, (list, tuple)):
+    if isinstance(x, (list, tuple)):
         return list(x)
-    else:
-        return [x] if x is not None else []
+    if hasattr(pd, "isna"):
+        try:
+            if pd.isna(x):
+                return []
+        except Exception:
+            # For types where pd.isna(x) returns an array or raises, just ignore
+            pass
+    return [x]
 
 def safe_json_dumps(x):
     if isinstance(x, np.ndarray):

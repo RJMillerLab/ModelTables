@@ -285,7 +285,11 @@ if __name__ == "__main__":
         valid_ds_df = load_combined_data(data_type="datasetcard", file_path=datasetcard_path, columns=["datasetId"], date=tag)
     else:
         # Fallback to default path (no date tag)
-        valid_ds_df = load_combined_data(data_type="datasetcard", file_path=os.path.expanduser("~/Repo/CitationLake/data/raw/"), columns=["datasetId"])
+        valid_ds_df = load_combined_data(
+            data_type="datasetcard",
+            file_path=os.path.expanduser("~/Repo/ModelTables/data/raw/"),
+            columns=["datasetId"],
+        )
     valid_dataset_ids = set(valid_ds_df["datasetId"].str.lower())
     del valid_ds_df
     print(f"Loaded {len(valid_dataset_ids)} valid dataset IDs")
@@ -320,9 +324,16 @@ if __name__ == "__main__":
     def to_list(x):
         if is_list_like(x):
             return to_list_safe(x)
-        # skip Pandas 的 NaN、None、pd.NaT
-        if pd.isna(x):
+        # Skip obvious null-like values while avoiding ambiguous array checks
+        if x is None:
             return []
+        if hasattr(pd, "isna"):
+            try:
+                if pd.isna(x):
+                    return []
+            except Exception:
+                # Some exotic types may cause pd.isna to return arrays or raise
+                pass
         return []
     # combine: readme + tag + self modelid
     df['tag_base_model_list']   = df['tag_base_model_list'].apply(to_list)

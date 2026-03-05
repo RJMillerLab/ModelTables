@@ -5,6 +5,7 @@ depre/
 results/
 logs/
 data/
+bak/
 arxiv_fulltext_html/
 cleaned_markdown_csvs/
 github_readme_output_2/

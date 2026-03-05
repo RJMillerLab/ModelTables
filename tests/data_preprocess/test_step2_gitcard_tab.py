@@ -165,9 +165,9 @@ def test_real_csv_files():
     
     # Paths to the real CSV files
     csv_files = [
-        "/Users/doradong/Repo/CitationLake/data/processed/deduped_hugging_csvs/ec8b87737d_table1.csv",
-        "/Users/doradong/Repo/CitationLake/data/processed/deduped_hugging_csvs/b82734632e_table2.csv",
-        "/Users/doradong/Repo/CitationLake/data/processed/deduped_hugging_csvs/c8ea08177c_table2.csv"
+        "/Users/doradong/Repo/ModelTables/data/processed/deduped_hugging_csvs/ec8b87737d_table1.csv",
+        "/Users/doradong/Repo/ModelTables/data/processed/deduped_hugging_csvs/b82734632e_table2.csv",
+        "/Users/doradong/Repo/ModelTables/data/processed/deduped_hugging_csvs/c8ea08177c_table2.csv"
     ]
     
     for i, csv_file in enumerate(csv_files, 1):

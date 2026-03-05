@@ -113,15 +113,22 @@ def populate_github_table_list(df_merged, processed_base_path, tag=None):
     for i, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Populating GitHub table list"):
         readme_paths = row['readme_path']
         # Handle different types: str, list, tuple, numpy.ndarray, or None
-        # Check numpy array first to avoid ValueError with pd.isna() on empty arrays
-        if pd.isna(readme_paths):
+        if readme_paths is None:
             readme_paths = []
         elif isinstance(readme_paths, str):
             readme_paths = [readme_paths]
         elif is_list_like(readme_paths):
+            # Safely handle numpy arrays / list-like without ambiguous pd.isna checks
             readme_paths = to_list_safe(readme_paths)
         else:
-            readme_paths = []
+            # Fallback for unexpected scalar values (e.g., NaN)
+            try:
+                if hasattr(pd, "isna") and pd.isna(readme_paths):
+                    readme_paths = []
+                else:
+                    readme_paths = []
+            except Exception:
+                readme_paths = []
         combined_csvs = []
         for md_file in readme_paths:
             if not md_file or not isinstance(md_file, str):

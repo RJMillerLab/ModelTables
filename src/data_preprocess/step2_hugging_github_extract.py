@@ -621,7 +621,7 @@ Exampled Output
 100%|███████████████████████████████████████████████████| 387883/387883 [01:20<00:00, 4793.16it/s]
 Start creating dictionary for {readme_path: list_of_tables}...
 Storing deduped CSVs: 100%|██████████████████████████████| 387883/387883 [13:59<00:00, 461.85it/s]
-✅ Deduped CSV mapping saved to: /Users/doradong/Repo/CitationLake/data/processed/hugging_deduped_mapping.json
+✅ Deduped CSV mapping saved to: /Users/doradong/Repo/ModelTables/data/processed/hugging_deduped_mapping.json
 ⚠️Step 2.2: Creating symlinks to 'sym_hugging_csvs' ...
 Linking CSVs: 100%|███████████████████████████████████| 1108759/1108759 [04:25<00:00, 4178.61it/s]
 End of HuggingFace part.
@@ -648,5 +648,5 @@ Processing Markdown files:  94%|████████████████
 Processing Markdown files: 100%|████████████████████████████| 19916/19916 [13:54<00:00, 23.87it/s]
 Processing GitHub readmes: 100%|█████████████████████| 1108759/1108759 [01:42<00:00, 10784.97it/s]
 ⚠️Step 4: Saving integrated DataFrame to Parquet file...
-✅ All done. Results saved to: /Users/doradong/Repo/CitationLake/data/processed/modelcard_step2.parquet
+✅ All done. Results saved to: /Users/doradong/Repo/ModelTables/data/processed/modelcard_step2.parquet
 """

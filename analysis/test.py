@@ -7,7 +7,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 
 data_type = "modelcard" # or "datasetcard"
-df = load_combined_data(data_type, file_path="~/Repo/CitationLake/data/raw/")
+df = load_combined_data(data_type, file_path="~/Repo/ModelTables/data/raw/")
 
 stats = get_statistics_card(df)
 print(json.dumps(stats, indent=4))

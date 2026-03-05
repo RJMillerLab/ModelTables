@@ -10,7 +10,7 @@ import pandas as pd
 from pathlib import Path
 
 # -------- paths / config --------
-RAW_DIR = os.path.expanduser("~/Repo/CitationLake/data/raw")  # parquet shards
+RAW_DIR = os.path.expanduser("~/Repo/ModelTables/data/raw")  # parquet shards
 # Pattern to match all relevant parquet shards (e.g., train-00000-of-00004.parquet … train-00003-of-00004.parquet)
 PARQUET_GLOB = os.path.join(RAW_DIR, "train-*-of-00004.parquet")
 

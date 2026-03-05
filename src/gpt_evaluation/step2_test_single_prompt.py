@@ -366,7 +366,11 @@ def test_single_model_pair(pairs_file: str, pair_index: int = 0, llm_model: str 
 	# Otherwise load from combined raw data
 	if card_a_raw is None or card_b_raw is None:
 		print("Loading model cards from raw combined data...")
-		df_raw = load_combined_data(data_type="modelcard", file_path="~/Repo/CitationLake/data/raw", columns=["modelId", "card"])  # minimal columns
+		df_raw = load_combined_data(
+			data_type="modelcard",
+			file_path="~/Repo/ModelTables/data/raw",
+			columns=["modelId", "card"],
+		)  # minimal columns
 		if df_raw is None or len(df_raw) == 0:
 			print("Failed to load combined raw modelcard data.")
 			return

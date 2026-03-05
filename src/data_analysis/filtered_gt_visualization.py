@@ -110,15 +110,15 @@ def calculate_table_frequencies(filtered_gt_tables, step3_dedup_path='data/proce
 def create_step_by_step_visualization(filtered_gt_tables, 
                                        raw_dir=None,
                                        parquet_pattern='train-*-of-00004.parquet',
-                                       step3_dedup_path='data/processed/modelcard_step3_dedup.parquet',
-                                       gt_related_path='data/processed/modelcard_gt_related_model.parquet',
+                                      step3_dedup_path='data/processed/modelcard_step3_dedup.parquet',
+                                      gt_related_path='data/processed/modelcard_gt_related_model.parquet',
                                        output_dir='data/analysis',
                                        output_suffix=''):
     """Create step-by-step filtering visualization with our agreed-upon steps.
     
     Args:
         filtered_gt_tables: Set of filtered GT table filenames
-        raw_dir: Directory containing raw parquet files (default: ~/Repo/CitationLake/data/raw)
+        raw_dir: Directory containing raw parquet files (default: ~/Repo/ModelTables/data/raw)
         parquet_pattern: Pattern for raw parquet files (default: 'train-*-of-00004.parquet')
         step3_dedup_path: Path to modelcard_step3_dedup parquet file
         gt_related_path: Path to modelcard_gt_related_model parquet file
@@ -131,7 +131,7 @@ def create_step_by_step_visualization(filtered_gt_tables,
     
     # Use card_statistics.py data source
     if raw_dir is None:
-        RAW_DIR = os.path.expanduser('~/Repo/CitationLake/data/raw')
+        RAW_DIR = os.path.expanduser('~/Repo/ModelTables/data/raw')
     else:
         RAW_DIR = os.path.expanduser(raw_dir)
     PARQUET_GLOB = os.path.join(RAW_DIR, parquet_pattern)
@@ -364,7 +364,7 @@ def main():
     """Main function to run the filtered GT analysis and visualization."""
     parser = argparse.ArgumentParser(description='Generate step-by-step filtering and table frequency visualizations')
     parser.add_argument('--raw-dir', type=str, default=None,
-                        help='Directory containing raw parquet files (default: ~/Repo/CitationLake/data/raw)')
+                        help='Directory containing raw parquet files (default: ~/Repo/ModelTables/data/raw)')
     parser.add_argument('--parquet-pattern', type=str, default='train-*-of-00004.parquet',
                         help='Pattern for raw parquet files (default: train-*-of-00004.parquet)')
     parser.add_argument('--step3-dedup', type=str, default='data/processed/modelcard_step3_dedup.parquet',
@@ -384,12 +384,11 @@ def main():
     
     args = parser.parse_args()
     
-    # Use v2 paths if requested
     if args.use_v2:
         if 'step3_dedup_v2' not in args.step3_dedup:
             args.step3_dedup = args.step3_dedup.replace('step3_dedup.parquet', 'step3_dedup_v2.parquet')
-        # Auto-add _v2 to output suffix if not already present
         if '_v2' not in args.output_suffix and not args.output_suffix.endswith('_v2'):
+            #args.output_suffix = '_v2' + args.output_suffix
             args.output_suffix = f'_v2{args.output_suffix}' if args.output_suffix else '_v2'
         print(f"🔧 V2 mode enabled - using v2 processed data files")
         print(f"📁 Output files will have suffix: {args.output_suffix}")
@@ -400,7 +399,7 @@ def main():
         args.output_suffix = f'{args.output_suffix}_{date_str}' if args.output_suffix else f'_{date_str}'
     
     print("=== Filtered GT Analysis and Visualization ===")
-    print(f"Raw data directory: {args.raw_dir or '~/Repo/CitationLake/data/raw'}")
+    print(f"Raw data directory: {args.raw_dir or '~/Repo/ModelTables/data/raw'}")
     print(f"Parquet pattern: {args.parquet_pattern}")
     print(f"Step3 dedup path: {args.step3_dedup}")
     print(f"GT related path: {args.gt_related}")
