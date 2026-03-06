@@ -11,14 +11,14 @@ python -m src.data_analysis.qc_anomaly --recursive --anomaly-min-cols 100 --anom
 import argparse
 import os
 import csv
+import pandas as pd
+import json
 import matplotlib.pyplot as plt
 import pandas as pd
 import sqlite3
+import duckdb
 from threading import Lock
-try:
-    from batch_process_tables import build_modelid_sql_query
-except Exception:
-    build_modelid_sql_query = None
+from src.data_analysis.batch_process_tables import build_modelid_sql_query
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from src.data_analysis.qc_stats import count_rows_fast, count_columns_from_header_fast
@@ -181,209 +181,180 @@ def build_resource_mappings(resource):
 
 def build_hugging_modelid_map():
     mapping = {}
-    try:
-        import duckdb
-        from batch_process_tables import build_modelid_sql_query
-        sql = build_modelid_sql_query() if build_modelid_sql_query else None
-        if sql:
-            con = duckdb.connect()
-            rows = con.execute(sql).fetchall()
-            con.close()
-            for csv_name, model_ids in rows:
-                if not csv_name:
+    sql = build_modelid_sql_query()
+    if sql:
+        print('running sql')
+        con = duckdb.connect()
+        rows = con.execute(sql).fetchall()
+        con.close()
+        for csv_name, model_ids in rows:
+            if not csv_name:
+                continue
+            base = os.path.basename(str(csv_name))
+            first_mid = str(model_ids).split(';')[0].strip() if model_ids else ''
+            if base and first_mid and base not in mapping:
+                mapping[base] = first_mid
+    else:
+        print('running pandas')
+        rel_path = "data/processed/modelcard_step3_merged.parquet"
+        if os.path.exists(rel_path):
+            import pandas as pd
+            df_rel = pd.read_parquet(rel_path)
+            cols = df_rel.columns.tolist()
+            for col in ["hugging_table_list_dedup", "hugging_table_list", "csv_paths"]:
+                if col not in cols:
                     continue
-                base = os.path.basename(str(csv_name))
-                first_mid = str(model_ids).split(';')[0].strip() if model_ids else ''
-                if base and first_mid and base not in mapping:
-                    mapping[base] = first_mid
-        else:
-            rel_path = "data/processed/modelcard_step3_merged.parquet"
-            if os.path.exists(rel_path):
-                import pandas as pd
-                df_rel = pd.read_parquet(rel_path)
-                cols = df_rel.columns.tolist()
-                for col in ["hugging_table_list_dedup", "hugging_table_list", "csv_paths"]:
-                    if col not in cols:
+                for _, row in df_rel.iterrows():
+                    mid = row.get("modelId")
+                    vals = row.get(col)
+                    if pd.isna(mid) or vals is None:
                         continue
-                    for _, row in df_rel.iterrows():
-                        mid = row.get("modelId")
-                        vals = row.get(col)
-                        if pd.isna(mid) or vals is None:
-                            continue
-                        if not isinstance(vals, (list, tuple)):
-                            vals = [vals]
-                        for v in vals:
-                            try:
-                                base = os.path.basename(str(v))
-                            except Exception:
-                                continue
-                            if base and base not in mapping:
-                                mapping[base] = mid
-                    if mapping:
-                        break
+                    if not isinstance(vals, (list, tuple)):
+                        vals = [vals]
+                    for v in vals:
+                        base = os.path.basename(str(v))
+                        if base and base not in mapping:
+                            mapping[base] = mid
+                if mapping:
+                    break
+    
+    # Also load v2 mapping (for v2_only files)
+    v2_mapping_json = "data/processed/hugging_deduped_mapping_v2.json"
+    step2_parquet = "data/processed/modelcard_step2.parquet"
+    
+    if os.path.exists(v2_mapping_json) and os.path.exists(step2_parquet):
+        # Load hash -> csv_paths mapping
+        with open(v2_mapping_json, 'r') as f:
+            hash_to_csvs = json.load(f)
         
-        # Also load v2 mapping (for v2_only files)
-        import pandas as pd
-        import json
-        v2_mapping_json = "data/processed/hugging_deduped_mapping_v2.json"
-        step2_parquet = "data/processed/modelcard_step2.parquet"
+        # Load modelId -> readme_hash mapping
+        df_step2 = pd.read_parquet(step2_parquet, columns=['modelId', 'readme_hash'])
+        hash_to_modelid = dict(zip(df_step2['readme_hash'], df_step2['modelId']))
         
-        if os.path.exists(v2_mapping_json) and os.path.exists(step2_parquet):
-            # Load hash -> csv_paths mapping
-            with open(v2_mapping_json, 'r') as f:
-                hash_to_csvs = json.load(f)
-            
-            # Load modelId -> readme_hash mapping
-            df_step2 = pd.read_parquet(step2_parquet, columns=['modelId', 'readme_hash'])
-            hash_to_modelid = dict(zip(df_step2['readme_hash'], df_step2['modelId']))
-            
-            # Build csv -> modelId mapping
-            for readme_hash, csv_list in hash_to_csvs.items():
-                model_id = hash_to_modelid.get(readme_hash)
-                if model_id and csv_list:
-                    for csv_path in csv_list:
-                        base = os.path.basename(str(csv_path))
-                        if base and base not in mapping:  # Don't overwrite v1 mapping
-                            mapping[base] = model_id
-            
-    except Exception:
-        pass
+        # Build csv -> modelId mapping
+        for readme_hash, csv_list in hash_to_csvs.items():
+            model_id = hash_to_modelid.get(readme_hash)
+            if model_id and csv_list:
+                for csv_path in csv_list:
+                    base = os.path.basename(str(csv_path))
+                    if base and base not in mapping:  # Don't overwrite v1 mapping
+                        mapping[base] = model_id
+        
     return mapping
 
 def build_github_source_map():
     mapping = {}
-    try:
-        import pandas as pd
-        import json
-        map_paths = [
-            "data/processed/csv_to_readme_mapping.parquet",
-            "data/processed/processed_paths.parquet",
-            "data/processed/raw_csv_to_text_mapping.parquet",
-        ]
-        for mp in map_paths:
-            if not os.path.exists(mp):
-                continue
-            df_map = pd.read_parquet(mp)
-            cols = df_map.columns.tolist()
-            if "csv_paths" in cols and "readme_path" in cols:
-                for _, row in df_map.iterrows():
-                    rp = row.get("readme_path")
-                    if isinstance(rp, (list, tuple)):
-                        rp = next((x for x in rp if isinstance(x, str) and x), None)
-                    cps = row.get("csv_paths")
-                    if cps is None:
-                        continue
-                    if not isinstance(cps, (list, tuple)):
-                        cps = [cps]
-                    for pth in cps:
-                        try:
-                            base = os.path.basename(str(pth))
-                        except Exception:
-                            continue
-                        if base and base not in mapping and isinstance(rp, str):
-                            mapping[base] = rp
-            elif "csv_path" in cols and "readme_path" in cols:
-                for _, row in df_map.iterrows():
-                    cp = row.get("csv_path")
-                    rp = row.get("readme_path")
-                    if isinstance(rp, (list, tuple)):
-                        rp = next((x for x in rp if isinstance(x, str) and x), None)
-                    if not isinstance(cp, str) or not isinstance(rp, str):
-                        continue
-                    base = os.path.basename(cp)
-                    if base and base not in mapping:
-                        mapping[base] = rp
-            if len(mapping) > 0:
-                break
-        
-        # Also load v2 mapping (md_to_csv_mapping.json in deduped_github_csvs_v2)
-        v2_mapping_json = "data/processed/deduped_github_csvs_v2/md_to_csv_mapping.json"
-        if os.path.exists(v2_mapping_json):
-            with open(v2_mapping_json, 'r') as f:
-                md_to_csv = json.load(f)
-            # md_to_csv maps: md_basename -> [list of csv_basenames]
-            # We reverse it to csv_basename -> md_basename
-            for md_file, csv_list in md_to_csv.items():
-                if not csv_list or csv_list is None:
+    map_paths = [
+        "data/processed/csv_to_readme_mapping.parquet",
+        "data/processed/processed_paths.parquet",
+        "data/processed/raw_csv_to_text_mapping.parquet",
+    ]
+    for mp in map_paths:
+        if not os.path.exists(mp):
+            continue
+        df_map = pd.read_parquet(mp)
+        cols = df_map.columns.tolist()
+        if "csv_paths" in cols and "readme_path" in cols:
+            for _, row in df_map.iterrows():
+                rp = row.get("readme_path")
+                if isinstance(rp, (list, tuple)):
+                    rp = next((x for x in rp if isinstance(x, str) and x), None)
+                cps = row.get("csv_paths")
+                if cps is None:
                     continue
-                readme_path = f"data/downloaded_github_readmes/{md_file}.md"
-                if isinstance(csv_list, list):
-                    for csv_basename in csv_list:
-                        if csv_basename and csv_basename not in mapping:
-                            mapping[csv_basename] = readme_path
-        
-    except Exception:
-        pass
+                if not isinstance(cps, (list, tuple)):
+                    cps = [cps]
+                for pth in cps:
+                    base = os.path.basename(str(pth))
+                    if base and base not in mapping and isinstance(rp, str):
+                        mapping[base] = rp
+        elif "csv_path" in cols and "readme_path" in cols:
+            for _, row in df_map.iterrows():
+                cp = row.get("csv_path")
+                rp = row.get("readme_path")
+                if isinstance(rp, (list, tuple)):
+                    rp = next((x for x in rp if isinstance(x, str) and x), None)
+                if not isinstance(cp, str) or not isinstance(rp, str):
+                    continue
+                base = os.path.basename(cp)
+                if base and base not in mapping:
+                    mapping[base] = rp
+        if len(mapping) > 0:
+            break
+    
+    # Also load v2 mapping (md_to_csv_mapping.json in deduped_github_csvs_v2)
+    v2_mapping_json = "data/processed/deduped_github_csvs_v2/md_to_csv_mapping.json"
+    if os.path.exists(v2_mapping_json):
+        with open(v2_mapping_json, 'r') as f:
+            md_to_csv = json.load(f)
+        # md_to_csv maps: md_basename -> [list of csv_basenames]
+        # We reverse it to csv_basename -> md_basename
+        for md_file, csv_list in md_to_csv.items():
+            if not csv_list or csv_list is None:
+                continue
+            readme_path = f"data/downloaded_github_readmes/{md_file}.md"
+            if isinstance(csv_list, list):
+                for csv_basename in csv_list:
+                    if csv_basename and csv_basename not in mapping:
+                        mapping[csv_basename] = readme_path
+    
     return mapping
 
 def build_arxiv_source_map():
     mapping = {}
-    try:
-        import pandas as pd
-        html_maps = [
-            "data/processed/html_table.parquet",
-            "data/processed/final_integration_with_paths.parquet",
-        ]
-        for hp in html_maps:
-            if not os.path.exists(hp):
-                continue
-            df_html = pd.read_parquet(hp)
-            cols = df_html.columns.tolist()
-            if "table_list" in cols and "html_path" in cols:
-                for _, row in df_html.iterrows():
-                    hpv = row.get("html_path")
-                    tl = row.get("table_list")
-                    if tl is None:
-                        continue
-                    if not isinstance(tl, (list, tuple)):
-                        tl = [tl]
-                    for pth in tl:
-                        try:
-                            base = os.path.basename(str(pth))
-                        except Exception:
-                            continue
-                        if base and base not in mapping and isinstance(hpv, str):
-                            mapping[base] = hpv
-            elif "html_table_list" in cols and "html_html_path" in cols:
-                for _, row in df_html.iterrows():
-                    hpv = row.get("html_html_path")
-                    tl = row.get("html_table_list")
-                    if tl is None:
-                        continue
-                    if not isinstance(tl, (list, tuple)):
-                        tl = [tl]
-                    for pth in tl:
-                        try:
-                            base = os.path.basename(str(pth))
-                        except Exception:
-                            continue
-                        if base and base not in mapping and isinstance(hpv, str):
-                            mapping[base] = hpv
-            if len(mapping) > 0:
-                break
-        
-        # Also load v2 mapping (html_parsing_results_v2.parquet)
-        v2_parquet = "data/processed/html_parsing_results_v2.parquet"
-        if os.path.exists(v2_parquet):
-            df_v2 = pd.read_parquet(v2_parquet)
-            if "csv_paths" in df_v2.columns and "html_path" in df_v2.columns:
-                for _, row in df_v2.iterrows():
-                    html_path = row.get("html_path")
-                    csv_paths = row.get("csv_paths")
-                    if csv_paths is None or not isinstance(html_path, str):
-                        continue
-                    if not isinstance(csv_paths, (list, tuple)):
-                        csv_paths = [csv_paths]
-                    for csv_path in csv_paths:
-                        try:
-                            base = os.path.basename(str(csv_path))
-                        except Exception:
-                            continue
-                        if base and base not in mapping:  # Don't overwrite v1 mapping
-                            mapping[base] = html_path
-        
-    except Exception:
-        pass
+    html_maps = [
+        "data/processed/html_table.parquet",
+        "data/processed/final_integration_with_paths.parquet",
+    ]
+    for hp in html_maps:
+        if not os.path.exists(hp):
+            continue
+        df_html = pd.read_parquet(hp)
+        cols = df_html.columns.tolist()
+        if "table_list" in cols and "html_path" in cols:
+            for _, row in df_html.iterrows():
+                hpv = row.get("html_path")
+                tl = row.get("table_list")
+                if tl is None:
+                    continue
+                if not isinstance(tl, (list, tuple)):
+                    tl = [tl]
+                for pth in tl:
+                    base = os.path.basename(str(pth))
+                    if base and base not in mapping and isinstance(hpv, str):
+                        mapping[base] = hpv
+        elif "html_table_list" in cols and "html_html_path" in cols:
+            for _, row in df_html.iterrows():
+                hpv = row.get("html_html_path")
+                tl = row.get("html_table_list")
+                if tl is None:
+                    continue
+                if not isinstance(tl, (list, tuple)):
+                    tl = [tl]
+                for pth in tl:
+                    base = os.path.basename(str(pth))
+                    if base and base not in mapping and isinstance(hpv, str):
+                        mapping[base] = hpv
+        if len(mapping) > 0:
+            break
+    
+    # Also load v2 mapping (html_parsing_results_v2.parquet)
+    v2_parquet = "data/processed/html_parsing_results_v2.parquet"
+    if os.path.exists(v2_parquet):
+        df_v2 = pd.read_parquet(v2_parquet)
+        if "csv_paths" in df_v2.columns and "html_path" in df_v2.columns:
+            for _, row in df_v2.iterrows():
+                html_path = row.get("html_path")
+                csv_paths = row.get("csv_paths")
+                if csv_paths is None or not isinstance(html_path, str):
+                    continue
+                if not isinstance(csv_paths, (list, tuple)):
+                    csv_paths = [csv_paths]
+                for csv_path in csv_paths:
+                    base = os.path.basename(str(csv_path))
+                    if base and base not in mapping:  # Don't overwrite v1 mapping
+                        mapping[base] = html_path
+    
     return mapping
 
 def print_overlap_summary(v1_file_map, v2_file_map):
@@ -422,10 +393,7 @@ def process_basenames(basenames, v1_file_map, v2_file_map, workers):
         if not path:
             return None, None
         ap = os.path.abspath(path)
-        try:
-            st = os.stat(ap)
-        except Exception:
-            return None, None
+        st = os.stat(ap)
         mtime = st.st_mtime
         size = st.st_size
         cached = cache_map.get(ap)

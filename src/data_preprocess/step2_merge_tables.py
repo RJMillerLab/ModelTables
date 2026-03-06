@@ -18,11 +18,6 @@ from tqdm import tqdm
 from collections import defaultdict
 from src.utils import to_parquet, load_config, is_list_like, to_list_safe
 
-FINAL_INTEGRATION_PARQUET   = "data/processed/final_integration_with_paths_v2.parquet"
-ALL_TITLE_PATH              = "data/processed/modelcard_all_title_list.parquet"
-MERGE_PATH                  = "data/processed/modelcard_step3_merged_v2.parquet"
-SIDE_PATH                   = "data/processed/modelcard_step2_v2.parquet"  # v1
-
 def _combine_lists(series):
     """
     Helper to combine lists while dropping NaN/None.
@@ -51,23 +46,11 @@ def _safe_parse_list(val):
 
 def populate_hugging_table_list(df_merged, processed_base_path, tag=None):
     """
-    Populate 'hugging_table_list' using 'hugging_deduped_mapping.json' (v1) or 'hugging_deduped_mapping_v2.json' (v2)
+    Populate 'hugging_table_list' using hugging_deduped_mapping. Tag = full suffix (e.g. v2_251117 → hugging_deduped_mapping_v2_251117.json).
     """
     suffix = f"_{tag}" if tag else ""
-    # Try v2 with tag first, then v2 without tag, then v1
-    hugging_map_json_path_v2_tag = os.path.join(processed_base_path, f"hugging_deduped_mapping_v2{suffix}.json")
-    hugging_map_json_path_v2 = os.path.join(processed_base_path, "hugging_deduped_mapping_v2.json")
-    hugging_map_json_path_v1 = os.path.join(processed_base_path, "hugging_deduped_mapping.json")
-    
-    if tag and os.path.exists(hugging_map_json_path_v2_tag):
-        print(f"📦 Using HuggingFace mapping v2 with tag: {hugging_map_json_path_v2_tag}")
-        hugging_map_json_path = hugging_map_json_path_v2_tag
-    elif os.path.exists(hugging_map_json_path_v2):
-        print(f"📦 Using HuggingFace mapping v2: {hugging_map_json_path_v2}")
-        hugging_map_json_path = hugging_map_json_path_v2
-    else:
-        print(f"📦 Using HuggingFace mapping v1: {hugging_map_json_path_v1}")
-        hugging_map_json_path = hugging_map_json_path_v1
+    hugging_map_json_path = os.path.join(processed_base_path, f"hugging_deduped_mapping{suffix}.json")
+    print(f"📦 Using HuggingFace mapping: {hugging_map_json_path}")
     
     with open(hugging_map_json_path, 'r', encoding='utf-8') as jf:
         hash_to_csv_map = json.load(jf)
@@ -83,29 +66,12 @@ def populate_hugging_table_list(df_merged, processed_base_path, tag=None):
 
 def populate_github_table_list(df_merged, processed_base_path, tag=None):
     """
-    Populate 'github_table_list' using 'md_to_csv_mapping.json' (v1) or v2 version
+    Populate 'github_table_list' using md_to_csv_mapping.json. Tag = full suffix (e.g. deduped_github_csvs_<tag>).
     """
     suffix = f"_{tag}" if tag else ""
-    # Try v2 with tag first, then v2 without tag, then v1
-    github_csvs_v2_tag = os.path.join(processed_base_path, f"deduped_github_csvs_v2{suffix}")
-    github_csvs_v2 = os.path.join(processed_base_path, "deduped_github_csvs_v2")
-    github_csvs_v1 = os.path.join(processed_base_path, "deduped_github_csvs")
-    github_mapping_v2_tag = os.path.join(github_csvs_v2_tag, "md_to_csv_mapping.json")
-    github_mapping_v2 = os.path.join(github_csvs_v2, "md_to_csv_mapping.json")
-    github_mapping_v1 = os.path.join(github_csvs_v1, "md_to_csv_mapping.json")
-    
-    if tag and os.path.exists(github_mapping_v2_tag):
-        print(f"📦 Using GitHub mapping v2 with tag: {github_mapping_v2_tag}")
-        github_csvs_folder = github_csvs_v2_tag
-        github_mapping_path = github_mapping_v2_tag
-    elif os.path.exists(github_mapping_v2):
-        print(f"📦 Using GitHub mapping v2: {github_mapping_v2}")
-        github_csvs_folder = github_csvs_v2
-        github_mapping_path = github_mapping_v2
-    else:
-        print(f"📦 Using GitHub mapping v1: {github_mapping_v1}")
-        github_csvs_folder = github_csvs_v1
-        github_mapping_path = github_mapping_v1
+    github_csvs_folder = os.path.join(processed_base_path, f"deduped_github_csvs{suffix}")
+    github_mapping_path = os.path.join(github_csvs_folder, "md_to_csv_mapping.json")
+    print(f"📦 Using GitHub mapping: {github_mapping_path}")
     
     with open(github_mapping_path, 'r', encoding='utf-8') as jf:
         md_to_csv_mapping = json.load(jf)
@@ -262,11 +228,11 @@ if __name__ == "__main__":
     tag = args.tag
     suffix = f"_{tag}" if tag else ""
     
-    # Determine input/output paths based on tag
-    final_integration_path = args.input_integration or os.path.join(processed_base_path, f"final_integration_with_paths_v2{suffix}.parquet")
+    # Determine input/output paths: tag is full suffix (no _v2 in template)
+    final_integration_path = args.input_integration or os.path.join(processed_base_path, f"final_integration_with_paths{suffix}.parquet")
     all_title_path = args.input_title_list or os.path.join(processed_base_path, f"modelcard_all_title_list{suffix}.parquet")
-    side_path = args.input_step2 or os.path.join(processed_base_path, f"modelcard_step2_v2{suffix}.parquet")
-    merge_path = args.output or os.path.join(processed_base_path, f"modelcard_step3_merged_v2{suffix}.parquet")
+    side_path = args.input_step2 or os.path.join(processed_base_path, f"modelcard_step2{suffix}.parquet")
+    merge_path = args.output or os.path.join(processed_base_path, f"modelcard_step3_merged{suffix}.parquet")
     
     print("📁 Paths in use:")
     print(f"   Final integration:  {final_integration_path}")

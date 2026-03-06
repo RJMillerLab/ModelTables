@@ -4,8 +4,10 @@ config.yaml
 depre/
 results/
 logs/
+data
 data/
 bak/
+scripts/
 arxiv_fulltext_html/
 cleaned_markdown_csvs/
 github_readme_output_2/
@@ -58,7 +60,6 @@ MANIFEST
 *.manifest
 *.spec
 cleaned_markdown_csvs/
-data/
 
 # Installer logs
 pip-log.txt

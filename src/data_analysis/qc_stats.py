@@ -16,22 +16,12 @@ from matplotlib.patches import Patch
 from src.utils import to_parquet, load_config, is_list_like, to_list_safe
 import csv
 
-V2_MODE = True  # Set to True to use v2 versions
-V2_SUFFIX = "_v2"  # Suffix for v2 output files
-
-# Filter configuration for tables that are too long or too wide (v2 filtering)
+# Filter configuration for tables that are too long or too wide
 MAX_COLS = 100  # Maximum number of columns
 MAX_ROWS = 200  # Maximum number of rows
 
-# Configuration (switch by V2_MODE)
-if V2_MODE:
-    INPUT_FILE = "data/processed/modelcard_step3_merged_v2.parquet"
-    INPUT_FILE_DEDUP = "data/processed/modelcard_step3_dedup_v2.parquet"
-    INTEGRATION_FILE = "data/processed/final_integration_with_paths_v2.parquet"
-else:
-    INPUT_FILE = "data/processed/modelcard_step3_merged.parquet"
-    INPUT_FILE_DEDUP = "data/processed/modelcard_step3_dedup.parquet"
-    INTEGRATION_FILE = "data/processed/final_integration_with_paths.parquet"
+# Default paths (CLI sets input parquets from --tag).
+PROCESSED_BASE_PATH = "data/processed"  # default base for resolving CSV paths to tag dirs; no need to pass around
 OUTPUT_DIR = "data/analysis"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 VALID_TITLE_PARQUET = "data/processed/all_title_list_valid.parquet"
@@ -67,41 +57,58 @@ RESOURCES = {
 BENCHMARK_NAMES = [x[0] for x in benchmark_data]  # For legend
 
 
-def find_v2_csv_path(original_path):
-    """Find v2 version of CSV file if it exists, otherwise return original path.
-    
-    Args:
-        original_path: Original CSV file path
-        
-    Returns:
-        Path to v2 version if exists, otherwise original path
+def _infer_resource_from_path(path):
+    """Infer resource from path (prefix match so tagged dirs like deduped_hugging_csvs_v2_251117 are recognized)."""
+    if "/deduped_hugging_csvs" in path or "/hugging" in path:
+        return "hugging"
+    if "/deduped_github_csvs" in path or "/github" in path:
+        return "github"
+    if "/tables_output" in path or "/html" in path:
+        return "html"
+    if "/llm_tables" in path or "/llm" in path:
+        return "llm"
+    return None
+
+
+def resolve_to_tagged_csv_path(path, tag):
     """
-    if not V2_MODE:
-        return original_path
-    
-    # Check if file exists
+    Resolve a parquet path to the CSV under the tag-specific directory.
+    Uses PROCESSED_BASE_PATH (default data/processed) so we don't pass it around.
+    - hugging/github/html: dirs deduped_hugging_csvs_<tag>, deduped_github_csvs_<tag>, tables_output_<tag>.
+    - llm_tables is not versioned: path unchanged.
+    """
+    if not path or not isinstance(path, str):
+        return path
+    res = _infer_resource_from_path(path)
+    if res is None:
+        return path
+    base = os.path.basename(path)
+    if res == "llm":
+        dir_name = "llm_tables"
+    else:
+        dir_name = {"hugging": "deduped_hugging_csvs", "github": "deduped_github_csvs", "html": "tables_output"}[res] + "_" + tag
+    target_dir = os.path.join(PROCESSED_BASE_PATH, dir_name)
+    current_dir = os.path.dirname(path)
+    if os.path.normpath(current_dir) == os.path.normpath(target_dir):
+        return path
+    candidate = os.path.join(target_dir, base)
+    return candidate if os.path.exists(candidate) else path
+
+
+def find_v2_csv_path(original_path):
+    """Legacy: If a v2 counterpart exists (deduped_*_v2, tables_output_v2), return it; else return original_path.
+    Prefer resolve_to_tagged_csv_path(path, tag) when tag is set."""
     if not os.path.exists(original_path):
         return original_path
-    
-    # Get directory and filename
     dir_path = os.path.dirname(original_path)
     filename = os.path.basename(original_path)
-    
-    # Look for v2 directory
     v2_dir = dir_path.replace('deduped_hugging_csvs', 'deduped_hugging_csvs_v2')
     v2_dir = v2_dir.replace('deduped_github_csvs', 'deduped_github_csvs_v2')
     v2_dir = v2_dir.replace('tables_output', 'tables_output_v2')
-    
-    # Check if v2 directory exists
     if not os.path.exists(v2_dir):
         return original_path
-    
-    # Look for v2 file
     v2_path = os.path.join(v2_dir, filename)
-    if os.path.exists(v2_path):
-        return v2_path
-    
-    return original_path
+    return v2_path if os.path.exists(v2_path) else original_path
 
 
 def count_rows_fast(csv_path, chunk_size=8 * 1024 * 1024, head_flag=False):
@@ -192,12 +199,17 @@ def should_filter_table_by_size_from_data(rows, cols):
     return False
 
 
-def process_csv_file(csv_file):
-    """Optimized CSV processing using binary reading for better performance."""
+def process_csv_file(csv_file, tag=None):
+    """Optimized CSV processing using binary reading for better performance.
+    When tag is set, resolve path to tag-specific dir (tag is the full suffix, e.g. v2 or v2_251117).
+    Otherwise use path as-is (no-tag run = v1 paths in parquet).
+    """
     try:
-        # Find v2 version if V2_MODE is enabled
-        actual_csv_file = find_v2_csv_path(csv_file)
-        
+        if tag:
+            actual_csv_file = resolve_to_tagged_csv_path(csv_file, tag)
+        else:
+            actual_csv_file = csv_file
+
         # df = pd.read_csv(actual_csv_file, dtype=str, keep_default_na=False)
         # Use optimized binary reading methods with head_flag=False to match pandas behavior
         rows = count_rows_fast(actual_csv_file, head_flag=False)  # Exclude header to match pandas
@@ -252,13 +264,13 @@ def compute_resource_stats(df, resource, tag=None):
     unique_paths = valid_paths.unique().tolist()
 
     dup_results = Parallel(n_jobs=-1)(
-        delayed(process_csv_file)(p)
+        delayed(process_csv_file)(p, tag)
         for p in tqdm(valid_paths.tolist(), desc=f"[DUPLICATED] Processing {resource} files")
     )
     dup_valid_files = [r[0] for r in dup_results if r[0] and r[0]['status'] == 'valid']
 
     dedup_results = Parallel(n_jobs=-1)(
-        delayed(process_csv_file)(p)
+        delayed(process_csv_file)(p, tag)
         for p in tqdm(unique_paths, desc=f"[DEDUP] Processing {resource} files")
     )
     dedup_valid_files = [r[0] for r in dedup_results if r[0] and r[0]['status'] == 'valid']
@@ -279,11 +291,11 @@ def compute_resource_stats(df, resource, tag=None):
     valid_title_paths = list()
     # iterate over rows
     for p_list, ht, hvt in zip(df[col], df['has_title'], df['has_valid_title']):
-        # Check if p_list is a valid list/array and not NaN
-        if pd.isna(p_list) or not is_list_like(p_list):
+        # Skip non list-like entries (including NaN / None)
+        if not is_list_like(p_list):
             continue
-        
-        # Convert to list safely
+
+        # Convert to list safely (supports numpy arrays / NaN, etc.)
         p_list = to_list_safe(p_list)
         
         # Extract valid string paths
@@ -628,27 +640,13 @@ def plot_metric(df, metric, filename):
     plt.close()
 
 
-def main(input_file=None, input_file_dedup=None, integration_file=None, output_dir=None, tag=None):
+def main(input_file, input_file_dedup, integration_file, tag):
     # Update global OUTPUT_DIR and VALID_TITLE_PARQUET for use in other functions
     global OUTPUT_DIR, VALID_TITLE_PARQUET
     
-    if input_file is None:
-        input_file = INPUT_FILE
-    if input_file_dedup is None:
-        input_file_dedup = INPUT_FILE_DEDUP
-    if integration_file is None:
-        integration_file = INTEGRATION_FILE
-    if output_dir is None:
-        output_dir = OUTPUT_DIR
-    
-    OUTPUT_DIR = output_dir
-    
     # Determine suffix for output files (use tag if provided)
     suffix = f"_{tag}" if tag else ""
-    
-    # Update VALID_TITLE_PARQUET based on tag
-    # Get processed_base_path from the caller or use default
-    processed_base_path = os.path.dirname(VALID_TITLE_PARQUET)  # "data/processed"
+    processed_base_path = os.path.dirname(VALID_TITLE_PARQUET) # "data/processed"
     VALID_TITLE_PARQUET = os.path.join(processed_base_path, f"all_title_list_valid{suffix}.parquet")
     
     df = pd.read_parquet(input_file, columns=['modelId', 'all_title_list'])
@@ -679,12 +677,8 @@ def main(input_file=None, input_file_dedup=None, integration_file=None, output_d
 
     results_df = create_combined_results(benchmark_data, resource_stats)
     
-    # Add v2 suffix and tag to output files if V2_MODE is enabled
-    if V2_MODE:
-        results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{V2_SUFFIX}{suffix}.parquet")
-        print(f"\n🔧 V2 Mode enabled - using v2 CSV files when available")
-    else:
-        results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{suffix}.parquet" if suffix else "benchmark_results.parquet")
+    # Use tag as full suffix for benchmark result file (e.g. v2, v2_251117).
+    results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{suffix}.parquet" if suffix else "benchmark_results.parquet")
     
     to_parquet(results_df, results_path)
     print(f"\nSaved results to {results_path}")
@@ -714,16 +708,30 @@ def main(input_file=None, input_file_dedup=None, integration_file=None, output_d
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Get statistics of tables in CSV files from different resources")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input', dest='input', default=None,
-                        help='Path to modelcard_step3_merged parquet (default: auto-detect from tag)')
-    parser.add_argument('--input-dedup', dest='input_dedup', default=None,
-                        help='Path to modelcard_step3_dedup parquet (default: auto-detect from tag)')
-    parser.add_argument('--input-integration', dest='input_integration', default=None,
-                        help='Path to final_integration_with_paths parquet (default: auto-detect from tag)')
-    parser.add_argument('--output-dir', dest='output_dir', default=None,
-                        help='Directory for output files (default: data/analysis)')
+    parser.add_argument(
+        '--tag',
+        dest='tag',
+        default=None,
+        help='Full suffix for versioning (e.g., v2 or v2_251117). Controls *_<tag>.parquet for inputs/outputs.',
+    )
+    parser.add_argument(
+        '--input',
+        dest='input',
+        default=None,
+        help='Path to modelcard_step3_merged parquet (default: modelcard_step3_merged[_<tag>].parquet)',
+    )
+    parser.add_argument(
+        '--input-dedup',
+        dest='input_dedup',
+        default=None,
+        help='Path to modelcard_step3_dedup parquet (default: modelcard_step3_dedup[_<tag>].parquet)',
+    )
+    parser.add_argument(
+        '--input-integration',
+        dest='input_integration',
+        default=None,
+        help='Path to final_integration_with_paths parquet (default: final_integration_with_paths[_<tag>].parquet)',
+    )
     args = parser.parse_args()
     
     config = load_config('config.yaml')
@@ -732,16 +740,15 @@ if __name__ == "__main__":
     tag = args.tag
     suffix = f"_{tag}" if tag else ""
     
-    # Determine input/output paths based on tag
-    input_file = args.input or os.path.join(processed_base_path, f"modelcard_step3_merged_v2{suffix}.parquet")
-    input_file_dedup = args.input_dedup or os.path.join(processed_base_path, f"modelcard_step3_dedup_v2{suffix}.parquet")
-    integration_file = args.input_integration or os.path.join(processed_base_path, f"final_integration_with_paths_v2{suffix}.parquet")
-    output_dir = args.output_dir or os.path.join(base_path, 'analysis')
+    # Determine input/output paths based on tag (tag is full suffix like v2 or v2_251117; no hardcoded _v2).
+    input_file = args.input or os.path.join(processed_base_path, f"modelcard_step3_merged{suffix}.parquet")
+    input_file_dedup = args.input_dedup or os.path.join(processed_base_path, f"modelcard_step3_dedup{suffix}.parquet")
+    integration_file = args.input_integration or os.path.join(processed_base_path, f"final_integration_with_paths{suffix}.parquet")
     
     print("📁 Paths in use:")
     print(f"   Input merged:        {input_file}")
     print(f"   Input dedup:          {input_file_dedup}")
     print(f"   Input integration:    {integration_file}")
-    print(f"   Output directory:     {output_dir}")
+    print(f"   Output directory:     {OUTPUT_DIR}")
     
-    main(input_file=input_file, input_file_dedup=input_file_dedup, integration_file=integration_file, output_dir=output_dir, tag=tag)
+    main(input_file=input_file, input_file_dedup=input_file_dedup, integration_file=integration_file, tag=tag)

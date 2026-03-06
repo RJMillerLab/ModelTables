@@ -53,13 +53,14 @@ DUPLICATE_MAPPING_JSON = os.path.join(OUTPUT_DIR, "duplicate_mapping.json")
 UNIQUE_FILES_TXT = os.path.join(OUTPUT_DIR, "unique_files.txt")
 DUPLICATE_GROUPS_JSON = os.path.join(OUTPUT_DIR, "duplicate_groups.json")
 STATS_PATH = os.path.join(OUTPUT_DIR, "stats.json")
-# Directories containing CSV files with their resource labels and priorities.
-DIRS = [
-    {"path": "data/processed/deduped_hugging_csvs_v2", "resource": "hugging", "priority": 1},
-    {"path": "data/processed/deduped_github_csvs_v2", "resource": "github", "priority": 2},
-    {"path": "data/processed/tables_output_v2", "resource": "html", "priority": 3},
-    {"path": "data/processed/llm_tables", "resource": "llm", "priority": 4}
+# V1 dirs (no tag): no _v2 suffix. No tag → use these only.
+DIRS_V1 = [
+    {"path": "data/processed/deduped_hugging_csvs", "resource": "hugging", "priority": 1},
+    {"path": "data/processed/deduped_github_csvs", "resource": "github", "priority": 2},
+    {"path": "data/processed/tables_output", "resource": "html", "priority": 3},
+    {"path": "data/processed/llm_tables", "resource": "llm", "priority": 4},
 ]
+DIRS = DIRS_V1
 # Resource priority dictionary (for comparing cross-resource priority)
 RESOURCE_PRIORITY = {
     "hugging": 1,
@@ -81,28 +82,9 @@ def is_generic_table(path):
     filename = os.path.basename(path)
     return any(pattern in filename for pattern in GENERIC_TABLE_PATTERNS)
 
-def normalize_path_to_relative(path):
-    """
-    Normalize a path to relative path format.
-    Converts absolute paths under data/processed to relative paths.
-    """
-    if not isinstance(path, str):
-        return path
-    if os.path.isabs(path):
-        try:
-            # Get the absolute path of data/processed
-            data_processed_abs = os.path.abspath('data/processed')
-            if path.startswith(data_processed_abs):
-                # Convert to relative path
-                return os.path.relpath(path, os.getcwd())
-        except:
-            pass
-    return path
-
 def get_linked_set_from_parquet(df, cols):
     """
-    Extract file paths from parquet columns and normalize them to relative paths.
-    Handles both absolute and relative paths by converting to relative paths.
+    Extract file paths from parquet columns (as-is; matching is done by (resource, basename) later).
     """
     linked_set = []
     for col in cols:
@@ -111,22 +93,56 @@ def get_linked_set_from_parquet(df, cols):
                 if is_list_like(paths):
                     for p in to_list_safe(paths):
                         if isinstance(p, str):
-                            p = normalize_path_to_relative(p)
                             linked_set.append(p)
                 elif isinstance(paths, str):
-                    paths = normalize_path_to_relative(paths)
                     linked_set.append(paths)
     return linked_set
 
+
+def parquet_path_to_local_path(p, path_by_key):
+    """
+    Map a parquet path (any prefix: CitationLake, ModelTables, relative) to local canonical path
+    by (resource, basename). Returns None if not found.
+    """
+    if not isinstance(p, str):
+        return None
+    res = infer_resource_from_path(p)
+    if res is None:
+        return None
+    key = (res, os.path.basename(p))
+    return path_by_key.get(key)
+
+
+def normalize_path_to_relative(path):
+    """
+    Normalize a path to relative form (data/processed/...) for duplicate_mapping lookup.
+    Used in update_row when resolving canonical path. Handles absolute paths under
+    any repo (ModelTables, CitationLake) by stripping to data/processed/...
+    """
+    if not isinstance(path, str):
+        return path
+    if os.path.isabs(path):
+        try:
+            data_processed_abs = os.path.abspath('data/processed')
+            if path.startswith(data_processed_abs):
+                return os.path.relpath(path, os.getcwd())
+            if "data/processed/" in path:
+                return path[path.find("data/processed/"):]
+        except Exception:
+            pass
+    return path
+
 def infer_resource_from_path(path: str):
-    """Infer the resource label from the canonical file path."""
-    if "/deduped_hugging_csvs_v2/" in path or "/deduped_hugging_csvs/" in path or "/hugging" in path:
+    """Infer the resource label from the canonical file path.
+    Uses prefix match so tagged dirs are recognized (e.g. deduped_hugging_csvs_v2_251117, llm_tables_251117).
+    """
+    if "/deduped_hugging_csvs" in path or "/hugging" in path:
         return "hugging"
-    if "/deduped_github_csvs_v2/" in path or "/deduped_github_csvs/" in path or "/github" in path:
+    if "/deduped_github_csvs" in path or "/github" in path:
         return "github"
-    if "/tables_output_v2/" in path or "/tables_output/" in path or "/html" in path:
+    if "/tables_output" in path or "/html" in path:
         return "html"
-    if "/llm_tables/" in path or "/llm" in path:
+    if "/llm_tables" in path or "/llm" in path:
         return "llm"
     return None
 
@@ -451,7 +467,7 @@ class BiasedLogNorm(LogNorm):
         scaled = super().__call__(value, clip)
         return np.power(scaled, self.bias)
 
-def save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=False):
+def save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=False, file_suffix=""):
     fontsize = 18
     plt.rcParams.update({
         'font.size': 18,           
@@ -556,17 +572,20 @@ def save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=False):
         )
     plt.tight_layout()
     
-    # Save with appropriate filename
-    suffix = "percentage" if is_percentage else "overlap"
-    plt.savefig(os.path.join(output_dir, f"heatmap_{suffix}.pdf"))
-    print(f"Heatmap saved to {os.path.join(output_dir, f'heatmap_{suffix}.pdf')}")
+    # Save with appropriate filename (file_suffix for versioning: e.g. _251117 for tag, empty for v2-only)
+    kind = "percentage" if is_percentage else "overlap"
+    basename = f"heatmap_{kind}{file_suffix}.pdf"
+    outpath = os.path.join(output_dir, basename)
+    plt.savefig(outpath)
+    print(f"Heatmap saved to {outpath}")
 
-def save_heatmap_percentage(dup_matrix, unique_counts, output_dir):
+def save_heatmap_percentage(dup_matrix, unique_counts, output_dir, file_suffix=""):
     """
     Save a heatmap showing the percentage of overlap between resources.
     The percentages are calculated based on the row totals.
+    file_suffix: Optional suffix for versioning (e.g. _251117).
     """
-    save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=True)
+    save_heatmap(dup_matrix, unique_counts, output_dir, is_percentage=True, file_suffix=file_suffix)
 
 def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None, tag=None):
     # Update global paths for use in other functions
@@ -604,31 +623,30 @@ def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None,
     df = pd.read_parquet(input_parquet, columns=['modelId', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped'])
     cols = ["hugging_table_list", "github_table_list", "html_table_list_mapped", "llm_table_list_mapped"]
     
-    # Update DIRS based on tag
+    # No tag → v1 dirs only. With tag → dirs with that suffix; fallback to v1 per resource if missing.
     processed_base_path = os.path.dirname(input_parquet) if input_parquet else "data/processed"
-    if tag:
+    if not tag:
+        dirs_to_use = DIRS_V1
+    else:
         dirs_with_tag = [
-            {"path": os.path.join(processed_base_path, f"deduped_hugging_csvs_v2_{tag}"), "resource": "hugging", "priority": 1},
-            {"path": os.path.join(processed_base_path, f"deduped_github_csvs_v2_{tag}"), "resource": "github", "priority": 2},
-            {"path": os.path.join(processed_base_path, f"tables_output_v2_{tag}"), "resource": "html", "priority": 3},
-            {"path": os.path.join(processed_base_path, f"llm_tables_{tag}"), "resource": "llm", "priority": 4}
+            {"path": os.path.join(processed_base_path, f"deduped_hugging_csvs_{tag}"), "resource": "hugging", "priority": 1},
+            {"path": os.path.join(processed_base_path, f"deduped_github_csvs_{tag}"), "resource": "github", "priority": 2},
+            {"path": os.path.join(processed_base_path, f"tables_output_{tag}"), "resource": "html", "priority": 3},
+            {"path": os.path.join(processed_base_path, f"llm_tables"), "resource": "llm", "priority": 4} # we don't update on llm_Tables
         ]
         # Fallback to non-tag directories if tag directories don't exist
         dirs_to_use = []
-        for dir_tag in dirs_with_tag:
-            if os.path.exists(dir_tag["path"]):
-                dirs_to_use.append(dir_tag)
+        for d in dirs_with_tag:
+            if os.path.exists(d["path"]):
+                dirs_to_use.append(d)
             else:
-                # Fallback to original DIRS
-                original_dir = next((d for d in DIRS if d["resource"] == dir_tag["resource"]), None)
-                if original_dir and os.path.exists(original_dir["path"]):
-                    dirs_to_use.append(original_dir)
-                    print(f"⚠️  Tag directory {dir_tag['path']} not found, using {original_dir['path']}")
-        if len(dirs_to_use) == 0:
-            print(f"⚠️  No tag directories found, falling back to default DIRS")
-            dirs_to_use = DIRS
-    else:
-        dirs_to_use = DIRS
+                v1_dir = next((x for x in DIRS_V1 if x["resource"] == d["resource"]), None)
+                if v1_dir and os.path.exists(v1_dir["path"]):
+                    dirs_to_use.append(v1_dir)
+                    print(f"⚠️  Tag dir {d['path']} not found, using v1 {v1_dir['path']}")
+        if not dirs_to_use:
+            print("⚠️  No tag dirs found, using v1")
+            dirs_to_use = DIRS_V1
     
     print(f"📁 Using directories:")
     for d in dirs_to_use:
@@ -638,7 +656,13 @@ def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None,
 
     linked_set = get_linked_set_from_parquet(df, cols)
     linked_set = set(linked_set)
-    print(f"Linked set size from parquet: {len(linked_set)}")
+    # Match by (resource, basename) so CitationLake/ModelTables/relative paths all align
+    linked_set_basename_keys = set(
+        (infer_resource_from_path(p), os.path.basename(p))
+        for p in linked_set
+        if isinstance(p, str) and os.path.basename(p) and infer_resource_from_path(p) is not None
+    )
+    print(f"Linked set size from parquet: {len(linked_set)} (basename keys: {len(linked_set_basename_keys)})")
     # intersection
     """existing_set = []
     for dir in file_paths:
@@ -657,38 +681,19 @@ def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None,
     resource_totals = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     resource_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     resource_generic_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
-    # Normalize linked_set paths for comparison
-    def normalize_path_for_comparison(path):
-        """Normalize path to relative path for consistent comparison."""
-        if not isinstance(path, str):
-            return path
-        if os.path.isabs(path):
-            try:
-                data_processed_abs = os.path.abspath('data/processed')
-                if path.startswith(data_processed_abs):
-                    return os.path.relpath(path, os.getcwd())
-            except:
-                pass
-        return path
-    
-    linked_set_normalized = {normalize_path_for_comparison(p) for p in linked_set}
-    
+    # Match by (resource, basename): parquet paths (CitationLake/ModelTables/any) align with local scan
     filtered_files_info = []
     for fi in tqdm(files_info, desc="Filtering files"):
         res = fi["resource"]
         resource_totals[res] += 1
-        
-        # Normalize file_path for comparison
-        normalized_file_path = normalize_path_for_comparison(fi["file_path"])
-        
-        # Filter 1: Must be in linked_set
-        # Filter 2: Must not be a generic table
-        if normalized_file_path in linked_set_normalized:
-            if not is_generic_table(fi["file_path"]):
-                resource_filtered[res] += 1
-                filtered_files_info.append(fi)
-            else:
-                resource_generic_filtered[res] += 1
+        key = (res, os.path.basename(fi["file_path"]))
+        if key not in linked_set_basename_keys:
+            continue
+        if not is_generic_table(fi["file_path"]):
+            resource_filtered[res] += 1
+            filtered_files_info.append(fi)
+        else:
+            resource_generic_filtered[res] += 1
     
     for res in RESOURCE_PRIORITY.keys():
         total = resource_totals[res]
@@ -746,17 +751,22 @@ def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None,
     time_start = time.time()
     # --- Step 6: Update the original parquet file with deduplicated file paths across resources ---
     print("Updating file paths in DataFrame using cross-resource duplicate mapping...")
-    # filter out invalid paths (qc remove)
-    # Normalize all VALID_PATHS to relative paths for consistent matching
-    VALID_PATHS = set(normalize_path_to_relative(fi['file_path']) for fi in filtered_files_info)
+    # (resource, basename) -> local path; parquet paths (any prefix) map to local via this
+    path_by_key = {(fi["resource"], os.path.basename(fi["file_path"])): fi["file_path"] for fi in filtered_files_info}
     for col in cols:
         total_before = df[col].apply(lambda x: len(to_list_safe(x)) if is_list_like(x) else 0).sum()
         print(f"Filtering {col}... Before: {total_before}")
-        # Normalize paths in df[col] to match VALID_PATHS format (relative paths)
-        df[col] = df[col].apply(
-            lambda x: [normalize_path_to_relative(p) for p in to_list_safe(x) if normalize_path_to_relative(p) in VALID_PATHS] 
-            if is_list_like(x) else []
-        )
+        # Keep only paths that exist locally; map parquet path -> local path by (resource, basename)
+        def map_to_local(path_list):
+            if not is_list_like(path_list):
+                return []
+            out = []
+            for p in to_list_safe(path_list):
+                local = parquet_path_to_local_path(p, path_by_key)
+                if local is not None:
+                    out.append(local)
+            return out
+        df[col] = df[col].apply(map_to_local)
         total_after = df[col].apply(lambda x: len(to_list_safe(x)) if is_list_like(x) else 0).sum()
         print(f"After: {total_after}")
     # map the file path to the canonical file path
@@ -808,15 +818,23 @@ def main(input_parquet=None, output_parquet=None, output_dir=None, fig_dir=None,
     dup_matrix.to_pickle(dup_matrix_file)
     print(f"Dup matrix saved to {dup_matrix_file}")
 
-    # Save both absolute and percentage heatmaps
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], FIG_DIR)
-    save_heatmap_percentage(dup_matrix, stats["cross_unique_counts"], FIG_DIR)
+    # Save both absolute and percentage heatmaps (with file_suffix for versioning: v2 vs v2_251117)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], FIG_DIR, file_suffix=suffix)
+    save_heatmap_percentage(dup_matrix, stats["cross_unique_counts"], FIG_DIR, file_suffix=suffix)
     print(f"Time taken: {time.time() - time_start} seconds")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument(
+        '--tag',
+        dest='tag',
+        default=None,
+        help=(
+            "Full suffix for versioning (optional). "
+            "Recommended patterns: no tag (v1), 'v2', or 'v2_251117'. "
+            "When set, parquet files use modelcard_step3_*_<tag>.parquet."
+        ),
+    )
     parser.add_argument('--input', dest='input', default=None,
                         help='Path to modelcard_step3_merged parquet (default: auto-detect from tag)')
     parser.add_argument('--output', dest='output', default=None,
@@ -830,12 +848,20 @@ if __name__ == "__main__":
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
     processed_base_path = os.path.join(base_path, 'processed')
+
     tag = args.tag
-    suffix = f"_{tag}" if tag else ""
-    
-    # Determine input/output paths based on tag
-    input_parquet = args.input or os.path.join(processed_base_path, f"modelcard_step3_merged_v2{suffix}.parquet")
-    output_parquet = args.output or os.path.join(processed_base_path, f"modelcard_step3_dedup_v2{suffix}.parquet")
+    # Tag is treated as full suffix for parquet filenames: *_<tag>.parquet.
+    # Examples:
+    #   no tag       -> modelcard_step3_merged.parquet
+    #   tag=v2       -> modelcard_step3_merged_v2.parquet
+    #   tag=v2_251117-> modelcard_step3_merged_v2_251117.parquet
+    parquet_suffix = f"_{tag}" if tag else ""
+    # For directory-level outputs (deduped/duplicate_mapping_*.json etc.), reuse the same suffix.
+    suffix = parquet_suffix
+
+    # Determine input/output paths with optional override from CLI.
+    input_parquet = args.input or os.path.join(processed_base_path, f"modelcard_step3_merged{parquet_suffix}.parquet")
+    output_parquet = args.output or os.path.join(processed_base_path, f"modelcard_step3_dedup{parquet_suffix}.parquet")
     output_dir = args.output_dir or os.path.join(base_path, f"deduped{suffix}" if tag else "deduped")
     fig_dir = args.fig_dir or os.path.join(base_path, 'analysis')
     
@@ -845,4 +871,5 @@ if __name__ == "__main__":
     print(f"   Output directory:    {output_dir}")
     print(f"   Figure directory:    {fig_dir}")
     
+    # Pass tag through; internal code only uses it to build suffixes like _<tag>.
     main(input_parquet=input_parquet, output_parquet=output_parquet, output_dir=output_dir, fig_dir=fig_dir, tag=tag)

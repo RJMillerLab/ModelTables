@@ -15,10 +15,6 @@ from src.utils import load_config
 
 OUTPUT_DIR = "data/analysis"
 
-# V2 mode configuration (should match qc_stats.py)
-V2_MODE = True  # Set to True to use v2 versions of CSV files
-V2_SUFFIX = "_v2"  # Suffix for v2 output files
-
 RESOURCES = {
     'hugging': ['hugging_table_list_dedup'],
     'github': ['github_table_list_dedup'],
@@ -168,8 +164,9 @@ def plot_metrics_grid(df, include_wdc=True, output_dir=None, suffix=""):
         for ci, cluster in enumerate(clusters[1:], start=1):
             cluster_start = cluster_start_positions[ci - 1]
             for ri, resource in enumerate(resources):
-                suffix = cluster_key_map[cluster]
-                idx = f"scilake-{resource}{suffix}"
+                # Cluster-specific suffix for benchmark key (do NOT override the function-level suffix used for filenames).
+                cluster_suffix = cluster_key_map[cluster]
+                idx = f"scilake-{resource}{cluster_suffix}"
                 val = scilake_df[scilake_df['Benchmark'] == idx][metric].values
                 if len(val):
                     positions.append(cluster_start + ri * bar_width)
@@ -251,13 +248,9 @@ def plot_metrics_grid(df, include_wdc=True, output_dir=None, suffix=""):
     if output_dir is None:
         output_dir = OUTPUT_DIR
     
-    # Add v2 suffix and tag to output files if V2_MODE is enabled
-    if V2_MODE:
-        pdf_path = os.path.join(output_dir, f"benchmark_metrics_vertical{V2_SUFFIX}{suffix}.pdf")
-        png_path = os.path.join(output_dir, f"benchmark_metrics_vertical{V2_SUFFIX}{suffix}.png")
-    else:
-        pdf_path = os.path.join(output_dir, f"benchmark_metrics_vertical{suffix}.pdf" if suffix else "benchmark_metrics_vertical.pdf")
-        png_path = os.path.join(output_dir, f"benchmark_metrics_vertical{suffix}.png" if suffix else "benchmark_metrics_vertical.png")
+    # Use tag as full suffix for output files (e.g. v2, v2_251117), matching qc_stats.py.
+    pdf_path = os.path.join(output_dir, f"benchmark_metrics_vertical{suffix}.pdf" if suffix else "benchmark_metrics_vertical.pdf")
+    png_path = os.path.join(output_dir, f"benchmark_metrics_vertical{suffix}.png" if suffix else "benchmark_metrics_vertical.png")
     
     # Use bbox_inches='tight' carefully - it may crop legends, so we set explicit bottom space
     plt.savefig(pdf_path, dpi=300, bbox_inches='tight', pad_inches=0.1)
@@ -270,12 +263,24 @@ def plot_metrics_grid(df, include_wdc=True, output_dir=None, suffix=""):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot benchmark results for number of tables, columns, and average rows per table")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input', dest='input', default=None,
-                        help='Path to benchmark_results parquet (default: auto-detect from tag)')
-    parser.add_argument('--output-dir', dest='output_dir', default=None,
-                        help='Directory for output figures (default: data/analysis)')
+    parser.add_argument(
+        '--tag',
+        dest='tag',
+        default=None,
+        help='Full suffix for versioning (e.g., v2 or v2_251117). Controls benchmark_results_<tag>.parquet and output filenames.',
+    )
+    parser.add_argument(
+        '--input',
+        dest='input',
+        default=None,
+        help='Path to benchmark_results parquet (default: benchmark_results[_<tag>].parquet in data/analysis).',
+    )
+    parser.add_argument(
+        '--output-dir',
+        dest='output_dir',
+        default=None,
+        help='Directory for output figures (default: data/analysis)',
+    )
     args = parser.parse_args()
     
     config = load_config('config.yaml')
@@ -287,12 +292,8 @@ if __name__ == "__main__":
     output_dir = args.output_dir or os.path.join(base_path, 'analysis')
     os.makedirs(output_dir, exist_ok=True)
     
-    # Use v2 file if V2_MODE is enabled, and add tag suffix if provided
-    if V2_MODE:
-        results_path = args.input or os.path.join(output_dir, f"benchmark_results{V2_SUFFIX}{suffix}.parquet")
-        print(f"🔧 V2 Mode enabled - reading from {results_path}")
-    else:
-        results_path = args.input or os.path.join(output_dir, f"benchmark_results{suffix}.parquet" if tag else "benchmark_results.parquet")
+    # Use tag as full suffix for benchmark_results (e.g. v2, v2_251117), matching qc_stats.py.
+    results_path = args.input or os.path.join(output_dir, f"benchmark_results{suffix}.parquet" if tag else "benchmark_results.parquet")
     
     print("📁 Paths in use:")
     print(f"   Input results:        {results_path}")

@@ -221,17 +221,16 @@ def main():
     parser = argparse.ArgumentParser(description="Process CSV files in different modes")
     parser.add_argument("--mode", type=str, choices=["tr", "str", "str_tr"], default="tr", help="Processing mode")
     parser.add_argument("--repo_root", type=str, default="/u4/z6dong/Repo", help="Repository root directory.")
-    parser.add_argument("--tag", type=str, default=None, help="Tag suffix for versioning (e.g., 251117). If provided, uses tagged folders like deduped_hugging_csvs_v2_<tag>")
+    parser.add_argument("--tag", type=str, default=None, help="Full suffix for versioning (e.g. v2, v2_251117). No tag = v1 dirs; with tag = deduped_*_<tag>, tables_output_<tag>; llm_tables never versioned.")
     args = parser.parse_args()
     
-    # Determine folder suffix based on tag
+    # No tag = v1 dirs. With tag = tag as full suffix; llm_tables never versioned
     tag_suffix = f"_{args.tag}" if args.tag else ""
-    
     folders = [
-        f"CitationLake/data/processed/deduped_hugging_csvs_v2{tag_suffix}",
-        f"CitationLake/data/processed/deduped_github_csvs_v2{tag_suffix}",
-        f"CitationLake/data/processed/tables_output_v2{tag_suffix}",
-        f"CitationLake/data/processed/llm_tables{tag_suffix}" if args.tag else "CitationLake/data/processed/llm_tables"
+        f"CitationLake/data/processed/deduped_hugging_csvs{tag_suffix}" if args.tag else "CitationLake/data/processed/deduped_hugging_csvs",
+        f"CitationLake/data/processed/deduped_github_csvs{tag_suffix}" if args.tag else "CitationLake/data/processed/deduped_github_csvs",
+        f"CitationLake/data/processed/tables_output{tag_suffix}" if args.tag else "CitationLake/data/processed/tables_output",
+        "CitationLake/data/processed/llm_tables",
     ]
     for folder in folders:
         full_folder = os.path.join(args.repo_root, folder)

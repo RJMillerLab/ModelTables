@@ -5,6 +5,7 @@ Last Modified: 2025-04-08
 Description: Generate a markdown report for table retrieval results, automatically from JSON files.
 Usage: 
  python -m src.data_analysis.report_generation
+ python -m src.data_analysis.report_generation --tag v2_251117
  python -m src.data_analysis.report_generation --start_idx 10 --end_idx 20
  python -m src.data_analysis.report_generation --query_table 1810.04805_table4.csv
 """
@@ -18,13 +19,30 @@ from collections import defaultdict
 import numpy as np
 from tqdm import tqdm
 
-BASE_PATH = "/Users/doradong/Repo/CitationLake"
+BASE_PATH = "/Users/doradong/Repo/ModelTables"
 
-DATA_DIR  = os.path.join(BASE_PATH, "data/processed")
-FILES = {
-    "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup.parquet",    
-    "valid_title"  : f"{DATA_DIR}/all_title_list_valid.parquet"
-}
+DATA_DIR = os.path.join(BASE_PATH, "data/processed")
+# Single source of truth: set_files_for_tag() only. No tag = no suffix in filenames.
+FILES = None
+
+def set_files_for_tag(tag=None):
+    """Set FILES from tag. tag is the full suffix you pass (e.g. v2_251117).
+    No tag -> modelcard_step3_dedup.parquet, all_title_list_valid.parquet.
+    With tag -> modelcard_step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet.
+    """
+    global FILES
+    if tag is None or tag == "":
+        FILES = {
+            "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup.parquet",
+            "valid_title": f"{DATA_DIR}/all_title_list_valid.parquet",
+        }
+    else:
+        FILES = {
+            "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup_{tag}.parquet",
+            "valid_title": f"{DATA_DIR}/all_title_list_valid_{tag}.parquet",
+        }
+
+set_files_for_tag(None)  # init to no-tag paths
 
 def get_file_path(filename):
     hugging_pattern = r'^[0-9a-f]{10}_table\d+\.csv$'
@@ -166,6 +184,7 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None, 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate a markdown report from JSON files.")
+    parser.add_argument("--tag", type=str, default=None, help="Full suffix for versioning (e.g. v2_251117). Uses modelcard_step3_dedup_<tag>.parquet and all_title_list_valid_<tag>.parquet. No tag = no suffix.")
     parser.add_argument("--json_path", type=str, default="results/scilake_final/test_hnsw_search_shuffle_col_tfidf_entity_full.json", help="Path to the JSON file.")
     parser.add_argument("--query_table", type=str, default=None, help="Specify a single query table to output.")
     parser.add_argument("--start_idx", type=int, default=0, help="Start index for query tables (inclusive).")
@@ -174,4 +193,5 @@ if __name__ == "__main__":
     include_valid = True
     include_raw = False
     args = parser.parse_args()
+    set_files_for_tag(args.tag)
     generate_md_report(args.json_path, include_raw, include_valid, query_table=args.query_table, start_idx=args.start_idx, end_idx=args.end_idx, show_model_titles=args.show_model_titles)

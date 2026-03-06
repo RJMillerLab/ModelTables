@@ -18,11 +18,8 @@ from scipy.sparse import csr_matrix, lil_matrix, coo_matrix
 import time
 
 # === Configuration ===
-#INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet" # original query id from online
-INPUT_PARQUET = "data/processed/extracted_annotations.parquet" # query title from online
 SIMILARITY_MODES = ["max_pr", "jaccard", "dice"]
 INTENTS = ["methodology_or_result"] # "background", "methodology", "result", 
-COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"
 
 import argparse
 from src.utils import load_config, is_list_like, to_list_safe
@@ -128,11 +125,6 @@ def compute_direct_matrix(Id_to_all, paper_list):
     return mat
 
 def main(input_parquet=None, combined_path=None):
-    if input_parquet is None:
-        input_parquet = INPUT_PARQUET
-    if combined_path is None:
-        combined_path = COMBINED_PATH
-    
     df = pd.read_parquet(input_parquet)
     df['corpusid'] = df['corpusid'].astype(str)
     print(f"Loaded {len(df)} rows")
@@ -225,6 +217,7 @@ if __name__ == "__main__":
     suffix = f"_{tag}" if tag else ""
     
     # Determine input/output paths based on tag
+    #INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet" # original query id from online
     input_parquet = args.input or os.path.join(processed_base_path, f"extracted_annotations{suffix}.parquet")
     combined_path = args.output or os.path.join(processed_base_path, f"modelcard_citation_all_matrices{suffix}.pkl.gz")
     

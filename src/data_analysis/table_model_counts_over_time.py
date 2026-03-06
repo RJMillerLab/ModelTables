@@ -9,7 +9,7 @@ This script creates a visualization showing:
 Using efficient SQL queries with DuckDB for fast processing.
 
 Author: Zhengyuan Dong
-Date: 2025-01-XX
+Date: 2025-11
 """
 
 import os
@@ -329,18 +329,19 @@ def main():
                        help='Directory to save output files')
     parser.add_argument('--output-suffix', type=str, default='',
                        help='Suffix to append to output filenames')
-    parser.add_argument('--use-v2', action='store_true',
-                       help='Use v2 version of step3_dedup file')
+    parser.add_argument('--tag', type=str, default=None,
+                       help='Full suffix for versioning (e.g. v2 or v2_251117). Uses step3_dedup_<tag>.parquet and output suffix _<tag>. Aligned with report_generation.')
     
     args = parser.parse_args()
     
-    # Use v2 if requested
-    if args.use_v2:
-        if 'step3_dedup_v2' not in args.step3_dedup:
-            args.step3_dedup = args.step3_dedup.replace('step3_dedup.parquet', 'step3_dedup_v2.parquet')
-        if '_v2' not in args.output_suffix:
-            args.output_suffix = f'_v2{args.output_suffix}' if args.output_suffix else '_v2'
-        print(f"🔧 V2 mode enabled")
+    # Apply tag (full suffix, e.g. v2 or v2_251117): only step3_dedup path and output_suffix; no hardcoded _v2.
+    default_step3 = 'data/processed/modelcard_step3_dedup.parquet'
+    if args.tag:
+        if args.step3_dedup == default_step3:
+            args.step3_dedup = f'data/processed/modelcard_step3_dedup_{args.tag}.parquet'
+        if not (args.output_suffix or '').strip():
+            args.output_suffix = f'_{args.tag}'
+        print(f"Tag mode: step3_dedup and output suffix use tag {args.tag!r}")
     
     # Load config
     config = load_config(args.config)
@@ -367,12 +368,8 @@ def main():
     # Initialize DuckDB connection
     con = duckdb.connect()
     
-    # Build and execute queries
-    # Determine valid_title_path based on v2 mode
-    if args.use_v2:
-        valid_title_path = os.path.expanduser('data/processed/all_title_list_valid.parquet')
-    else:
-        valid_title_path = os.path.expanduser('data/processed/all_title_list_valid.parquet')
+    # Build and execute queries: valid_title_path follows tag (with tag -> all_title_list_valid_<tag>.parquet, no tag -> all_title_list_valid.parquet).
+    valid_title_path = os.path.expanduser(f'data/processed/all_title_list_valid_{args.tag}.parquet' if args.tag else 'data/processed/all_title_list_valid.parquet')
     
     table_query = build_table_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob)
     model_query = build_model_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob)

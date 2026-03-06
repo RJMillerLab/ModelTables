@@ -92,6 +92,7 @@ This step extracts tabular data from various sources and processes it.
 # Versioning mode (with tag):
 # Input: data/processed/modelcard_step1_<tag>.parquet, github_readmes_info_<tag>.parquet, downloaded_github_readmes_<tag>/
 # Output: data/processed/modelcard_step2_v2_<tag>.parquet, data/processed/deduped_hugging_csvs_v2_<tag>/, data/processed/hugging_deduped_mapping_v2_<tag>.json, data/processed/deduped_github_csvs_v2_<tag>/, data/processed/deduped_github_csvs_v2_<tag>/md_to_csv_mapping.json
+############################################### Here we only keep v2 version for extracting table as this is more accurate
 python -m src.data_preprocess.step2_hugging_github_extract --tag 251117 > logs/step2_hugging_github_extract_251117.log 2>&1
 
 # Process downloaded GitHub HTML files to Markdown.
@@ -103,6 +104,8 @@ python -m src.data_preprocess.step2_git_md2text --tag 251117 > logs/step2_git_md
 # Input: modelcard_step1_<tag>.parquet, github_readme_cache_<tag>.parquet, downloaded_github_readmes_<tag>_processed/, PDF/GitHub URLs
 # Output: modelcard_all_title_list_<tag>.parquet, github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
 python -m src.data_preprocess.step2_arxiv_github_title --tag 251117 > logs/step2_arxiv_github_title_251117.log 2>&1
+# From repo root: target must be relative to the link's dir (data/processed), so same-dir name only:
+ln -sf modelcard_all_title_list_251117.parquet data/processed/modelcard_all_title_list_v2_251117.parquet
 
 # Save deduplicated titles for querying Semantic Scholar (S2ORC).
 # Input: modelcard_all_title_list_<tag>.parquet
@@ -145,6 +148,7 @@ python -m src.data_preprocess.step2_arxiv_get_html --tag 251117 > logs/step2_arx
 # Extract tables from arXiv HTML files.
 # Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional)
 # Output: html_table.parquet, tables_output/*.csv
+###############################################
 python -m src.data_preprocess.step2_arxiv_parse --tag 251117 > logs/step2_arxiv_parse_251117.log 2>&1
 python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --output_dir data/processed/tables_output_v2_251117 --tag 251117 --save_mode csv > logs/step2_arxiv_parse_v2_251117.log 2>&1  #/duckdb/sqlite 
 
@@ -170,8 +174,11 @@ python -m src.data_preprocess.step2_llm_save --tag 251117 > logs/step2_llm_save_
 
 This section details the process of generating ground truth labels for table unionability.
 ```bash
-python -m src.data_preprocess.step2_merge_tables --tag 251117 > logs/step2_merge_tables_251117.log 2>&1  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file. Input: final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_v2_<tag>.parquet. Output: modelcard_step3_merged_v2_<tag>.parquet
+python -m src.data_preprocess.step2_merge_tables --tag v2_251117 > logs/step2_merge_tables_v2_251117.log 2>&1  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file. Input: final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_v2_<tag>.parquet. Output: modelcard_step3_merged_v2_<tag>.parquet
+
+# for this script, we don't need v2 version, because paper citation won't be affected by the v2
 python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: extracted_annotations_<tag>.parquet. Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
+ln -sf modelcard_citation_all_matrices_251117.pkl.gz data/processed/modelcard_citation_all_matrices_v2_251117.pkl.gz
 python -m src.data_analysis.paper_relatedness_distribution --tag 251117 > logs/paper_relatedness_distribution_251117.log 2>&1  # (Optional) Plot violin figures of paper relatedness distribution. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: overlap_violin_by_mode_<tag>.pdf
 python -m src.data_analysis.paper_relatedness_threshold --tag 251117 > logs/paper_relatedness_threshold_251117.log 2>&1  # (Optional) Determine paper relatedness thresholds. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: score_*.pdf files in data/analysis/
 ```
@@ -181,10 +188,10 @@ python -m src.data_analysis.paper_relatedness_threshold --tag 251117 > logs/pape
 Ensure data quality and consistency before generating final ground truth.
 
 ```bash
-python -m src.data_preprocess.step2_dedup_tables --tag 251117 > logs/step2_dedup_tables_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet
-python -m src.data_analysis.qc_dedup_fig --tag 251117 > logs/qc_dedup_fig_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_<tag>/dup_matrix.pkl, deduped_<tag>/stats.json. Output: heatmaps in data/analysis/
-python -m src.data_analysis.qc_stats --tag 251117 > logs/qc_stats_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet
-python -m src.data_analysis.qc_stats_fig --tag 251117 > logs/qc_stats_fig_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
+python -m src.data_preprocess.step2_dedup_tables --tag v2_251117 > logs/step2_dedup_tables_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet
+python -m src.data_analysis.qc_dedup_fig --tag v2_251117 > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_<tag>/dup_matrix_<tag>.pkl, deduped_<tag>/stats_<tag>.json. Output: heatmaps heatmap_overlap_<tag>.pdf / heatmap_percentage_<tag>.pdf in data/analysis/
+python -m src.data_analysis.qc_stats --tag v2_251117 > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_<tag>.parquet. Output: benchmark_results_<tag>.parquet where <tag>=v2_251117.
+python -m src.data_analysis.qc_stats_fig --tag v2_251117 > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_<tag>.parquet. Output: benchmark_metrics_vertical_<tag>.pdf/png
 python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 #(Optional)
 python -m src.tools.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 #(Optional) # compare v1 and v2 table diff
 # (Optional) Double-check deduplication and mapping logic.
@@ -198,13 +205,13 @@ Generate the definitive ground truth files for evaluation.
 
 ```bash
 # (Depre) python -m src.data_gt.step3_create_symlinks --tag 251117 > logs/step3_create_symlinks_251117.log 2>&1  # Create symbolic links for organizing processed tables. Input: modelcard_step3_dedup_v2_<tag>.parquet. Output: modelcard_step4_v2_<tag>.parquet, sym_*_csvs_* (symbolic links)
-bash src/data_gt/step3_gt.sh 251117 > logs/step3_gt_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
+bash src/data_gt/step3_gt.sh v2_251117 > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
 python -m src.tools.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 # (Optional)
 python -m src.data_gt.debug_npz --gt-dir data/gt/ > logs/debug_npz.log 2>&1 # (Optional) Debug NPZ ground truth files to ensure valid conditions.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).
 python -m src.data_localindexing.turn_tus_into_pickle > logs/turn_tus_into_pickle.log 2>&1
 # (deprecate) python -m src.data_gt.gt_combine > logs/gt_combine.log 2>&1
-python -m src.data_gt.modelcard_matrix --tag 251117 > logs/modelcard_matrix_251117.log 2>&1  # Add other two levels of citation graphs (modelcard and dataset). Input: modelcard_step1_<tag>.parquet, modelcard_step3_dedup_v2_<tag>.parquet, modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_gt_related_model_<tag>.parquet, data/gt/scilake_gt_modellink_*_<tag>.npz
+python -m src.data_gt.modelcard_matrix --tag v2_251117 > logs/modelcard_matrix_v2_251117.log 2>&1  # Add other two levels of citation graphs (modelcard and dataset). Input: modelcard_step1_<tag>.parquet, modelcard_step3_dedup_v2_<tag>.parquet, modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_gt_related_model_<tag>.parquet, data/gt/scilake_gt_modellink_*_<tag>.npz
 python -m src.data_gt.merge_union --level direct --tag 251117 > logs/merge_union_251117.log 2>&1  # Merge union ground truth. Input: data/gt/*_<tag>.npz, *_<tag>.pkl. Output: data/gt/csv_pair_union_*_<tag>_processed.npz
 python -m src.data_analysis.gt_distri --tag 251117 > logs/gt_distri_251117.log 2>&1  # Plot GT length distribution (boxplot/violin). Input: data/gt/*_<tag>.npz
 python -m src.data_gt.nonzeroedge --gt_dir data/gt --tag 251117 > logs/nonzeroedge_251117.log 2>&1  # Compute non-zero edge statistics for citation graphs. Input: data/gt/*_<tag>.npz
@@ -228,10 +235,10 @@ Prepare data and augmentations for integration with the Starmie benchmark framew
 ```bash
 # Step 1: Create augmented table folders (tr/str/str_tr)
 # This creates folders like: deduped_hugging_csvs_v2_251117_tr, deduped_hugging_csvs_v2_251117_str
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode tr --tag 251117 > logs/trick_aug_tr_251117.log 2>&1   # Create transpose augmented folders
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str --tag 251117 > logs/trick_aug_str_251117.log 2>&1  # Create string augmented folders
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode tr --tag v2_251117 > logs/trick_aug_tr_v2_251117.log 2>&1   # Create transpose augmented folders
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str --tag v2_251117 > logs/trick_aug_str_v2_251117.log 2>&1  # Create string augmented folders
 # Or process all modes:
-#python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_tr --tag 251117 > logs/trick_aug_str_tr_251117.log 2>&1  # Create both str and tr augmented folders
+#python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_tr --tag v2_251117 > logs/trick_aug_str_tr_v2_251117.log 2>&1  # Create both str and tr augmented folders
 
 # Step 2: Create symlinks from CitationLake to starmie_internal
 # This creates symlinks in starmie_internal/data/scilake_final_<tag>/datalake
@@ -242,7 +249,7 @@ python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --di
 python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode all --dir-name scilake_final_251117 > logs/ln_scilake_all_251117.log 2>&1  # All modes (base, str, tr, tr_str)
 
 # Note: For default v2 version (no tag), omit --tag and use scilake_final_v2 as dir-name
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode tr > logs/trick_aug_tr_v2.log 2>&1  # No tag, uses v2 folders
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode tr --tag v2 > logs/trick_aug_tr_v2.log 2>&1  # No tag, uses v2 folders
 python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --dir-name scilake_final_v2 > logs/ln_scilake_base_v2.log 2>&1  # No tag, uses v2
 ```
 
@@ -441,8 +448,8 @@ Tools for analyzing the retrieval results and ground truth.
 ```bash
 # Get top-10 results from step3_search_hnsw.
 python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json > logs/report_generation.log 2>&1
-# then gen markdown
-python -m src.data_analysis.report_generation --json_path data/baseline/baseline1_dense.json --query_table 1810.04805_table4.csv > logs/report_generation_baseline.log 2>&1
+# Use a specific version of step3_dedup/all_title_list_valid by passing full suffix tag (e.g. v2_251117).
+python -m src.data_analysis.report_generation --tag v2_251117 --json_path data/baseline/baseline1_dense.json --query_table 1810.04805_table4.csv > logs/report_generation_baseline_v2_251117.log 2>&1
 # --show_model_titles
 
 # Check if a specific CSV pair is related in the ground truth.
@@ -453,7 +460,7 @@ python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/s
 
 # CSV to ModelID Mapping
 # Get modelIDs from CSV files (supports GitHub, HuggingFace, HTML, LLM sources)
-python batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keywords.csv > logs/batch_process_tables.log 2>&1
+python src/data_analysis/batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keywords.csv > logs/batch_process_tables.log 2>&1
 # Analyze HTML table files and compare column counts between v1 and v2
 # Input: tmp/top_tables_with_keywords.csv (filtered for HTML source)
 # Output: tmp/html_table_analysis.csv with column count comparison
@@ -516,7 +523,7 @@ python -m src.data_analysis.hf_models_analysis > logs/hf_models_analysis.log 2>&
 python -m src.data_analysis.filtered_gt_visualization > logs/filtered_gt_visualization.log 2>&1
 python -m src.data_analysis.quick_visualization_final > logs/quick_visualization_final.log 2>&1
 # the count v.s. time visualization
-python src/data_analysis/table_model_counts_over_time.py --use-v2 --output-dir data/analysis > logs/table_model_counts_over_time.log 2>&1
+python src/data_analysis/table_model_counts_over_time.py --tag v2_251117 --output-dir data/analysis > logs/table_model_counts_over_time_v2_251117.log 2>&1  # step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet, output table_model_counts_over_time_<tag>.pdf/png
 # TODO: top-10!
 ```
 

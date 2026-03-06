@@ -33,23 +33,23 @@ DATA_DIR = "data/processed"
 GT_DIR = "data/gt"
 
 # ---- default files (can be overridden by CLI/kwargs) ----
-# These will be updated based on tag if provided
+# No tag = v1 paths (no _v2). With tag = full suffix, e.g. modelcard_step3_dedup_<tag>.parquet
 FILES = {
     "combined": f"{DATA_DIR}/modelcard_citation_all_matrices.pkl.gz",
-    "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup_v2.parquet",
-    "integration": f"{DATA_DIR}/final_integration_with_paths_v2.parquet",
+    "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup.parquet",
+    "integration": f"{DATA_DIR}/final_integration_with_paths.parquet",
     "title_list": f"{DATA_DIR}/modelcard_all_title_list.parquet",
     "valid_title": f"{DATA_DIR}/all_title_list_valid.parquet"
 }
 
 def update_files_with_tag(tag=None):
-    """Update FILES dictionary with tag suffix if provided."""
+    """Update FILES dictionary with tag suffix if provided. Tag is full suffix (e.g. v2, v2_251117)."""
     global FILES
     suffix = f"_{tag}" if tag else ""
     FILES = {
         "combined": f"{DATA_DIR}/modelcard_citation_all_matrices{suffix}.pkl.gz",
-        "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup_v2{suffix}.parquet",
-        "integration": f"{DATA_DIR}/final_integration_with_paths_v2{suffix}.parquet",
+        "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup{suffix}.parquet",
+        "integration": f"{DATA_DIR}/final_integration_with_paths{suffix}.parquet",
         "title_list": f"{DATA_DIR}/modelcard_all_title_list{suffix}.parquet",
         "valid_title": f"{DATA_DIR}/all_title_list_valid{suffix}.parquet" if suffix else f"{DATA_DIR}/all_title_list_valid.parquet"
     }
@@ -397,12 +397,14 @@ if __name__ == "__main__":
     parser.add_argument("--tag", dest="tag", default=None, help="Tag suffix for versioning (e.g., 251117). Enables versioning mode for input files.")
     args = parser.parse_args()
 
-    # Update file paths based on tag
+    # Update file paths based on tag (no tag = v1 paths)
     if args.tag:
         update_files_with_tag(args.tag)
-        print("📁 Using tag-based input files:")
-        for key, path in FILES.items():
-            print(f"   {key}: {path}")
-        print(f"   GT output directory: {GT_DIR}/ (with tag suffix)")
+    # Always print paths in use so you can verify in the log
+    print("📁 Paths in use:")
+    print(f"   tag: {args.tag!r}")
+    for key, path in FILES.items():
+        print(f"   {key}: {path}")
+    print(f"   GT output directory: {GT_DIR}/")
 
     build_ground_truth(rel_key=args.rel_key, overlap_rate_threshold=args.overlap_rate_threshold, tag=args.tag)

@@ -25,9 +25,9 @@ from collections import defaultdict
 from itertools import product
 from scipy.sparse import save_npz, coo_matrix
 
-DATA_PATH           = "data/processed/modelcard_step1.parquet" 
-DATA_2_PATH         = "data/processed/modelcard_step3_dedup_v2.parquet"
-DATA_3_PATH         = "data/processed/modelcard_step3_merged_v2.parquet"
+DATA_PATH           = "data/processed/modelcard_step1.parquet"
+DATA_2_PATH         = "data/processed/modelcard_step3_dedup.parquet"
+DATA_3_PATH         = "data/processed/modelcard_step3_merged.parquet"
 CARD_TAGS_KEY       = "card_tags"
 CARD_README_KEY     = 'card_readme'
 
@@ -254,8 +254,8 @@ if __name__ == "__main__":
     
     # Determine input paths based on tag
     data_path = args.input_step1 or os.path.join(processed_base_path, f"modelcard_step1{suffix}.parquet")
-    data_2_path = args.input_dedup or os.path.join(processed_base_path, f"modelcard_step3_dedup_v2{suffix}.parquet")
-    data_3_path = args.input_merged or os.path.join(processed_base_path, f"modelcard_step3_merged_v2{suffix}.parquet")
+    data_2_path = args.input_dedup or os.path.join(processed_base_path, f"modelcard_step3_dedup{suffix}.parquet")
+    data_3_path = args.input_merged or os.path.join(processed_base_path, f"modelcard_step3_merged{suffix}.parquet")
     output_related_path = args.output_related or (os.path.join(processed_base_path, f"modelcard_gt_related_model{suffix}.parquet") if tag else os.path.join(processed_base_path, "modelcard_gt_related_model.parquet"))
     
     print("📁 Paths in use:")

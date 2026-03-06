@@ -60,7 +60,7 @@ if __name__ == "__main__":
     with open(stats_file, "r") as f:
         stats = json.load(f)
 
-    # Generate both absolute and percentage heatmaps
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], fig_dir)
-    save_heatmap_percentage(dup_matrix, stats["cross_unique_counts"], fig_dir)
+    # Generate both absolute and percentage heatmaps (file_suffix from tag so v2 vs v2_251117 don't overwrite)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], fig_dir, file_suffix=suffix)
+    save_heatmap_percentage(dup_matrix, stats["cross_unique_counts"], fig_dir, file_suffix=suffix)
     print(f"✅ Heatmaps saved to {fig_dir}")
