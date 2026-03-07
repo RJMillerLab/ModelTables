@@ -89,23 +89,25 @@ This step extracts tabular data from various sources and processes it.
 ```bash
 # Extract tables from Hugging Face Model Cards and GitHub READMEs. Saves CSVs to local folder.
 # Versioning mode (with tag):
-# Input: data/processed/modelcard_step1_<tag>.parquet, github_readmes_info_<tag>.parquet, downloaded_github_readmes_<tag>/
-# Output: data/processed/modelcard_step2_v2_<tag>.parquet, data/processed/deduped_hugging_csvs_v2_<tag>/, data/processed/hugging_deduped_mapping_v2_<tag>.json, data/processed/deduped_github_csvs_v2_<tag>/, data/processed/deduped_github_csvs_v2_<tag>/md_to_csv_mapping.json
-############################################### Here we only keep v2 version for extracting table as this is more accurate; see v1 extracting, check the previous packaged version on github
-python -m src.data_preprocess.step2_hugging_github_extract --tag 251117 > logs/step2_hugging_github_extract_251117.log 2>&1
-
-# Process downloaded GitHub HTML files to Markdown. Skips when output file already exists (e.g. ln -s into _processed).
+# Process downloaded GitHub HTML files to Markdown. Skips when output file already exists (e.g. ln -s into _processed). 
 # Input: data/downloaded_github_readmes_<tag>/
 # Output: data/downloaded_github_readmes_<tag>_processed/, data/processed/md_parsing_results_v2_<tag>.parquet
 # (Optional) python -m src.data_preprocess.ln_giturl --source-dir data/downloaded_github_readmes_processed --target-dir data/downloaded_github_readmes_251117_processed > logs/ln_giturl_processed_251117.log 2>&1
 python -m src.data_preprocess.step2_git_md2text --tag 251117 > logs/step2_git_md2text_251117.log 2>&1
 
+# Extract tables from Hugging model cards + GitHub READMEs. Input: modelcard_step1, github_readmes_info, downloaded_github_readmes_<tag>/ (not _processed).
+# Input: data/processed/modelcard_step1_<tag>.parquet, github_readmes_info_<tag>.parquet, downloaded_github_readmes_<tag>/
+# Output: data/processed/modelcard_step2_v2_<tag>.parquet, data/processed/deduped_hugging_csvs_v2_<tag>/, data/processed/hugging_deduped_mapping_v2_<tag>.json, data/processed/deduped_github_csvs_v2_<tag>/, md_to_csv_mapping.json
+############################################### Here we only keep v2 version for extracting table as this is more accurate; see v1 extracting, check the previous packaged version on github
+python -m src.data_preprocess.step2_hugging_github_extract --tag 251117 > logs/step2_hugging_github_extract_251117.log 2>&1
+
 # Extract titles from arXiv and GitHub URLs (not S2ORC). For BibTeX entries and PDF URLs.
 # Input: modelcard_step1_<tag>.parquet, github_readme_cache_<tag>.parquet, downloaded_github_readmes_<tag>_processed/, PDF/GitHub URLs
-# Output: modelcard_all_title_list_<tag>.parquet, github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
-python -m src.data_preprocess.step2_arxiv_github_title --tag 251117 > logs/step2_arxiv_github_title_251117.log 2>&1
+# Output: modelcard_all_title_list_<tag>.parquet, 
+# (Output but not used anymore) github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
+python -m src.data_preprocess.step2_arxiv_github_title --tag 251117 > logs/step2_arxiv_github_title_251117.log 2>&1 # This one is slow..
 # From repo root: target must be relative to the link's dir (data/processed), so same-dir name only:
-ln -sf modelcard_all_title_list_251117.parquet data/processed/modelcard_all_title_list_v2_251117.parquet
+ln -s modelcard_all_title_list_251117.parquet data/processed/modelcard_all_title_list_v2_251117.parquet
 
 # Save deduplicated titles for querying Semantic Scholar (S2ORC).
 # Input: modelcard_all_title_list_<tag>.parquet

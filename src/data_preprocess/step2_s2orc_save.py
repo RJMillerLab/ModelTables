@@ -24,31 +24,19 @@ from src.data_preprocess.step2_arxiv_github_title import load_cache, save_cache 
 
 def main():
     parser = argparse.ArgumentParser(description='Save deduplicated titles for querying Semantic Scholar')
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input-title-list', dest='input_title_list', default=None,
-                        help='Path to all_title_list parquet file (default: auto-detect from tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     args = parser.parse_args()
-    
-    # Step 0: Load configuration and basic paths
+
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
     processed_base_path = os.path.join(base_path, 'processed')
     data_type = 'modelcard'
-    tag = args.tag
-    
-    # Determine input file based on tag
-    if args.input_title_list:
-        input_file = args.input_title_list
-    else:
-        input_suffix = f"_{tag}" if tag else ""
-        input_file = os.path.join(processed_base_path, f"{data_type}_all_title_list{input_suffix}.parquet")
-    
-    # Determine output files based on tag
-    output_suffix = f"_{tag}" if tag else ""
-    dedup_titles_path = os.path.join(processed_base_path, f"{data_type}_dedup_titles{output_suffix}.json")
-    query_results_path = os.path.join(processed_base_path, f"{data_type}_title_query_results{output_suffix}.json")
-    mapped_output_path = os.path.join(processed_base_path, f"{data_type}_all_title_list_mapped{output_suffix}.parquet")
+    suffix = f"_{args.tag}" if args.tag else ""
+
+    input_file = os.path.join(processed_base_path, f"{data_type}_all_title_list{suffix}.parquet")
+    dedup_titles_path = os.path.join(processed_base_path, f"{data_type}_dedup_titles{suffix}.json")
+    query_results_path = os.path.join(processed_base_path, f"{data_type}_title_query_results{suffix}.json")
+    mapped_output_path = os.path.join(processed_base_path, f"{data_type}_all_title_list_mapped{suffix}.parquet")
     
     print(f"📁 Input file: {input_file}")
     print(f"📁 Output files:")
@@ -63,7 +51,9 @@ def main():
     # Step 3: Extract and deduplicate all titles from "all_title_list" column
     print("Step 3: Extracting and deduplicating all titles...")
     all_titles = []
-    for titles in df_final["all_title_list"]: # all_bibtex_titles: reliable, all_title_list: need to be cleaned ...
+    for titles in df_final["all_title_list"]:
+        if titles is None or (hasattr(pd, "isna") and pd.isna(titles)):
+            continue
         if is_list_like(titles):
             all_titles.extend(to_list_safe(titles))
         elif isinstance(titles, str):

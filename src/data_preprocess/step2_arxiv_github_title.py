@@ -40,16 +40,11 @@ import ast
 class PdfReadError(Exception):
     pass
 
-# Cache paths will be determined dynamically based on tag
-def get_cache_paths(base_path, tag=None):
-    """Get cache file paths based on tag"""
-    processed_path = os.path.join(base_path, 'processed')
-    if tag:
-        arxiv_cache = os.path.join(processed_path, f"arxiv_titles_cache_{tag}.json")
-        rxiv_cache = os.path.join(processed_path, f"rxiv_titles_cache_{tag}.json")
-    else:
-        arxiv_cache = os.path.join(processed_path, "arxiv_titles_cache.json")
-        rxiv_cache = os.path.join(processed_path, "rxiv_titles_cache.json")
+# Cache paths: suffix is "_251117" or "" so one pattern for all
+def get_cache_paths(base_path, suffix=""):
+    processed_path = os.path.join(base_path, "processed")
+    arxiv_cache = os.path.join(processed_path, f"arxiv_titles_cache{suffix}.json")
+    rxiv_cache = os.path.join(processed_path, f"rxiv_titles_cache{suffix}.json")
     return arxiv_cache, rxiv_cache
 
 
@@ -315,10 +310,11 @@ def batch_fetch_arxiv_titles(arxiv_ids, chunk_size=20, delay_between_chunks=1):
     print("[DEBUG] Finished processing all chunks")  
     return results
 
-def update_downloaded_path(df):
-    df["downloaded_path"] = df["downloaded_path"].apply(
-        lambda x: x.replace("downloaded_github_readmes", "downloaded_github_readmes_processed") if isinstance(x, str) else x
-    )
+def update_downloaded_path(df, processed_basename):
+    """Normalize downloaded_path to use processed_basename (e.g. downloaded_github_readmes_251117_processed or downloaded_github_readmes_processed)."""
+    def _norm(path):
+        return re.sub(r"downloaded_github_readmes[^/]*", processed_basename, path, count=1) if isinstance(path, str) else path
+    df["downloaded_path"] = df["downloaded_path"].apply(_norm)
     return df
 
 # GitHub utilities from first script (in English comments now)
@@ -619,31 +615,19 @@ def fetch_url_title(url):
         print(f"Error in fetch_url_title({url}): {e}")
         return ""
 
-def load_github_cache(config, tag=None):
-    """Load GitHub cache, preferring tag-specific version if available"""
-    processed_path = os.path.join(config.get('base_path'), "processed")
-    
-    # Try tag-specific cache first, then fallback to default
-    if tag:
-        tag_cache_path = os.path.join(processed_path, f"github_readme_cache_{tag}.parquet")
-        if os.path.exists(tag_cache_path):
-            mapping_path = tag_cache_path
-        else:
-            # Fallback to default
-            mapping_path = os.path.join(processed_path, "github_readme_cache.parquet")
-    else:
-        updated_mapping_path = os.path.join(processed_path, "github_readme_cache_update.parquet")
-        if os.path.exists(updated_mapping_path):
-            mapping_path = updated_mapping_path
-        else:
-            mapping_path = os.path.join(processed_path, "github_readme_cache.parquet")
-    
+def load_github_cache(config, suffix=""):
+    """Load GitHub cache. Paths are normalized to downloaded_github_readmes{suffix}_processed."""
+    processed_path = os.path.join(config.get("base_path"), "processed")
+    tag_path = os.path.join(processed_path, f"github_readme_cache{suffix}.parquet")
+    mapping_path = tag_path if os.path.exists(tag_path) else os.path.join(processed_path, "github_readme_cache.parquet")
+    if not suffix:
+        update_path = os.path.join(processed_path, "github_readme_cache_update.parquet")
+        mapping_path = update_path if os.path.exists(update_path) else mapping_path
     if not os.path.exists(mapping_path):
         print(f"Warning: GitHub cache not found at {mapping_path}, using empty cache")
         return {}
-    
     mapping_df = pd.read_parquet(mapping_path)
-    mapping_df = update_downloaded_path(mapping_df) # fix path for new folder
+    mapping_df = update_downloaded_path(mapping_df, f"downloaded_github_readmes{suffix}_processed")
     url_to_hash = {
         str(k): str(v)
         for k, v in zip(mapping_df.get('raw_url', []), mapping_df.get('downloaded_path', []))
@@ -656,50 +640,28 @@ def main():
     parser = argparse.ArgumentParser(description='Extract titles from PDF and GitHub links')
     parser.add_argument('--tag', dest='tag', default=None,
                         help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input-step1', dest='input_step1', default=None,
-                        help='Path to step1 parquet file (default: auto-detect from tag)')
     args = parser.parse_args()
     
-    config = load_config('config.yaml')
-    base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
-    data_type = 'modelcard'
-    tag = args.tag
-    
-    # Determine input file based on tag
-    if args.input_step1:
-        step1_file = args.input_step1
-    else:
-        step1_suffix = f"_{tag}" if tag else ""
-        step1_file = os.path.join(processed_base_path, f"{data_type}_step1{step1_suffix}.parquet")
-    
-    output_suffix = f"_{tag}" if tag else ""
-    output_file = os.path.join(processed_base_path, f"{data_type}_all_title_list{output_suffix}.parquet")
-    
-    # Determine cache paths based on tag
-    ARXIV_CACHE_PATH, RXIV_CACHE_PATH = get_cache_paths(base_path, tag)
-    
-    # Determine GitHub readme folder based on tag
-    if tag:
-        GITHUB_README_FOLDER = os.path.join(base_path, f"downloaded_github_readmes_{tag}_processed")
-    else:
-        GITHUB_README_FOLDER = os.path.join(base_path, "downloaded_github_readmes_processed")
-    
-    # Determine GitHub cache and extraction cache paths
-    if tag:
-        github_extraction_cache_path = os.path.join(processed_base_path, f"github_extraction_cache_{tag}.json")
-        github_cache_update_path = os.path.join(processed_base_path, f"github_readme_cache_update_{tag}.parquet")
-    else:
-        github_extraction_cache_path = os.path.join(processed_base_path, "github_extraction_cache.json")
-        github_cache_update_path = os.path.join(processed_base_path, "github_readme_cache_update.parquet")
-    
+    config = load_config("config.yaml")
+    base_path = config.get("base_path", "data")
+    processed_base_path = os.path.join(base_path, "processed")
+    data_type = "modelcard"
+    suffix = f"_{args.tag}" if args.tag else ""
+
+    step1_file = os.path.join(processed_base_path, f"{data_type}_step1{suffix}.parquet")
+    output_file = os.path.join(processed_base_path, f"{data_type}_all_title_list{suffix}.parquet")
+    ARXIV_CACHE_PATH, RXIV_CACHE_PATH = get_cache_paths(base_path, suffix)
+    GITHUB_README_FOLDER = os.path.join(base_path, f"downloaded_github_readmes{suffix}_processed")
+    github_extraction_cache_path = os.path.join(processed_base_path, f"github_extraction_cache{suffix}.json")
+    github_cache_update_path = os.path.join(processed_base_path, f"github_readme_cache_update{suffix}.parquet")
+
     print(f"📁 Input step1 file: {step1_file}")
     print(f"📁 Output file: {output_file}")
     print(f"📁 GitHub readme folder: {GITHUB_README_FOLDER}")
     print(f"📁 ArXiv cache: {ARXIV_CACHE_PATH}")
     print(f"📁 GitHub extraction cache: {github_extraction_cache_path}")
     
-    GITHUB_PATH_CACHE = load_github_cache(config, tag)
+    GITHUB_PATH_CACHE = load_github_cache(config, suffix)
     print(f"Loaded {len(GITHUB_PATH_CACHE)} GitHub cache entries.")
 
     print("Step 1: Loading data from parquet (modelcard_step1)...")
@@ -730,8 +692,7 @@ def main():
             link=lk, domain=dm, category=cat, handler=handler, invalid=invalid
         ))
     df_links = pd.DataFrame(records)
-    links_csv_suffix = f"_{tag}" if tag else ""
-    links_csv_path = os.path.join(processed_base_path, f"all_links_with_category{links_csv_suffix}.csv")
+    links_csv_path = os.path.join(processed_base_path, f"all_links_with_category{suffix}.csv")
     df_links.to_csv(links_csv_path, index=False)
     print(f"Wrote {links_csv_path}")
 
