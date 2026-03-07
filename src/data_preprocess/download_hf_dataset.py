@@ -12,58 +12,20 @@ import shutil
 from pathlib import Path
 import subprocess
 import sys
+from huggingface_hub import hf_hub_download, list_repo_files
+import pyarrow.parquet as pq
 
 # Configuration defaults
 MODELCARD_DATASET = "librarian-bots/model_cards_with_metadata"
 DATASETCARD_DATASET = "librarian-bots/dataset_cards_with_metadata"
-DEFAULT_OUTPUT_DIR = Path("data/raw_251116")
-
-def install_package(package):
-    """Install a package using pip"""
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", package])
-    except subprocess.CalledProcessError:
-        print(f"Warning: Could not install {package}, trying without --break-system-packages")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-        except subprocess.CalledProcessError as e:
-            print(f"Error installing {package}: {e}")
-            return False
-    return True
+DEFAULT_OUTPUT_DIR = Path("data/raw_251117")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Download Hugging Face model_cards_with_metadata or dataset_cards_with_metadata snapshot")
-    parser.add_argument(
-        "--date",
-        type=str,
-        default=None,
-        help="Date tag (e.g., 251117). Output dir becomes data/raw_<date>. If downloading to 1118, will move to 1117 after download."
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default=None,
-        help="Custom output directory (overrides --date)."
-    )
-    parser.add_argument(
-        "--type",
-        type=str,
-        choices=["modelcard", "datasetcard"],
-        default="modelcard",
-        help="Type of cards to download: 'modelcard' or 'datasetcard' (default: modelcard)."
-    )
-    parser.add_argument(
-        "--dataset-name",
-        type=str,
-        default=None,
-        help="Hugging Face dataset ID (overrides --type)."
-    )
-    parser.add_argument(
-        "--move-to-date",
-        type=str,
-        default=None,
-        help="After download, move files to this date directory (e.g., 251117). Useful when downloading on 1118 but want to use 1117 tag."
-    )
+    parser.add_argument("--date", type=str, default=None, help="Date tag (e.g., 251117). Output dir becomes data/raw_<date>.")
+    parser.add_argument("--output-dir", type=str, default=None, help="Custom output directory (overrides --date).")
+    parser.add_argument("--type", type=str, choices=["modelcard", "datasetcard"], default="modelcard", help="Type of cards to download: 'modelcard' or 'datasetcard' (default: modelcard).")
+    parser.add_argument("--dataset-name", type=str, default=None, help="Hugging Face dataset ID (overrides --type).")
     return parser.parse_args()
 
 def main():
@@ -84,28 +46,6 @@ def main():
         output_dir = Path("data") / f"raw_{args.date}"
     else:
         output_dir = DEFAULT_OUTPUT_DIR
-    
-    # Determine target date for moving files
-    move_to_date = args.move_to_date or args.date
-    
-    # Try to import required packages
-    try:
-        from huggingface_hub import hf_hub_download, list_repo_files
-    except ImportError:
-        print("Installing huggingface_hub...")
-        if not install_package("huggingface_hub"):
-            print("Please install huggingface_hub manually: pip install huggingface_hub")
-            return
-        from huggingface_hub import hf_hub_download, list_repo_files
-    
-    try:
-        import pyarrow.parquet as pq
-    except ImportError:
-        print("Installing pyarrow...")
-        if not install_package("pyarrow"):
-            print("Please install pyarrow manually: pip install pyarrow")
-            return
-        import pyarrow.parquet as pq
     
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -150,6 +90,15 @@ def main():
         downloaded_files.append(local_path)
         print(f"✓ Downloaded to {local_path}")
     
+    # flatten: parquets under subdirs (e.g. data/) → output_dir
+    for p in output_dir.rglob("*.parquet"):
+        if p.parent != output_dir:
+            shutil.move(str(p), str(output_dir / p.name))
+    for subdir in sorted(output_dir.iterdir(), key=lambda x: len(x.parts), reverse=True):
+        if subdir.is_dir() and not any(subdir.iterdir()):
+            subdir.rmdir()
+    downloaded_files = [str(p) for p in output_dir.glob("*.parquet")]
+    
     print(f"\n✓ All files downloaded successfully to {output_dir.absolute()}")
     
     # Show file sizes
@@ -159,34 +108,6 @@ def main():
         total_size += size
         print(f"  {Path(file_path).name}: {size / (1024**3):.2f} GB")
     print(f"  Total size: {total_size / (1024**3):.2f} GB")
-    
-    # Move files to target date directory if specified
-    if move_to_date and move_to_date != args.date:
-        target_dir = Path("data") / f"raw_{move_to_date}"
-        if target_dir != output_dir:
-            print(f"\n📦 Moving files from {output_dir} to {target_dir}...")
-            target_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Move all parquet files
-            for file_path in downloaded_files:
-                src = Path(file_path)
-                # Keep the renamed filename (with datasetcard- prefix if applicable)
-                dst = target_dir / src.name
-                if dst.exists():
-                    print(f"  ⚠️  {dst.name} already exists, skipping...")
-                else:
-                    shutil.move(str(src), str(dst))
-                    print(f"  ✓ Moved {src.name} to {target_dir}")
-            
-            # Remove source directory if empty
-            try:
-                if output_dir.exists() and not any(output_dir.iterdir()):
-                    output_dir.rmdir()
-                    print(f"  ✓ Removed empty directory {output_dir}")
-            except:
-                pass
-            
-            print(f"\n✓ All files moved to {target_dir.absolute()}")
 
 if __name__ == "__main__":
     main()

@@ -19,7 +19,7 @@ Use `download_hf_dataset.py` to pull the newest `librarian-bots/model_cards_with
 
 ```bash
 mkdir logs
-# Download modelcards
+# Download modelcards/datasetcards dataset
 python -m src.data_preprocess.download_hf_dataset --date 251117 --type modelcard/datasetcard > logs/download_hf_dataset_251117.log 2>&1
 ```
 
@@ -29,16 +29,15 @@ This step extracts key metadata from model cards and associated links.
 ```bash
 # Split readme and tags, parse URLs, parse BibTeX entries.
 # Output: ['modelId', 'author', 'last_modified', 'downloads', 'likes', 'library_name', 'tags', 'pipeline_tag', 'createdAt', 'card', 'card_tags', 'card_readme', 'pdf_link', 'github_link', 'all_links', 'extracted_bibtex', 'extracted_bibtex_tuple', 'parsed_bibtex_tuple_list', 'successful_parse_count']
-# (Optional)
-#python -m src.data_preprocess.load_raw_to_db sqlite/duckdb > logs/load_raw_to_db.log 2>&1 # save raw to DuckDB, but will explode the memory
-python -m src.data_preprocess.step1_parse --raw-date 251117 --versioning --baseline-step1 data/processed/modelcard_step1.parquet > logs/step1_parse_251117.log 2>&1
+
+#python -m src.data_preprocess.step1_parse --raw-date 251117 --versioning --baseline-step1 data/processed/modelcard_step1.parquet > logs/step1_parse_251117.log 2>&1 # incremental mode, based on the previous step1 result
 # or 
-python -m src.data_preprocess.step1_parse --raw-date 251117 > logs/step1_parse_251117.log 2>&1
-python -m src.data_preprocess.step1_down_giturl --tag 251117 --versioning --baseline-cache data/processed/github_readme_cache.parquet > logs/step1_down_giturl_251117.log 2>&1 # Download GitHub READMEs and HTMLs from extracted URLs; Input: modelcard_step1.parquet, Output: giturl_info.parquet, downloaded_github_readmes/
-#python -m src.data_preprocess.step1_down_giturl_fake > logs/step1_down_giturl_fake.log 2>&1 # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
-find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' > logs/find_large_readmes.log 2>&1 # some readme files are too large
-# Query specific GitHub URL content (example). Input: local path to a downloaded README, Output: URL content
-python -m src.data_analysis.query_giturl load --query "data/downloaded_github_readmes/0a0c3d247213c087eb2472c3fe387292.md" > logs/query_giturl.log 2>&1 # sql. # (Optional)
+python -m src.data_preprocess.step1_parse --raw-date 251117 > logs/step1_parse_251117.log 2>&1 # output: modelcard_step1_251117.parquet
+python -m src.data_preprocess.step1_down_giturl --tag 251117 --versioning --baseline-cache data/processed/github_readme_cache.parquet > logs/step1_down_giturl_251117.log 2>&1 # Download GitHub READMEs; Input: modelcard_step1_251117.parquet. Download: only new files to data/downloaded_github_readmes_251117/. Output: (1) dir data/downloaded_github_readmes_251117/, (2) github_readmes_info_251117.parquet, (3) github_readme_cache_251117.parquet. All saved paths in (2)(3) are unified as data/downloaded_github_readmes_251117/ (reused from baseline are not re-downloaded; run ln_giturl to symlink baseline into this dir).
+python -m src.data_preprocess.ln_giturl --source-dir data/downloaded_github_readmes --target-dir data/downloaded_github_readmes_251117 > logs/ln_giturl_251117.log 2>&1 # Symlink all .md from source into target; skip if name already in target. In case that we try to analyze github readmes folder in the future
+# (Optional) python -m src.data_preprocess.step1_down_giturl_fake > logs/step1_down_giturl_fake.log 2>&1 # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
+# (Optional) find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' > logs/find_large_readmes.log 2>&1 # some readme files are too large, they are actually model files
+# (Optional) python -m src.data_analysis.query_giturl "data/downloaded_github_readmes/0a0c3d247213c087eb2472c3fe387292.md" --cache data/processed/github_readme_cache_251117.parquet > logs/query_giturl.log 2>&1 # Look up GitHub URL by local path
 ```
 
 ### 2\. Download and Build Database for Faster Querying
@@ -92,14 +91,15 @@ This step extracts tabular data from various sources and processes it.
 # Versioning mode (with tag):
 # Input: data/processed/modelcard_step1_<tag>.parquet, github_readmes_info_<tag>.parquet, downloaded_github_readmes_<tag>/
 # Output: data/processed/modelcard_step2_v2_<tag>.parquet, data/processed/deduped_hugging_csvs_v2_<tag>/, data/processed/hugging_deduped_mapping_v2_<tag>.json, data/processed/deduped_github_csvs_v2_<tag>/, data/processed/deduped_github_csvs_v2_<tag>/md_to_csv_mapping.json
-############################################### Here we only keep v2 version for extracting table as this is more accurate
+############################################### Here we only keep v2 version for extracting table as this is more accurate; see v1 extracting, check the previous packaged version on github
 python -m src.data_preprocess.step2_hugging_github_extract --tag 251117 > logs/step2_hugging_github_extract_251117.log 2>&1
 
-# Process downloaded GitHub HTML files to Markdown.
+# Process downloaded GitHub HTML files to Markdown. Skips when output file already exists (e.g. ln -s into _processed).
 # Input: data/downloaded_github_readmes_<tag>/
 # Output: data/downloaded_github_readmes_<tag>_processed/, data/processed/md_parsing_results_v2_<tag>.parquet
+# (Optional) python -m src.data_preprocess.ln_giturl --source-dir data/downloaded_github_readmes_processed --target-dir data/downloaded_github_readmes_251117_processed > logs/ln_giturl_processed_251117.log 2>&1
 python -m src.data_preprocess.step2_git_md2text --tag 251117 > logs/step2_git_md2text_251117.log 2>&1
-#python -m src.data_preprocess.step2_git_md2text_v2 --n_jobs 8 --output_dir data/processed/md_processed_v2 --save_mode csv/duckdb/sqlite > logs/step2_git_md2text_v2.log 2>&1
+
 # Extract titles from arXiv and GitHub URLs (not S2ORC). For BibTeX entries and PDF URLs.
 # Input: modelcard_step1_<tag>.parquet, github_readme_cache_<tag>.parquet, downloaded_github_readmes_<tag>_processed/, PDF/GitHub URLs
 # Output: modelcard_all_title_list_<tag>.parquet, github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
@@ -213,7 +213,7 @@ python -m src.data_localindexing.turn_tus_into_pickle > logs/turn_tus_into_pickl
 # (deprecate) python -m src.data_gt.gt_combine > logs/gt_combine.log 2>&1
 python -m src.data_gt.modelcard_matrix --tag v2_251117 > logs/modelcard_matrix_v2_251117.log 2>&1  # Add other two levels of citation graphs (modelcard and dataset). Input: modelcard_step1_<tag>.parquet, modelcard_step3_dedup_v2_<tag>.parquet, modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_gt_related_model_<tag>.parquet, data/gt/scilake_gt_modellink_*_<tag>.npz
 python -m src.data_gt.merge_union --level direct --tag 251117 > logs/merge_union_251117.log 2>&1  # Merge union ground truth. Input: data/gt/*_<tag>.npz, *_<tag>.pkl. Output: data/gt/csv_pair_union_*_<tag>_processed.npz
-python -m src.data_analysis.gt_distri --tag 251117 > logs/gt_distri_251117.log 2>&1  # Plot GT length distribution (boxplot/violin). Input: data/gt/*_<tag>.npz
+python -m src.data_analysis.gt_distri --tag 251117 > logs/gt_distri_251117.log 2>&1  # Plot GT length distribution (boxplot/violin). Input: data/gt/*_<tag>.npz and *_<tag>_processed.npz (requires merge_union first). Use same --tag as merge_union.
 python -m src.data_gt.nonzeroedge --gt_dir data/gt --tag 251117 > logs/nonzeroedge_251117.log 2>&1  # Compute non-zero edge statistics for citation graphs. Input: data/gt/*_<tag>.npz
 # (test)python -m src.data_gt.test_modelcard_update --mode dataset > logs/test_modelcard_update.log 2>&1 # check whether matrix multiplication and for loop obtain the same results
 #(test)python -m src.data_gt.convert_adj_to_npz --input data/gt/scilake_gt_modellink_dataset_adj_processed.pkl --output-prefix data/gt/scilake_gt_modellink_dataset > logs/convert_adj_to_npz.log 2>&1 # pkl2npz

@@ -401,36 +401,44 @@ def process_github_readmes(row, output_folder, config):
     return csv_files
 ########
 
-def process_markdown_files(github_folder, output_folder):
+def _process_one_md_file(md_file, github_folder, output_folder, max_size_mb=5):
+    """
+    Process a single markdown file: extract tables, write CSVs. Returns (base_name, list_of_csv_basenames) or (base_name, None) if skipped (oversized).
+    """
+    md_path = os.path.join(github_folder, md_file)
+    if os.path.getsize(md_path) > max_size_mb * 1024 * 1024:
+        return (md_file.replace(".md", ""), None)
+    base_csv_name = md_file.replace(".md", "")
+    with open(md_path, 'r', encoding='utf-8') as f:
+        md_content = f.read()
+    _, tables = detect_and_extract_markdown_tables(md_content)
+    table_csv_basenames = []
+    for i, table in enumerate(tables):
+        table = sanitize_markdown_table_separators(table)
+        csv_basename = f"{base_csv_name}_table_{i}.csv"
+        csv_path = os.path.join(output_folder, csv_basename)
+        tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path)
+        if tmp_path:
+            table_csv_basenames.append(csv_basename)
+    return (base_csv_name, table_csv_basenames if table_csv_basenames else [])
+
+
+def process_markdown_files(github_folder, output_folder, n_jobs=-1):
     """
     Process all markdown files in github_folder and save them as CSV in output_folder.
-    Skips files larger than 100MB, but still records them in the mapping with value None.
-    If no tables are found, records an empty list.
+    Skips files larger than 5MB, but still records them in the mapping with value None.
+    If no tables are found, records an empty list. Uses joblib Parallel for speed.
     """
     os.makedirs(output_folder, exist_ok=True)
     markdown_files = [f for f in os.listdir(github_folder) if f.endswith(".md")]
-    md_to_csv_mapping = {}
-    for md_file in tqdm(markdown_files, desc="Processing Markdown files"):
-        md_path = os.path.join(github_folder, md_file)
-        # Check file size (skip if > 5MB, but still record in mapping)
-        if os.path.getsize(md_path) > 5 * 1024 * 1024:  # 5MB threshold
-            print(f"⚠️ Skipping {md_file} (File too large: {os.path.getsize(md_path) / (1024 * 1024):.2f} MB)")
-            md_to_csv_mapping[md_file.replace(".md", "")] = None  # Record as None
-            continue
-        base_csv_name = md_file.replace(".md", "")
-        with open(md_path, 'r', encoding='utf-8') as f:
-            md_content = f.read()
-        _, tables = detect_and_extract_markdown_tables(md_content)
-        table_csv_basenames = []
-        for i, table in enumerate(tables):
-            table = sanitize_markdown_table_separators(table)
-            csv_basename = f"{base_csv_name}_table_{i}.csv"
-            csv_path = os.path.join(output_folder, csv_basename)
-            tmp_path = MarkdownHandler.markdown_to_csv(table, csv_path)
-            if tmp_path:
-                table_csv_basenames.append(csv_basename)
-        # If no tables found, store an empty list instead of skipping
-        md_to_csv_mapping[base_csv_name] = table_csv_basenames if table_csv_basenames else []
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_process_one_md_file)(md_file, github_folder, output_folder)
+        for md_file in tqdm(markdown_files, desc="Processing Markdown files")
+    )
+    md_to_csv_mapping = {name: val for name, val in results}
+    skipped = sum(1 for v in md_to_csv_mapping.values() if v is None)
+    if skipped:
+        print(f"⚠️ Skipped {skipped} markdown file(s) (over 5MB).")
     # Save mapping as JSON for reference
     mapping_json_path = os.path.join(output_folder, "md_to_csv_mapping.json")
     with open(mapping_json_path, 'w', encoding='utf-8') as json_file:

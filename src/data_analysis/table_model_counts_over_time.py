@@ -23,19 +23,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-def load_config(config_path='config.yaml'):
-    """Load configuration from YAML file."""
-    import yaml
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-def get_raw_parquet_files(config, pattern='train-*-of-00004.parquet'):
-    """Get list of raw parquet files."""
-    raw_base_path = os.path.join(config.get('base_path', 'data/'), 'raw')
-    parquet_glob = os.path.join(raw_base_path, pattern)
-    return parquet_glob
-
-def build_table_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob):
+def build_table_count_query(step3_dedup_path, valid_title_path, date_source_path):
     """Build SQL query to count tables over time.
     
     Concatenates all table lists (hugging, github, html, llm) and counts unique tables per date.
@@ -47,7 +35,7 @@ def build_table_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob
         SELECT 
             modelId,
             CAST(createdAt AS DATE) as created_date
-        FROM read_parquet('{raw_parquet_glob}')
+        FROM read_parquet('{date_source_path}')
         WHERE modelId IS NOT NULL 
         AND createdAt IS NOT NULL
     ),
@@ -163,7 +151,7 @@ def build_table_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob
     """
     return query
 
-def build_model_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob):
+def build_model_count_query(step3_dedup_path, valid_title_path, date_source_path):
     """Build SQL query to count models over time.
     
     Only counts models with valid titles (all_title_list_valid) and tables.
@@ -173,7 +161,7 @@ def build_model_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob
         SELECT 
             modelId,
             CAST(createdAt AS DATE) as created_date
-        FROM read_parquet('{raw_parquet_glob}')
+        FROM read_parquet('{date_source_path}')
         WHERE modelId IS NOT NULL 
         AND createdAt IS NOT NULL
     ),
@@ -311,74 +299,51 @@ def create_visualization(table_df, model_df, output_dir='.', output_suffix=''):
     return merged_df
 
 def main():
-    """Main function."""
+    """Main function. All paths are determined by --tag only."""
     parser = argparse.ArgumentParser(
         description='Visualize table counts and model counts over time'
     )
-    parser.add_argument('--step3-dedup', type=str, 
-                       default='data/processed/modelcard_step3_dedup.parquet',
-                       help='Path to step3_dedup parquet file')
-    parser.add_argument('--raw-dir', type=str, default=None,
-                       help='Directory containing raw parquet files (default: from config)')
-    parser.add_argument('--raw-pattern', type=str, 
-                       default='train-*-of-00004.parquet',
-                       help='Pattern for raw parquet files')
-    parser.add_argument('--config', type=str, default='config.yaml',
-                       help='Path to config.yaml file')
-    parser.add_argument('--output-dir', type=str, default='.',
-                       help='Directory to save output files')
-    parser.add_argument('--output-suffix', type=str, default='',
-                       help='Suffix to append to output filenames')
     parser.add_argument('--tag', type=str, default=None,
-                       help='Full suffix for versioning (e.g. v2 or v2_251117). Uses step3_dedup_<tag>.parquet and output suffix _<tag>. Aligned with report_generation.')
+                       help='Version tag. With tag: step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet, modelcard_step1_<tag>.parquet (or step1_<short> when tag is v2_<short>), output _<tag>. No tag: untagged parquets and data/raw/train-*-of-00004.parquet.')
+    parser.add_argument('--output-dir', type=str, default='data/analysis',
+                       help='Directory to save output files')
     
     args = parser.parse_args()
+    tag = args.tag
+    processed = os.path.expanduser('data/processed')
+    step3_dedup_path = os.path.join(processed, f'modelcard_step3_dedup_{tag}.parquet') if tag else os.path.join(processed, 'modelcard_step3_dedup.parquet')
+    valid_title_path = os.path.join(processed, f'all_title_list_valid_{tag}.parquet') if tag else os.path.join(processed, 'all_title_list_valid.parquet')
     
-    # Apply tag (full suffix, e.g. v2 or v2_251117): only step3_dedup path and output_suffix; no hardcoded _v2.
-    default_step3 = 'data/processed/modelcard_step3_dedup.parquet'
-    if args.tag:
-        if args.step3_dedup == default_step3:
-            args.step3_dedup = f'data/processed/modelcard_step3_dedup_{args.tag}.parquet'
-        if not (args.output_suffix or '').strip():
-            args.output_suffix = f'_{args.tag}'
-        print(f"Tag mode: step3_dedup and output suffix use tag {args.tag!r}")
-    
-    # Load config
-    config = load_config(args.config)
-    
-    # Get raw parquet files path
-    if args.raw_dir:
-        raw_parquet_glob = os.path.join(args.raw_dir, args.raw_pattern)
+    # Date source (createdAt): with tag -> step1 parquet (write-hardcoded); no tag -> raw parquet (write-hardcoded)
+    if tag:
+        step1_path = os.path.join(processed, f'modelcard_step1_{tag}.parquet')
+        if not os.path.exists(step1_path) and tag.startswith('v2_'):
+            step1_path = os.path.join(processed, f'modelcard_step1_{tag[3:]}.parquet')  # v2_251117 -> 251117
+        if not os.path.exists(step1_path):
+            raise FileNotFoundError(f"Date source not found: {step1_path}")
+        date_source_path = step1_path
     else:
-        raw_base_path = os.path.join(config.get('base_path', 'data/'), 'raw')
-        raw_parquet_glob = os.path.join(raw_base_path, args.raw_pattern)
+        date_source_path = os.path.expanduser('data/raw/train-*-of-00004.parquet')
     
-    # Expand user path
-    raw_parquet_glob = os.path.expanduser(raw_parquet_glob)
-    step3_dedup_path = os.path.expanduser(args.step3_dedup)
+    output_suffix = f'_{tag}' if tag else ''
     
     print("="*60)
     print("📊 Table and Model Counts Over Time Visualization")
     print("="*60)
-    print(f"Step3 dedup path: {step3_dedup_path}")
-    print(f"Raw parquet glob: {raw_parquet_glob}")
-    print(f"Output directory: {args.output_dir}")
-    print(f"Output suffix: {args.output_suffix}")
+    print(f"Step3 dedup: {step3_dedup_path}")
+    print(f"Date source (createdAt): {date_source_path}")
+    print(f"Output dir: {args.output_dir}, suffix: {output_suffix or '(none)'}")
     
-    # Initialize DuckDB connection
     con = duckdb.connect()
     
-    # Build and execute queries: valid_title_path follows tag (with tag -> all_title_list_valid_<tag>.parquet, no tag -> all_title_list_valid.parquet).
-    valid_title_path = os.path.expanduser(f'data/processed/all_title_list_valid_{args.tag}.parquet' if args.tag else 'data/processed/all_title_list_valid.parquet')
-    
-    table_query = build_table_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob)
-    model_query = build_model_count_query(step3_dedup_path, valid_title_path, raw_parquet_glob)
+    table_query = build_table_count_query(step3_dedup_path, valid_title_path, date_source_path)
+    model_query = build_model_count_query(step3_dedup_path, valid_title_path, date_source_path)
     
     table_df = execute_query(con, table_query, "Calculating cumulative table counts")
     model_df = execute_query(con, model_query, "Calculating cumulative model counts")
     
     # Create visualization
-    merged_df = create_visualization(table_df, model_df, args.output_dir, args.output_suffix)
+    merged_df = create_visualization(table_df, model_df, args.output_dir, output_suffix)
     
     # Print summary statistics
     print("\n" + "="*60)

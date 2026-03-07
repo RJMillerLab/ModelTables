@@ -31,6 +31,7 @@ def create_local_filename(base_output_dir, github_url):
     filename = f"{url_hash}.md"
     return os.path.join(base_output_dir, filename)
 
+
 def parse_github_link(github_link):
     if not isinstance(github_link, str):
         return None, None
@@ -83,13 +84,17 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
     print(f"Found {total_links_before_dedup} GitHub links before deduplication.")
     print(f"Found {len(all_links)} unique GitHub URLs after deduplication.")
     
+    # rel_output_dir: must be data/downloaded_github_readmes_<tag>/ so parquet paths are canonical
+    rel_output_dir = "data/" + os.path.basename(os.path.normpath(base_output_dir))
+
     # Auto-cache: Always check for existing files in base_output_dir
-    # This is independent of versioning mode
     existing_in_dir = 0
     for link in all_links:
         local_filename = create_local_filename(base_output_dir, link)
         if os.path.exists(local_filename):
             rel_path = os.path.relpath(local_filename, base_path)
+            if not rel_path.startswith("data/"):
+                rel_path = "data/" + rel_path.lstrip("/")
             cache[link] = rel_path
             existing_in_dir += 1
     
@@ -150,9 +155,9 @@ def main_download(df, base_output_dir, to_path="data/github_readmes_info.parquet
                                 full_path = path if os.path.exists(path) else None
                         
                         if full_path and os.path.exists(full_path):
-                            # Store the original path (preserving folder structure)
                             if url not in cache:
-                                cache[url] = path  # Store relative path to preserve folder info
+                                # Unify path: always write as data/downloaded_github_readmes_<tag>/basename
+                                cache[url] = os.path.join(rel_output_dir, os.path.basename(path))
                             existing_count += 1
                             break  # Found existing file, no need to check other paths for this URL
             
@@ -295,20 +300,21 @@ def bulk_download_github_urls(all_links, base_output_dir, num_workers=8, base_pa
             return link, cache[link]
         local_filename = create_local_filename(base_output_dir, link)
         if os.path.exists(local_filename):
-            # Convert to relative path
             rel_path = os.path.relpath(local_filename, base_path)
+            if not rel_path.startswith("data/"):
+                rel_path = "data/" + rel_path.lstrip("/")
             cache[link] = rel_path
             return link, rel_path
         downloaded_path = download_readme(link, local_filename)
         if downloaded_path:
-            # Convert to relative path
             try:
                 downloaded_path = os.path.relpath(downloaded_path, base_path)
             except ValueError:
-                # If paths are on different drives (Windows), keep as is
                 pass
+            if downloaded_path and not downloaded_path.startswith("data/"):
+                downloaded_path = "data/" + downloaded_path.lstrip("/")
         cache[link] = downloaded_path
-        return link, downloaded_path
+        return link, cache[link]
     
     with tqdm_joblib(tqdm(desc="Bulk Download", total=len(all_links))) as progress_bar:
         results = Parallel(n_jobs=num_workers)(

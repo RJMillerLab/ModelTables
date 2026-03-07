@@ -275,7 +275,10 @@ def plot_violin(length_data, palette, title, prefix):
     plt.subplots_adjust(left=0.06, right=0.99, top=0.95, bottom=0.12)
     plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_violin.pdf"), 
                 bbox_inches='tight', pad_inches=0.02)
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}_violin.png"), 
+                bbox_inches='tight', pad_inches=0.02)
     print("Violin plot saved →", os.path.join(OUTPUT_DIR, f"{prefix}_violin.pdf"))
+    print("Violin plot saved →", os.path.join(OUTPUT_DIR, f"{prefix}_violin.png"))
 
 if __name__ == "__main__":
     import argparse
@@ -310,10 +313,10 @@ if __name__ == "__main__":
         else:
             print(f"{src}: no data")
 
-    # plot_histogram(lengths, "GT Length (All Sources)", "gt_all")
-    #plot_kde(lengths, "GT Length Distribution (All Sources)", "gt_all")
-    #plot_log_boxplot(lengths, PALETTE, "Log-scale GT link count distribution across benchmarks", "gt_boxplot")
-    plot_violin(lengths, PALETTE, "Log-scale links count distribution across benchmarks", "gt_violin")
+    # plot_histogram(lengths, "GT Length (All Sources)", f"gt_all{suffix}")
+    #plot_kde(lengths, "GT Length Distribution (All Sources)", f"gt_all{suffix}")
+    #plot_log_boxplot(lengths, PALETTE, "Log-scale GT link count distribution across benchmarks", f"gt_boxplot{suffix}")
+    plot_violin(lengths, PALETTE, "Log-scale links count distribution across benchmarks", f"gt_violin{suffix}")
 
 """
 SANTOS Small: count=50, min=11, max=31

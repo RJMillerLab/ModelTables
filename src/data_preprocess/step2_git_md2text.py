@@ -10,6 +10,7 @@ from src.utils import to_parquet, load_config
 
 def process_md_file(filepath, input_root, output_dir, convert_only_when_html=True):
     rel_path = os.path.relpath(filepath, input_root)
+    out_path = os.path.join(output_dir, rel_path)
     result = {
         'input_path': filepath,
         'relative_path': rel_path,
@@ -17,6 +18,10 @@ def process_md_file(filepath, input_root, output_dir, convert_only_when_html=Tru
         'converted_from_html': False,
         'error': None,
     }
+    # skip if exist
+    if os.path.exists(out_path):
+        result['output_path'] = out_path
+        return result
     try:
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
