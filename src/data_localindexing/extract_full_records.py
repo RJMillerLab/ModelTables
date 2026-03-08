@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 # Extract full records from step*_file.ndjson matching the given citation IDs.
-# Usage:
-#     python extract_full_records.py \
-#            --ids hit_ids.txt \
-#            --src_dir /u4/z6dong/shared_data/se_citations_250218 \
-#            --out full_hits.jsonl
+# Usage (tag-only interface, consistent with other S2ORC scripts):
+#     python extract_full_records.py --tag 251117 --src_dir /u4/z6dong/shared_data/se_citations_250218
+# This will read IDs from hit_ids_<tag>.txt and write to full_hits_<tag>.jsonl.
 
 import argparse, glob, os, sys, re
 
@@ -27,14 +25,24 @@ def pick_lines(step_file: str, wanted: set[str], out_fh):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ids", required=True,
-                    help="hit_ids.txt, one citationid (numeric) per line")
-    ap.add_argument("--src_dir", required=True,
-                    help="Directory containing step*_file.ndjson")
-    ap.add_argument("--out", default="full_hits.jsonl")
+    ap.add_argument(
+        "--tag",
+        required=True,
+        help="Tag suffix (e.g. 251117). Controls both input IDs and output JSONL: "
+             "hit_ids_<tag>.txt → full_hits_<tag>.jsonl",
+    )
+    ap.add_argument(
+        "--src_dir",
+        required=True,
+        help="Directory containing step*_file.ndjson",
+    )
     args = ap.parse_args()
 
-    wanted = iter_ids(args.ids)
+    suffix = f"_{args.tag}"
+    ids_path = f"hit_ids{suffix}.txt"
+    out_path = f"full_hits{suffix}.jsonl"
+
+    wanted = iter_ids(ids_path)
     if not wanted:
         print("⚠️  IDs file is empty. Exiting."); sys.exit(0)
 
@@ -43,10 +51,10 @@ def main():
         print("❌ No step*_file found."); sys.exit(1)
 
     print(f"🗃  Will scan {len(step_files)} files, extracting {len(wanted)} IDs")
-    with open(args.out, "w", encoding="utf-8") as out_fh:
+    with open(out_path, "w", encoding="utf-8") as out_fh:
         for fp in step_files:
             pick_lines(fp, wanted, out_fh)
-    print(f"✅  Done. Lines written to → {args.out}")
+    print(f"✅  Done. Lines written to → {out_path}")
 
 if __name__ == "__main__":
     main()

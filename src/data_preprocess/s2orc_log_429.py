@@ -4,7 +4,7 @@ Created: 2025-04-12
 Last Modified: 2025-04-12
 Description: This script extracts error titles from a log file and saves them in either TXT or JSON format.
 Usage:
-    python -m src.data_preprocess.s2orc_log_429 --logfile logs/s2orc_API_query.log --outformat json --outfile data/processed/modelcard_dedup_titles_429.json --error 429
+    python -m src.data_preprocess.s2orc_log_429 --logfile logs/s2orc_API_query_251117.log --outformat json --tag 251117 --error 429
 """
 
 import json
@@ -42,13 +42,18 @@ def save_as_json(titles, output_file):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract error titles from a log file")
     parser.add_argument("--logfile", help="Path to the log file")
-    parser.add_argument("--outformat", choices=["txt", "json"], help="Output format: txt or json")
-    parser.add_argument("--outfile", help="Path to the output file")
+    parser.add_argument("--outformat", choices=["txt", "json"], default="json", help="Output format: txt or json")
+    #parser.add_argument("--outfile", help="Path to the output file (default: data/processed/modelcard_dedup_titles_{tag}_429.json when --tag given)")
+    parser.add_argument("--tag", help="Tag suffix (e.g. 251117). When set, default outfile is modelcard_dedup_titles_{tag}_429.json")
     parser.add_argument("--error", type=str, default="", help="Error filter string, e.g. '429' or '404'")
     args = parser.parse_args()
 
+    #outfile = args.outfile
+    suffix = f"_{args.tag}" if args.tag else ""     
+    outfile = f"data/processed/modelcard_dedup_titles{suffix}_429.json"
+
     titles = extract_error_titles(args.logfile, error_filter=args.error if args.error else None)
     if args.outformat == "txt":
-        save_as_txt(titles, args.outfile)
+        save_as_txt(titles, outfile)
     elif args.outformat == "json":
-        save_as_json(titles, args.outfile)
+        save_as_json(titles, outfile)

@@ -432,7 +432,7 @@ def main():
             'source_files': [
                 'data/processed/modelcard_all_title_list.parquet',
                 'data/processed/all_title_list_valid.parquet',
-                'data/processed/giturl_info.parquet',
+                #'data/processed/giturl_info.parquet',
                 'data/processed/github_readmes_info.parquet'
             ]
         }

@@ -7,7 +7,9 @@ Created: 2025‑05‑04
 Last Edited: 2025‑05‑05
 """
 
-import json, pandas as pd
+import argparse
+import json
+import pandas as pd
 from pathlib import Path
 from collections import defaultdict
 from src.utils import to_parquet
@@ -17,12 +19,15 @@ DATA_DIR          = Path("data/processed")
 INPUT_JSONL       = DATA_DIR / "full_hits.jsonl"
 ID_LIST_TXT       = DATA_DIR / "tmp_local_ids.txt"        # ← whitelist
 
-CITATIONS_PQ      = DATA_DIR / "s2orc_citations_cache.parquet"
-REFERENCES_PQ     = DATA_DIR / "s2orc_references_cache.parquet"
-QUERY_RESULTS_PQ  = DATA_DIR / "s2orc_query_results.parquet"
-TITLES_CACHE_FILE = DATA_DIR / "s2orc_titles2ids.parquet"
-
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Convert full_hits.jsonl to S2ORC-style parquet files")
+    parser.add_argument("--tag", default=None, help="Tag suffix (e.g. 251117). Outputs s2orc_*_{tag}.parquet")
+    args = parser.parse_args()
+    suffix = f"_{args.tag}" if args.tag else ""
+    CITATIONS_PQ      = DATA_DIR / f"s2orc_citations_cache{suffix}.parquet"
+    REFERENCES_PQ     = DATA_DIR / f"s2orc_references_cache{suffix}.parquet"
+    QUERY_RESULTS_PQ  = DATA_DIR / f"s2orc_query_results{suffix}.parquet"
+    TITLES_CACHE_FILE = DATA_DIR / f"s2orc_titles2ids{suffix}.parquet"
     # ---------- ❷ Read whitelist ----------
     with ID_LIST_TXT.open() as f:
         WL = [line.strip() for line in f if line.strip()]

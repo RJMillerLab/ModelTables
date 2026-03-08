@@ -11,23 +11,18 @@ Description:
     Later, you can merge these new results with your existing caches in your main merge function.
     
 Usage:
-    python -m src.data_preprocess.s2orc_retry_missing
+    python -m src.data_preprocess.s2orc_retry_missing --tag 251117
+    python -m src.data_preprocess.s2orc_retry_missing --tag 429   # legacy 429-only run
 """
 
 import os
+import argparse
 import pandas as pd
 from tqdm import tqdm
 from src.data_preprocess.s2orc_API_query import get_single_citations_row, get_single_references_row
 from src.utils import to_parquet
 
-prefix = "_429"  # Set prefix if needed (e.g. "_429")
 DATA_FOLDER = "data/processed"
-TITLES_CACHE_FILE = f"{DATA_FOLDER}/s2orc_titles2ids{prefix}.parquet"        # Titles mapping cache
-CITATIONS_CACHE_FILE = f"{DATA_FOLDER}/s2orc_citations_cache{prefix}.parquet"  # Original citations cache
-REFERENCES_CACHE_FILE = f"{DATA_FOLDER}/s2orc_references_cache{prefix}.parquet"  # Original references cache
-
-CITATIONS_MISSING_FILE = f"{DATA_FOLDER}/s2orc_citations_missing{prefix}.parquet"
-REFERENCES_MISSING_FILE = f"{DATA_FOLDER}/s2orc_references_missing{prefix}.parquet"
 
 def load_parquet_or_empty(file_path, columns):
     if os.path.exists(file_path):
@@ -36,6 +31,19 @@ def load_parquet_or_empty(file_path, columns):
         return pd.DataFrame(columns=columns)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Re-query missing citations/references (e.g. 429 errors)")
+    parser.add_argument("--tag", default=None, help="Tag suffix for versioning (e.g. 251117). Must match s2orc_API_query --tag.")
+    args = parser.parse_args()
+    if not args.tag:
+        raise SystemExit("--tag is required (e.g. --tag 251117). Ensures retry uses same version as s2orc_API_query.")
+
+    suffix = f"_{args.tag}"
+    TITLES_CACHE_FILE = f"{DATA_FOLDER}/s2orc_titles2ids{suffix}.parquet"
+    CITATIONS_CACHE_FILE = f"{DATA_FOLDER}/s2orc_citations_cache{suffix}.parquet"
+    REFERENCES_CACHE_FILE = f"{DATA_FOLDER}/s2orc_references_cache{suffix}.parquet"
+    CITATIONS_MISSING_FILE = f"{DATA_FOLDER}/s2orc_citations_missing{suffix}.parquet"
+    REFERENCES_MISSING_FILE = f"{DATA_FOLDER}/s2orc_references_missing{suffix}.parquet"
+
     # --- Load the Titles Mapping Cache ---
     if not os.path.exists(TITLES_CACHE_FILE):
         print(f"❌ Titles cache file {TITLES_CACHE_FILE} not found. Exiting.")
