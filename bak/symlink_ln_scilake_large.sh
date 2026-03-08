@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define repo root and target directory
-repo_root="/u4/z6dong/Repo" ######################################
+repo_root="/u501/z6dong/Repo" ######################################
 target_dir="$repo_root/starmie_internal/data/scilake_large/datalake"
 
 # List of subfolders relative to the repo root

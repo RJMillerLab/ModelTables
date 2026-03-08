@@ -3,8 +3,8 @@ Author: Zhengyuan Dong
 Created: 2025-03-09
 Last Modified: 2025-03-09
 
-python build_mini_s2orc.py build --directory /u4/z6dong/shared_data/se_s2orc_250218
-python build_mini_s2orc.py query --title "BioMANIA: Simplifying bioinformatics data analysis through conversation" --directory /u4/z6dong/shared_data/se_s2orc_250218
+python build_mini_s2orc.py build --directory /u501/z6dong/shared_data/se_s2orc_250218
+python build_mini_s2orc.py query --title "BioMANIA: Simplifying bioinformatics data analysis through conversation" --directory /u501/z6dong/shared_data/se_s2orc_250218
 """
 
 import os

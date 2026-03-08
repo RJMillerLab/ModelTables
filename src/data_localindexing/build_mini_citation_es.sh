@@ -12,15 +12,15 @@ echo "========Stopping any existing Elasticsearch processes on this node..."
 #sleep 5
 
 echo "========Removing stale lock files from shared directories..."
-rm -f /u4/z6dong/shared_data/elasticsearch-8.11.1/data/_state/write.lock
-rm -rf /u4/z6dong/shared_data/elasticsearch-8.11.1/data/snapshot_cache
+rm -f /u501/z6dong/shared_data/elasticsearch-8.11.1/data/_state/write.lock
+rm -rf /u501/z6dong/shared_data/elasticsearch-8.11.1/data/snapshot_cache
 
 # Set lower JVM heap settings to avoid excessive memory usage
 export ES_JAVA_OPTS="-Xms4g -Xmx4g"
 
 # Set up a local data directory to ensure exclusive usage
 #ES_DATA_DIR="/tmp/elasticsearch_data_${SLURM_JOB_ID}"
-ES_DATA_DIR="/u4/z6dong/shared_data/es_data_persistent"
+ES_DATA_DIR="/u501/z6dong/shared_data/es_data_persistent"
 rm -f ${ES_DATA_DIR}/node.lock
 rm -rf ${ES_DATA_DIR}/snapshot_cache/write.lock
 #rm -rf ${ES_DATA_DIR}/_state
@@ -32,7 +32,7 @@ NODE_IP=$(hostname -I | awk '{print $1}')
 echo "Node IP: ${NODE_IP}"
 
 echo "========Starting Elasticsearch..."
-ES_PATH="/u4/z6dong/shared_data/elasticsearch-8.11.1/bin/elasticsearch"
+ES_PATH="/u501/z6dong/shared_data/elasticsearch-8.11.1/bin/elasticsearch"
 nohup ${ES_PATH} \
   -Epath.data=${ES_DATA_DIR} \
   -Ediscovery.type=single-node \
@@ -74,11 +74,11 @@ curl -XGET "http://${NODE_IP}:9200/_cluster/health?wait_for_status=yellow&timeou
 
 echo "========Running bulk import..."
 
-#python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index --fields minimal
-#python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index_full --fields full
+#python build_mini_citation_es.py --mode build --directory /u501/z6dong/shared_data/se_citations_250218 --index_name citations_index --fields minimal
+#python build_mini_citation_es.py --mode build --directory /u501/z6dong/shared_data/se_citations_250218 --index_name citations_index_full --fields full
 #python build_mini_citation_es.py --mode query --index_name citations_index --id 150223110
 #python build_mini_citation_es.py --mode test --index_name citations_index
-#python build_mini_citation_es.py --mode update --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
+#python build_mini_citation_es.py --mode update --directory /u501/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
 #python build_mini_citation_es.py --mode prepare_ids
 #python build_mini_citation_es.py --mode batch --index_name citations_index --input_file tmp_local_ids.txt --output_file batch_results.parquet
 #curl -XDELETE "http://localhost:9200/citations_index_full"
@@ -96,7 +96,7 @@ with open("hit_ids.txt", "w") as f:
 print(f"→ Exported {len(ids)} citation IDs to hit_ids.txt")
 PY
 echo "======== Step 3: Extract full JSON records by citation ID ========"
-python extract_full_records.py --ids hit_ids.txt --src_dir /u4/z6dong/shared_data/se_citations_250218 --out full_hits.jsonl
+python extract_full_records.py --ids hit_ids.txt --src_dir /u501/z6dong/shared_data/se_citations_250218 --out full_hits.jsonl
 
 
 echo "========Bulk import completed."

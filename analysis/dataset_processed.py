@@ -239,7 +239,7 @@ print(eligible_below_min[['query', 'retrieved_title', 'score', 'rank']].head())
 
 
 ### !!! tmr present
-new_title_cols = ["title_arxiv", "title_rxiv", "title_github_readme", "title_github_html", "title_github_bibtex", "title_pdf", "title_other", "parsed_bibtex_tuple_list_github"]
+new_title_cols = ["title_arxiv", "title_rxiv", "title_github_readme", "title_github_html", "raw_github_bibtex", "title_pdf", "title_other", "parsed_bibtex_tuple_list_github"]
 for col in new_title_cols:
     non_empty = df1[col].apply(lambda x: isinstance(x, (list, np.ndarray, tuple)) and len(x) > 0)
     proportion = non_empty.mean() * 100
@@ -258,7 +258,7 @@ df1[non_empty].iloc[0][[col]]
 # In[74]:
 
 
-tmp = df1[non_empty].iloc[0]['title_github_bibtex']
+tmp = df1[non_empty].iloc[0]['raw_github_bibtex']
 tmp
 
 

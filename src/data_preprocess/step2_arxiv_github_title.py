@@ -2,7 +2,7 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-02-24
-Last Modified: 2025-03-16 (Updated GitHub URL handling, parallel GitHub processing, debug prints)
+Last Modified: 2026-03-08 (Intra-row dedup on all_title_list: normalize -, space, .)
 Description: Enhanced title extraction tool for pdf_links and github_links.
              1. Extract links from pdf_links and github_links columns, remove duplicates.
              2. For arxiv.org links, extract IDs, then batch query titles.
@@ -31,8 +31,8 @@ import argparse
 from src.data_ingestion.readme_parser import BibTeXExtractor
 from src.data_ingestion.bibtex_parser import BibTeXFactory
 from src.data_preprocess.step1_parse import process_bibtex_tuple, parse_bibtex_entries
+from src.data_preprocess.title_dedup_utils import dedup_row_titles as _dedup_row_titles
 from joblib import parallel_backend 
-from PyPDF2 import PdfReader
 import pyarrow as pa
 import pyarrow.parquet as pq
 import ast
@@ -164,6 +164,7 @@ def pdf_title_partial_fetch(url, max_bytes=2048):
             return pdf_title_full_fetch(url)
         content = resp.content
         try:
+            from PyPDF2 import PdfReader
             pdf_reader = PdfReader(io.BytesIO(content))
             metadata = pdf_reader.metadata
             title = metadata.get('/Title') if metadata else None
@@ -191,6 +192,7 @@ def pdf_title_full_fetch(url):
             with open(local_pdf_path, 'wb') as f:
                 f.write(resp.content)
             pdf_bytes = resp.content
+        from PyPDF2 import PdfReader
         pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
         metadata = pdf_reader.metadata
         title = metadata.get('/Title') if metadata else None
@@ -829,7 +831,7 @@ def main():
         title_rxiv = []
         title_github_readme = []
         title_github_html = []
-        title_github_bibtex = []
+        raw_github_bibtex = []
         title_pdf = []
         title_other = []
         
@@ -862,7 +864,7 @@ def main():
                             bibtex_list = [bibtex_str]
                     else:
                         bibtex_list = [bibtex_str]
-                    title_github_bibtex.extend(bibtex_list)
+                    raw_github_bibtex.extend(bibtex_list)
             elif link_lower.endswith(".pdf"):
                 pass
             else:
@@ -875,7 +877,7 @@ def main():
             "title_rxiv": title_rxiv if title_rxiv else None,
             "title_github_readme": title_github_readme if title_github_readme else None,
             "title_github_html": title_github_html if title_github_html else None,
-            "title_github_bibtex": title_github_bibtex if title_github_bibtex else None,
+            "raw_github_bibtex": raw_github_bibtex if raw_github_bibtex else None,
             "title_pdf": title_pdf if title_pdf else None,
             "title_other": title_other if title_other else None,
         })
@@ -895,27 +897,49 @@ def main():
             if isinstance(col, str) and col.startswith("title_"):
                 if isinstance(val, str):
                     if val.strip():
-                        additional_titles.append(
-                            val.replace("{", "").replace("}", "").lower().strip()
-                        )
+                        additional_titles.append(val.replace("{", "").replace("}", "").lower().strip())
                 elif isinstance(val, (list, np.ndarray, tuple)):
                     for item in val:
                         if isinstance(item, str) and item.strip():
-                            additional_titles.append(
-                                item.replace("{", "").replace("}", "").lower().strip()
-                            )
-        all_titles = list(set(bibtex_titles + additional_titles))
+                            additional_titles.append(item.replace("{", "").replace("}", "").lower().strip())
+        all_titles = list(set(bibtex_titles + additional_titles)) # dedup
         return all_titles
 
     df_new_titles = df.apply(map_links_to_new_title_columns, axis=1)
     df = pd.concat([df, df_new_titles], axis=1)
     #df["github_bibtex_tuple"] = df["github_titles"].apply(extract_bibtex_from_github_titles)
-    parse_bibtex_entries(df, key="title_github_bibtex", output_key="parsed_bibtex_tuple_list_github", count_key = "successful_parse_count_github")
+    parse_bibtex_entries(df, key="raw_github_bibtex", output_key="parsed_bibtex_tuple_list_github", count_key = "successful_parse_count_github")
     print("\n-- Final df --")
     df_step1 = pd.read_parquet(step1_file, columns=['modelId', 'parsed_bibtex_tuple_list'])
     df_final = pd.merge(df_step1, df, on="modelId", how="left")
     df_final["all_bibtex_titles"] = df_final.apply(merge_bibtex_titles, axis=1)
     df_final["all_title_list"] = df_final.apply(merge_all_titles, axis=1)
+
+    # Intra-row dedup on all_title_list (normalize: remove -, space, .), keep title with fewest symbols
+    print("Step 5: Intra-row dedup on all_title_list (remove -, space, .)...")
+    total_before, total_after = 0, 0
+    all_groups = []
+    new_lists = []
+    for idx, row in df_final.iterrows():
+        titles = row.get("all_title_list")
+        n_before = len(to_list_safe(titles)) if titles is not None else 0
+        total_before += n_before
+        deduped, row_groups = _dedup_row_titles(titles)
+        total_after += len(deduped)
+        all_groups.extend(row_groups)
+        new_lists.append(deduped if deduped else [])
+    df_final["all_title_list"] = new_lists
+    removed = total_before - total_after
+    print(f"  Before: {total_before} items, After: {total_after}, Removed: {removed} repeated items, Groups: {len(all_groups)}")
+    dup_to_kept = {}
+    for g in all_groups:
+        for d in g["duplicates"]:
+            dup_to_kept[d] = g["kept"]
+    intra_row_groups_path = os.path.join(processed_base_path, f"all_title_list_intra_row_dedup_groups{suffix}.json")
+    with open(intra_row_groups_path, "w", encoding="utf-8") as f:
+        json.dump({"groups": all_groups, "duplicate_to_kept": dup_to_kept, "stats": {"before": total_before, "after": total_after, "removed": removed}}, f, ensure_ascii=False, indent=2)
+    print(f"  Saved group mapping to {intra_row_groups_path}")
+
     df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
     to_parquet(df_final, output_file)
     print(f"✅ Merged BibTeX columns into 'all_bibtex_titles'")

@@ -23,10 +23,10 @@ Script Description:
         to match against source files. This allows filtering to only link valid/processed tables.
 
 Usage:
-    python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base
-    python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode str
-    python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode all
-    python -m src.data_symlink.ln_scilake --repo_root /u4/z6dong/Repo --mode base --tag 251117
+    python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode base
+    python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode str
+    python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode all
+    python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode base --tag 251117
     python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --dir-name scilake_final_251117 --mask-file data/analysis/all_valid_title_valid_251117.txt
     # Note: When --tag is provided, mask file is auto-loaded from data/analysis/all_valid_title_valid_{tag}.txt if it exists
 """
@@ -138,7 +138,7 @@ def process_folder(source_folder, target_dir, cache, file_suffix, mask_set=None)
 
 def main():
     parser = argparse.ArgumentParser(description="Incremental CSV symlinker with mode-based suffixes.")
-    parser.add_argument("--repo_root", type=str, default="/u4/z6dong/Repo", help="Repository root path.")
+    parser.add_argument("--repo_root", type=str, default="/u501/z6dong/Repo", help="Repository root path.")
     parser.add_argument("--mode", type=str, choices=list(MODE_SUFFIX.keys())+["all"], default="base",
                         help="Mode for folder and file suffix. Use 'all' to run every mode.")
     parser.add_argument("--dir-name", type=str, default=None,

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#repo_root="/u4/z6dong/Repo"
+#repo_root="/u501/z6dong/Repo"
 repo_root="/Users/doradong/Repo"
 folders=(
     "CitationLake/data/processed/deduped_hugging_csvs"

@@ -11,8 +11,8 @@ Description:
 Optimized batch extraction from ES cache → SQLite → NDJSON lines → Annotations extraction.
 
 python step2_se_url_tab.py \
-    --directory /u4/z6dong/shared_data/se_s2orc_250218 \
-    --db_path /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db \
+    --directory /u501/z6dong/shared_data/se_s2orc_250218 \
+    --db_path /u501/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db \
     --parquet_cache data/processed/s2orc_rerun.parquet \
     --output_parquet data/processed/extracted_annotations.parquet \
     --n_jobs -1

@@ -12,16 +12,16 @@ echo "========Stopping any existing Elasticsearch processes on this node..."
 #sleep 5
 
 echo "========Removing stale lock files from shared directories..."
-rm -f /u4/z6dong/shared_data/elasticsearch-8.11.1/data/_state/write.lock
-rm -f /u4/z6dong/shared_data/elasticsearch-8.11.1/data/snapshot_cache/write.lock
-rm -f /u4/z6dong/shared_data/es_data_persistent/node.lock
+rm -f /u501/z6dong/shared_data/elasticsearch-8.11.1/data/_state/write.lock
+rm -f /u501/z6dong/shared_data/elasticsearch-8.11.1/data/snapshot_cache/write.lock
+rm -f /u501/z6dong/shared_data/es_data_persistent/node.lock
 
 # Set lower JVM heap settings to avoid excessive memory usage
 export ES_JAVA_OPTS="-Xms4g -Xmx4g"
 
 # Set up a local data directory to ensure exclusive usage
 #ES_DATA_DIR="/tmp/elasticsearch_data_${SLURM_JOB_ID}"
-ES_DATA_DIR="/u4/z6dong/shared_data/es_data_persistent"
+ES_DATA_DIR="/u501/z6dong/shared_data/es_data_persistent"
 #rm -rf ${ES_DATA_DIR}
 #mkdir -p ${ES_DATA_DIR} && 
 chmod 700 ${ES_DATA_DIR}
@@ -31,7 +31,7 @@ NODE_IP=$(hostname -I | awk '{print $1}')
 echo "Node IP: ${NODE_IP}"
 
 echo "========Starting Elasticsearch..."
-ES_PATH="/u4/z6dong/shared_data/elasticsearch-8.11.1/bin/elasticsearch"
+ES_PATH="/u501/z6dong/shared_data/elasticsearch-8.11.1/bin/elasticsearch"
 nohup ${ES_PATH} \
   -Epath.data=${ES_DATA_DIR} \
   -Ediscovery.type=single-node \
@@ -72,10 +72,10 @@ echo "========Checking cluster health..."
 curl -XGET "http://${NODE_IP}:9200/_cluster/health?wait_for_status=yellow&timeout=120s"
 
 echo "========Running bulk import..."
-#python build_mini_s2orc_es.py --mode build --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index
-#python build_mini_s2orc_es.py --mode test --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index
-#python build_mini_s2orc_es.py --mode query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --query "BioMANIA: Simplifying bioinformatics data analysis through conversation"
-python build_mini_s2orc_es.py --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file modelcard_dedup_titles.json --cache_file data/processed/query_cache.parquet
+#python build_mini_s2orc_es.py --mode build --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index
+#python build_mini_s2orc_es.py --mode test --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index
+#python build_mini_s2orc_es.py --mode query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --query "BioMANIA: Simplifying bioinformatics data analysis through conversation"
+python build_mini_s2orc_es.py --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file modelcard_dedup_titles.json --cache_file data/processed/query_cache.parquet
 echo "========Bulk import completed."
 
 echo "========Killing Elasticsearch process with PID ${ES_PID}..."

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 Usage:
-    python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index --fields minimal
-    python build_mini_citation_es.py --mode build --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index_full --fields full
+    python build_mini_citation_es.py --mode build --directory /u501/z6dong/shared_data/se_citations_250218 --index_name citations_index --fields minimal
+    python build_mini_citation_es.py --mode build --directory /u501/z6dong/shared_data/se_citations_250218 --index_name citations_index_full --fields full
     python build_mini_citation_es.py --mode query --index_name citations_index --id 8982892
     python build_mini_citation_es.py --mode test --index_name citations_index
     python build_mini_citation_es.py --mode batch --input_file corpusIds.txt --index_name citations_index_full
-    python build_mini_citation_es.py --mode update --directory /u4/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
+    python build_mini_citation_es.py --mode update --directory /u501/z6dong/shared_data/se_citations_250218 --index_name citations_index # update from minimal to full
 
 Notes:
   - In build mode, all NDJSON files (*.ndjson) in the specified directory will be processed.

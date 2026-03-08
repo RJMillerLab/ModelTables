@@ -26,7 +26,7 @@ def collect_files_from_dir(directory, limit, seed=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Randomly sample files from multiple subdirectories.")
-    parser.add_argument('--root_dir', type=str, required=True, help='Root directory, e.g., /u4/z6dong/Repo')
+    parser.add_argument('--root_dir', type=str, required=True, help='Root directory, e.g., /u501/z6dong/Repo')
     parser.add_argument('--output_file', type=str, default='file_list.txt', help='Output file path')
     parser.add_argument('--limit', type=int, default=1000, help='Max files per subdir')
     parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')

@@ -28,7 +28,7 @@ def collect_files(directory, pattern, limit, seed=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Randomly sample matching symlink files from a datalake.")
-    parser.add_argument('--root_dir', type=str, required=True, help='Root directory (e.g. /u4/z6dong/Repo)')
+    parser.add_argument('--root_dir', type=str, required=True, help='Root directory (e.g. /u501/z6dong/Repo)')
     parser.add_argument('--output', type=str, required=True, help='Subdirectory under root (e.g. scilake_large)')
     parser.add_argument('--output_file', type=str, default='file_list.txt', help='Output file path')
     parser.add_argument('--limit', type=int, default=1000, help='Max files per type')

@@ -7,7 +7,7 @@ Description: This script processes CSV files in a specified folder using differe
 - "tr": Transposes the CSV data.
 - "str": Converts each cell to the string format "colname-value".
 - "str_tr": Converts each cell to "colname-value" and then transposes the data.
-Usage: python -m src.data_symlink.trick_aug --mode str --repo_root /u4/z6dong/Repo
+Usage: python -m src.data_symlink.trick_aug --mode str --repo_root /u501/z6dong/Repo
 """
 
 import os
@@ -220,7 +220,7 @@ def main():
     # Parse command-line arguments to choose the processing mode
     parser = argparse.ArgumentParser(description="Process CSV files in different modes")
     parser.add_argument("--mode", type=str, choices=["tr", "str", "str_tr"], default="tr", help="Processing mode")
-    parser.add_argument("--repo_root", type=str, default="/u4/z6dong/Repo", help="Repository root directory.")
+    parser.add_argument("--repo_root", type=str, default="/u501/z6dong/Repo", help="Repository root directory.")
     parser.add_argument("--tag", type=str, default=None, help="Full suffix for versioning (e.g. v2, v2_251117). No tag = v1 dirs; with tag = deduped_*_<tag>, tables_output_<tag>; llm_tables never versioned.")
     args = parser.parse_args()
     

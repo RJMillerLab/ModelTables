@@ -52,9 +52,9 @@ I don't update this section anymore, as the semantic scholar dataset is too larg
 ```bash
 # TODO: add command from privatecommonscript to here, for downloading the semantic scholar here
 # Requirement: cd to the path of downloaded dataset, e.g.: cd ~/shared_data/se_s2orc_250218
-python -m src.data_localindexing.build_mini_s2orc build --directory /u4/z6dong/shared_data/se_s2orc_250218/ # After downloading semantic scholar dataset, build database based on it.
-python -m src.data_localindexing.build_mini_s2orc query --title "BioMANIA: Simplifying bioinformatics data analysis through conversation" --directory /u4/z6dong/shared_data/se_s2orc_250218/ # After building up database, query title based on db file.
-python -m src.data_localindexing.build_mini_s2orc query_cid --corpusid 248779963 --directory /u4/z6dong/shared_data/se_s2orc_250218
+python -m src.data_localindexing.build_mini_s2orc build --directory /u501/z6dong/shared_data/se_s2orc_250218/ # After downloading semantic scholar dataset, build database based on it.
+python -m src.data_localindexing.build_mini_s2orc query --title "BioMANIA: Simplifying bioinformatics data analysis through conversation" --directory /u501/z6dong/shared_data/se_s2orc_250218/ # After building up database, query title based on db file.
+python -m src.data_localindexing.build_mini_s2orc query_cid --corpusid 248779963 --directory /u501/z6dong/shared_data/se_s2orc_250218
 
 # issue: citation edge is hard to store, it is too much ... Solution: I think we better using the API to query citation relationship? Or use cypher to query over graph condensely
 # python -m src.data_localindexing.build_complete_citation build --directory ./ # build db for citation dataset
@@ -63,7 +63,7 @@ python -m src.data_localindexing.build_mini_s2orc query_cid --corpusid 248779963
 # python -m src.data_preprocess.step1_citationAPI # get citations through bibtex only by API. TODO: Update for bibtex + url, not bibtex only. TODO: Update for all bibtex, not the first bibtex
 
 # Optional solution: we use kuzu database to store node and edge
-#python -m src.data_localindexing.build_mini_citation_kuzu --mode build --directory /u4/z6dong/shared_data/se_citations_250218/
+#python -m src.data_localindexing.build_mini_citation_kuzu --mode build --directory /u501/z6dong/shared_data/se_citations_250218/
 #python -m src.data_localindexing.test_node_edge_db # test how many nodes and edges are in built database
 # issue: slow for our 300G ndjson files, not suitable for this stage
 
@@ -74,9 +74,9 @@ python -m src.data_localindexing.build_mini_s2orc query_cid --corpusid 248779963
 # sbatch src.data_localindexing.neo4j_slurm
 
 # fuzzy matching: elastic search for s2orc
-python -m src.data_localindexing.build_mini_s2orc_es --mode build --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
-python -m src.data_localindexing.build_mini_s2orc_es --mode query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --query "BioMANIA: Simplifying bioinformatics data analysis through conversation"
-python -m src.data_localindexing.build_mini_s2orc_es --mode test --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u4/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
+python -m src.data_localindexing.build_mini_s2orc_es --mode build --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u501/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
+python -m src.data_localindexing.build_mini_s2orc_es --mode query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --query "BioMANIA: Simplifying bioinformatics data analysis through conversation"
+python -m src.data_localindexing.build_mini_s2orc_es --mode test --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u501/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
 ```
 </details>
 
@@ -100,35 +100,41 @@ python -m src.data_preprocess.step2_hugging_github_extract --tag 251117 > logs/s
 
 # Extract titles from arXiv and GitHub URLs (not S2ORC). For BibTeX entries and PDF URLs.
 # Input: modelcard_step1_<tag>.parquet, github_readme_cache_<tag>.parquet, downloaded_github_readmes_<tag>_processed/, PDF/GitHub URLs
-# Output: modelcard_all_title_list_<tag>.parquet, 
+# Output: modelcard_all_title_list_<tag>.parquet, all_title_list_intra_row_dedup_groups_<tag>.json
 # (Output but not used anymore) github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
 python -m src.data_preprocess.step2_arxiv_github_title --tag 251117 > logs/step2_arxiv_github_title_251117.log 2>&1 # This one is slow..
-# From repo root: target must be relative to the link's dir (data/processed), so same-dir name only:
-ln -s modelcard_all_title_list_251117.parquet data/processed/modelcard_all_title_list_v2_251117.parquet
+ln -s data/processed/modelcard_all_title_list_251117.parquet data/processed/modelcard_all_title_list_v2_251117.parquet
+# (One-time fix without rerun: PYTHONPATH=. python bak/dedup_all_title_list_intra_row_251117.py)
 
-# Save deduplicated titles for querying Semantic Scholar (S2ORC). Input: modelcard_all_title_list_<tag>.parquet Output: modelcard_dedup_titles_<tag>.json
+# Save deduplicated titles for querying Semantic Scholar (S2ORC). Cross-row dedup: same normalize. Output: modelcard_dedup_titles_<tag>.json, s2orc_cross_row_dedup_groups_<tag>.json
 python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_save_251117.log 2>&1
 
 <details>
 #### Option1:
 # Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits). Input: modelcard_dedup_titles_<tag>.json (from step2_s2orc_save) Output: s2orc_query_results_<tag>.parquet, s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet, s2orc_titles2ids_<tag>.parquet
-# save some searched results, only search the missing titles
-cp -r data/processed/s2orc_titles2ids.parquet data/processed/s2orc_titles2ids_251117.parquet
-cp -r data/processed/s2orc_query_results.parquet data/processed/s2orc_query_results_251117.parquet
-cp -r data/processed/s2orc_citations_cache.parquet data/processed/s2orc_citations_cache_251117.parquet
-cp -r data/processed/s2orc_references_cache.parquet data/processed/s2orc_references_cache_251117.parquet
 
-python -m src.data_preprocess.s2orc_API_query --tag 251117 > logs/s2orc_API_query_251117_2.log 2>&1
- - python -m src.data_preprocess.s2orc_log_429 --tag 251117 --logfile logs/s2orc_API_query_251117.log --error 429 > logs/s2orc_log_429_251117.log 2>&1 # if 429 errors, extract failed titles to modelcard_dedup_titles_251117_429.json
- - python -m src.data_preprocess.s2orc_retry_missing --tag 251117 > logs/s2orc_retry_missing_251117.log 2>&1 # make up for the missing items (use after s2orc_log_429 if needed)
- - python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet. Add --add-missing if you ran s2orc_retry_missing
+# copy from searched results, save some searched results, only search the missing titles
+#cp -r data/processed/s2orc_titles2ids.parquet data/processed/s2orc_titles2ids_251117.parquet
+#cp -r data/processed/s2orc_query_results.parquet data/processed/s2orc_query_results_251117.parquet
+#cp -r data/processed/s2orc_citations_cache.parquet data/processed/s2orc_citations_cache_251117.parquet
+#cp -r data/processed/s2orc_references_cache.parquet data/processed/s2orc_references_cache_251117.parquet
+
+python -m src.data_preprocess.s2orc_API_query --tag 251117 > logs/s2orc_API_query_251117_3.log 2>&1
+ # (Patches)
+ #- PYTHONPATH=. python bak/s2orc_log_parser --tag 251117 --logdir logs # extract from s2orc_API_query*.log → s2orc_titles2ids_251117_5.parquet
+ #- PYTHONPATH=. python bak/merge_s2orc_titles.py --file1 data/processed/s2orc_titles2ids_251117.parquet --file2 data/processed/s2orc_titles2ids_251117_2.parquet --output data/processed/s2orc_titles2ids_251117_3.parquet
+ #- PYTHONPATH=. python bak/filter_s2orc_titles_by_dedup.py --tag 251117  # I: _3, dedup_titles | O: _4 (filter by dedup, success first)
+ # mv data/processed/s2orc_titles2ids_251117_4.parquet data/processed/s2orc_titles2ids_251117.parquet
+ # (Patches for 429 rate limit error)
+ #- python -m src.data_preprocess.s2orc_log_429 --tag 251117 --logfile logs/s2orc_API_query_251117.log --error 429 > logs/s2orc_log_429_251117.log 2>&1 # if 429 errors, extract failed titles to modelcard_dedup_titles_251117_429.json
+ #- python -m src.data_preprocess.s2orc_retry_missing --tag 251117 > logs/s2orc_retry_missing_251117.log 2>&1 # make up for the missing items (use after s2orc_log_429 if needed)
+ # python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet. 
  - bash src/data_localindexing/build_mini_citation_es.sh > logs/build_mini_citation_es.log 2>&1 # I: xx | O: batch_results
-# (Deprecate: Old method) bash src.data_localindexing/build_mini_citation_es.sh
 # Extract full records from batch query results. Input: batch_results + hit_ids.txt utput: full_hits.jsonl
-python -m src.data_localindexing.extract_full_records --tag 251117 --src_dir /u4/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1
+python -m src.data_localindexing.extract_full_records --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1
 # Merge extracted full records. Input: full_hits.jsonl Output: s2orc_*_<tag>.parquet
 python -m src.data_localindexing.extract_full_records_to_merge --tag 251117 > logs/extract_full_records_to_merge_251117.log 2>&1
-- python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet
+- python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet Add --add-missing if you ran s2orc_retry_missing
  # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query |
   # I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
  - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext -> ref/cit info
@@ -136,7 +142,7 @@ python -m src.data_localindexing.extract_full_records_to_merge --tag 251117 > lo
 
 ### Option2:
 # batch querying papers_index
-python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u4/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles.json --cache_file data/processed/query_cache.json
+python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles.json --cache_file data/processed/query_cache.json
 # getting full tables
 </details>
 
@@ -262,7 +268,7 @@ All Starmie scripts support a `TAG` environment variable for versioning:
 
 ```bash
 # bash prepare_sample.sh > logs/prepare_sample.log 2>&1  # Sample 1000 tables from each resource folder for evaluation
-# python -m src.data_symlink.prepare_sample_server --root_dir /u4/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42 > logs/prepare_sample_server.log 2>&1  # Alternative for server
+# python -m src.data_symlink.prepare_sample_server --root_dir /u501/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42 > logs/prepare_sample_server.log 2>&1  # Alternative for server
 python -m src.data_symlink.prepare_sample --root_dir /u1/z6dong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42 > logs/prepare_sample.log 2>&1  # Another substitution
 # (deprecated) python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt > logs/prepare_sample_tricks.log 2>&1  # Create file lists for trick-augmented files (Input: scilake_final_filelist.txt, Output: scilake_final_filelist_{tricks}_filelist.txt)
 # (deprecated) python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt > logs/ln_scilake_final_link.log 2>&1  # Create validation file lists

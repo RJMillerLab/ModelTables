@@ -6,7 +6,7 @@
 
 
 echo "Starting Neo4j..."
-/u4/z6dong/shared_data/neo4j-community-2025.02.0/bin/neo4j console
+/u501/z6dong/shared_data/neo4j-community-2025.02.0/bin/neo4j console
 
 echo "Waiting 10s for Neo4j to be ready..."
 sleep 10
@@ -14,11 +14,11 @@ sleep 10
 echo "Running Python script to build the citation graph..."
 python build_mini_citation_neo4j.py \
     --mode build \
-    --directory /u4/z6dong/shared_data/se_citations_250218/ \
+    --directory /u501/z6dong/shared_data/se_citations_250218/ \
     --fields minimal
 
 #echo "Stopping Neo4j..."
-#/u4/z6dong/shared_data/neo4j-community-2025.02.0/bin/neo4j stop
+#/u501/z6dong/shared_data/neo4j-community-2025.02.0/bin/neo4j stop
 
 echo "All done!"
 
