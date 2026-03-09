@@ -19,7 +19,7 @@ import os
 import argparse
 import pandas as pd
 from tqdm import tqdm
-from src.data_preprocess.s2orc_API_query import get_single_citations_row, get_single_references_row
+from src.data_preprocess.s2orc_refcit_API import get_single_citations_row, get_single_references_row
 from src.utils import to_parquet
 
 DATA_FOLDER = "data/processed"
@@ -32,10 +32,10 @@ def load_parquet_or_empty(file_path, columns):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Re-query missing citations/references (e.g. 429 errors)")
-    parser.add_argument("--tag", default=None, help="Tag suffix for versioning (e.g. 251117). Must match s2orc_API_query --tag.")
+    parser.add_argument("--tag", default=None, help="Tag suffix for versioning (e.g. 251117). Must match API query scripts --tag.")
     args = parser.parse_args()
     if not args.tag:
-        raise SystemExit("--tag is required (e.g. --tag 251117). Ensures retry uses same version as s2orc_API_query.")
+        raise SystemExit("--tag is required (e.g. --tag 251117). Ensures retry uses same version as API query scripts.")
 
     suffix = f"_{args.tag}"
     TITLES_CACHE_FILE = f"{DATA_FOLDER}/s2orc_titles2ids{suffix}.parquet"
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     if requery_citations_ids:
         for pid in tqdm(requery_citations_ids, desc="Re-querying Citations"):
             # Call the imported function with the new missing file as cache file
-            record = get_single_citations_row(pid, sleep_time=1, timeout=60, cache_file=CITATIONS_MISSING_FILE)
+            record = get_single_citations_row(pid, sleep_time=1, timeout=60, merge_key="paperId")
             # Only add if the returned record is not empty
             if record and record.get("paperId"):
                 new_citations.append(record)
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     new_references = []
     if requery_references_ids:
         for pid in tqdm(requery_references_ids, desc="Re-querying References"):
-            record = get_single_references_row(pid, sleep_time=1, timeout=60, cache_file=REFERENCES_MISSING_FILE)
+            record = get_single_references_row(pid, sleep_time=1, timeout=60, merge_key="paperId")
             if record and record.get("paperId"):
                 new_references.append(record)
     else:

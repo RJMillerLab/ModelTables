@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Extract full records from step*_file.ndjson matching the given citation IDs.
 # Usage (tag-only interface, consistent with other S2ORC scripts):
-#     python extract_full_records.py --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218
+#     python s2orc_refcit_local.py --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218
 # This will read IDs from hit_ids_<tag>.txt and write to full_hits_<tag>.jsonl.
 
 import argparse, glob, os, sys, re

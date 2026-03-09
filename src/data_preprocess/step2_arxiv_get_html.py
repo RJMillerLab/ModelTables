@@ -257,7 +257,7 @@ def main():
     #all_titles = set(df_parquet["retrieved_title"].dropna().unique())
     #print(f"[INFO] Loaded {len(df_parquet)} rows from {parquet_path}, found {len(all_titles)} unique 'retrieved_title'.")
 
-    ######## 1) Load titles from parquet using SQL helper (same logic as s2orc_API_query) ########
+    ######## 1) Load titles from parquet using SQL helper ########
     all_titles_list = extract_non_empty_column_list_sql(parquet_path, "retrieved_title")
     all_titles_list = [t for t in all_titles_list if t.lower() not in {"nan", "none"}]
     all_titles = set(all_titles_list)

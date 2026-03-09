@@ -5,10 +5,6 @@ Last Modified: 2025-04-12
 Description: This script merges multiple DataFrames from S2ORC data, processes JSON fields, and saves the final DataFrame to a Parquet file.
 Usage:
     python -m src.data_preprocess.s2orc_merge --tag 251117
-    python -m src.data_preprocess.s2orc_merge --tag 251117 --add-missing  # after s2orc_retry_missing
-Updates:
-    There are some missing citations/references in the titles2ids parquet file. This script will identify them and print the missing items.
-    There are some 429 errors in the API query. This script will identify them and print the missing items.
 """
 
 import argparse
@@ -19,7 +15,6 @@ from collections import Counter, defaultdict
 from glob import glob
 from src.utils import to_parquet
 
-DATA_FOLDER = "data/processed"
 MERGE_KEY = "corpusId"
 
 def print_key_stats(df, key, df_name):
@@ -220,103 +215,64 @@ def load_parquet_if_exists(path):
         return pd.read_parquet(path)
     return None
 
-def load_main_and_429(stem, tag, data_path):
-    """
-    Load the base file and its 429 variant for a given stem and tag.
-
-    Rules:
-      - tag is None: use stem.parquet and stem_429.parquet (if it exists)
-      - tag is set:  use stem_{tag}.parquet and stem_{tag}_429.parquet (if it exists)
-
-    Only these two variants for the current tag are considered; files from other
-    tags are ignored.
-    """
+def load_tagged_file(stem, tag, data_path):
+    """Load one tag-aware parquet file."""
     suffix = f"_{tag}" if tag else ""
-    candidates = [
-        data_path / f"{stem}{suffix}.parquet",
-        data_path / f"{stem}{suffix}_429.parquet",
-    ]
-    dfs = []
-    for p in candidates:
-        if p.exists():
-            dfs.append(pd.read_parquet(p))
-    if not dfs:
-        raise FileNotFoundError(
-            f"No files found for stem={stem!r} with tag={tag!r}; "
-            f"checked: {', '.join(str(p) for p in candidates)}"
-        )
-    return pd.concat(dfs, ignore_index=True)
+    p = data_path / f"{stem}{suffix}.parquet"
+    if not p.exists():
+        raise FileNotFoundError(f"File not found for stem={stem!r} with tag={tag!r}; checked: {p}")
+    return pd.read_parquet(p)
 
-def remerge_multiple_files(data_path, tag, add_missing=False):
+
+def merge_cit_ref(df_titles, df_citations, df_references, merge_key):
+    df_titles[merge_key] = df_titles[merge_key].astype(str)
+    # Merge titles with citations and references using left join on merge_key
+    df_merged = pd.merge(df_titles, df_citations, on=merge_key, how="left")
+    df_merged = pd.merge(df_merged, df_references, on=merge_key, how="left")
+    #to_parquet(df_merged, output_file)
+    #print(f"💾 Merged results saved to {output_file}")
+    return df_merged
+
+def merge_all_results(titles_cache, citations_cache, references_cache, merge_key):
     """
-    Re-merge caches for a given tag by combining main + 429 (+ optional missing)
-    files.
-
-      - tag is None:      use untagged *.parquet and *_429.parquet
-      - tag like 251117:  use *_{tag}.parquet and *_{tag}_429.parquet
-
-    This keeps different tags completely separated.
+    Merge the titles mapping, single citations, and single references parquet files into one consolidated parquet.
+    The merge is performed by paperId. The columns from the citations data are renamed with suffix _citations,
+    and those from references are renamed with suffix _references.
+    
+    The final merged DataFrame contains:
+      - query_title, retrieved_title, paperId, corpusId (from titles mapping)
+      - original_response and parsed_response from citations (with suffix _citations)
+      - original_response and parsed_response from references (with suffix _references)
+    The merged result is saved to output_file.
     """
-    # 1) citations / references 主 cache（主 + 429）
-    citations_cache_main = load_main_and_429("s2orc_citations_cache", tag, data_path)
-    references_cache_main = load_main_and_429("s2orc_references_cache", tag, data_path)
-
-    # 2) missing 结果（如果有的话，同样主 + 429）
-    if add_missing:
-        try:
-            citations_missing = load_main_and_429("s2orc_citations_missing", tag, data_path)
-        except FileNotFoundError:
-            citations_missing = None
-        try:
-            references_missing = load_main_and_429("s2orc_references_missing", tag, data_path)
-        except FileNotFoundError:
-            references_missing = None
-
-        if citations_missing is not None:
-            citations_cache = pd.concat([citations_cache_main, citations_missing], ignore_index=True)
-        else:
-            citations_cache = citations_cache_main
-        if references_missing is not None:
-            references_cache = pd.concat([references_cache_main, references_missing], ignore_index=True)
-        else:
-            references_cache = references_cache_main
-    else:
-        citations_cache = citations_cache_main
-        references_cache = references_cache_main
-
-    # 3) titles / query_results 也按同样规则：只看当前 tag 的 base + 429
-    query_results = load_main_and_429("s2orc_query_results", tag, data_path)
-    titles2ids = load_main_and_429("s2orc_titles2ids", tag, data_path)
-
-    from src.data_preprocess.s2orc_API_query import merge_cit_ref
-    # Rename cache columns to match merge_all_results output (original_response -> original_response_citations/_references)
-    df_cit = citations_cache.rename(columns={"original_response": "original_response_citations"})
-    df_ref = references_cache.rename(columns={"original_response": "original_response_references"})
-    suffix = f"_{tag}" if tag else ""
-    output_path = data_path / f"s2orc_query_results{suffix}_merged.parquet"
-    final_merged_df = merge_cit_ref(titles2ids, df_cit, df_ref, str(output_path), MERGE_KEY="paperId")
-    return final_merged_df
+    df_titles = pd.read_parquet(titles_cache)
+    df_citations = pd.read_parquet(citations_cache)
+    # Rename columns with _citations suffix (except merge_key)
+    df_citations = df_citations.rename(columns={"original_response": "original_response_citations"})
+    df_references = pd.read_parquet(references_cache)
+    df_references = df_references.rename(columns={"original_response": "original_response_references"})
+    #"parsed_response": "parsed_response_references"
+    df_merged = merge_cit_ref(df_titles, df_citations, df_references, merge_key)
+    return df_merged
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge S2ORC parquet files and parse citations/references")
-    parser.add_argument(
-        "--tag",
-        required=False,
-        default=None,
-        help="Tag suffix (e.g. 251117). Must match s2orc_API_query --tag; "
-             "if omitted, uses untagged base + base_429 files.",
-    )
-    parser.add_argument("--add-missing", action="store_true", help="Include s2orc_*_missing_{tag}.parquet from retry")
+    parser.add_argument("--tag", default=None, help="Tag suffix (e.g. 251117). Must match s2orc_API_query --tag.")
     args = parser.parse_args()
-    tag = args.tag
-    add_missing = args.add_missing
-
-    data_path = Path(DATA_FOLDER)
-    suffix = f"_{tag}" if tag else ""
+    data_path = Path("data/processed")
+    suffix = f"_{args.tag}" if args.tag else ""
+    # Merge using current tag files only.
+    MERGE_KEY = "corpusId"
     output_file = data_path / f"s2orc_rerun{suffix}.parquet"
+    titles_cache_file = data_path / f"s2orc_titles2ids{suffix}.parquet"
+    citations_cache_file = data_path / f"s2orc_citations_cache{suffix}.parquet"
+    references_cache_file = data_path / f"s2orc_references_cache{suffix}.parquet"
+    #merged_results_file = data_path / f"s2orc_query_results{suffix}.parquet"
+    # 5. Merge all caches into one consolidated parquet file.
+    final_merged_df = merge_all_results(titles_cache=titles_cache_file, citations_cache=citations_cache_file,  references_cache=references_cache_file, merge_key=MERGE_KEY)
+    print("\n💾 Merge process complete.")
 
-    # Always use remerge_multiple_files to combine main + 429 (+ missing)
-    final_merged_df = remerge_multiple_files(data_path, tag, add_missing=add_missing)
+    #final_merged_df = pd.read_parquet(merged_results_file)
     cit_new_cols = final_merged_df["original_response_citations"].apply(
         lambda x: pd.Series(
             parse_cit_papers(x, id_key="citingcorpusid"),
@@ -349,6 +305,7 @@ if __name__ == "__main__":
     )
     final_merged_df = pd.concat([final_merged_df, cit_new_cols, ref_new_cols], axis=1)
     to_parquet(final_merged_df, output_file)
+    print('Save merged dataframe to', output_file)
     
     # Compute and print the intents counter statistics
     intents_counter = count_intents(final_merged_df, col_name="original_response_references")
@@ -361,5 +318,5 @@ if __name__ == "__main__":
     print("\nIntent and isInfluential Co-occurrence Stats:")
     for intent, stats in intent_influential_stats.items():
         print(f"{intent}: {stats}")
-    print('Save merged dataframe to', output_file)
+    
     

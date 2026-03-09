@@ -14,19 +14,19 @@ from pathlib import Path
 from collections import defaultdict
 from src.utils import to_parquet
 
-# ---------- ❶ Path ----------
-DATA_DIR          = Path("data/processed")
-INPUT_JSONL       = DATA_DIR / "full_hits.jsonl"
-ID_LIST_TXT       = DATA_DIR / "tmp_local_ids.txt"        # ← whitelist
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert full_hits.jsonl to S2ORC-style parquet files")
     parser.add_argument("--tag", default=None, help="Tag suffix (e.g. 251117). Outputs s2orc_*_{tag}.parquet")
     args = parser.parse_args()
+    # ---------- ❶ Path ----------
+    DATA_DIR          = Path("data/processed")
     suffix = f"_{args.tag}" if args.tag else ""
+
+    INPUT_JSONL       = DATA_DIR / f"full_hits{suffix}.jsonl"
+    ID_LIST_TXT       = DATA_DIR / f"tmp_local_ids{suffix}.txt"        # ← whitelist
     CITATIONS_PQ      = DATA_DIR / f"s2orc_citations_cache{suffix}.parquet"
     REFERENCES_PQ     = DATA_DIR / f"s2orc_references_cache{suffix}.parquet"
-    QUERY_RESULTS_PQ  = DATA_DIR / f"s2orc_query_results{suffix}.parquet"
     TITLES_CACHE_FILE = DATA_DIR / f"s2orc_titles2ids{suffix}.parquet"
     # ---------- ❷ Read whitelist ----------
     with ID_LIST_TXT.open() as f:
@@ -55,10 +55,7 @@ if __name__ == "__main__":
         rows = []
         for cid in WL:
             lst = bucket[cid]
-            rows.append({
-                "corpusId": str(cid),
-                "original_response": json.dumps({"data": lst}, ensure_ascii=False)
-            })
+            rows.append({"corpusId": str(cid), "original_response": json.dumps({"data": lst}, ensure_ascii=False)})
         return pd.DataFrame(rows)
     df_cit = build_cache(cit_bucket, "citing_papers")
     df_ref = build_cache(ref_bucket, "cited_papers")
@@ -66,12 +63,3 @@ if __name__ == "__main__":
     to_parquet(df_ref, REFERENCES_PQ)
     print("✅  citations rows =", len(df_cit),  "→", CITATIONS_PQ)
     print("✅  references rows =", len(df_ref),  "→", REFERENCES_PQ)
-    # ---------- ❺ stub: keep one empty row per whitelist id ----------
-    # File paths
-    from src.data_preprocess.s2orc_API_query import merge_all_results
-    stub = merge_all_results(titles_cache=TITLES_CACHE_FILE,
-                                    citations_cache=CITATIONS_PQ,
-                                    references_cache=REFERENCES_PQ,
-                                    output_file=QUERY_RESULTS_PQ,
-                                    MERGE_KEY = "corpusId")
-    print("✅  stub rows =", len(stub), "→", QUERY_RESULTS_PQ)
