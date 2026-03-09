@@ -472,6 +472,35 @@ def load_table_from_sqlite(table_name, db_path="modellake_all.db", parquet_path=
         conn.close()
 
 
+def extract_non_empty_column_list_sql(parquet_path: str, column_name: str):
+    """
+    Extract a parquet column as a cleaned Python list using SQL only.
+
+    Interface intentionally minimal:
+      - parquet_path
+      - column_name
+
+    Filtering behavior is designed to match this pandas expression:
+      df[df[col].notna() & (df[col].astype(str) != "")][col].tolist()
+
+    In particular:
+      - remove SQL NULL
+      - keep textual values like "nan"/"None" if they exist as strings
+      - do not trim spaces before comparing with empty string
+    """
+    query = f"""
+        SELECT CAST({column_name} AS TEXT) AS value
+        FROM read_parquet('{parquet_path}')
+        WHERE {column_name} IS NOT NULL
+          AND CAST({column_name} AS TEXT) <> ''
+    """
+    conn = duckdb.connect()
+    try:
+        return [row[0] for row in conn.execute(query).fetchall()]
+    finally:
+        conn.close()
+
+
 # ------------------------
 # Optimized Parquet writer
 # ------------------------
@@ -628,6 +657,7 @@ def save_parquet_optimized(
     downcast_integers: bool = True,
     downcast_floats_to_fp32: bool = False,
     use_dictionary: bool = True,
+    verbose: bool = False,
 ):
     """Save a DataFrame to Parquet with compact Arrow types and ZSTD compression.
 
@@ -640,9 +670,11 @@ def save_parquet_optimized(
             # Only compress simple string lists, NOT struct lists
             if _is_simple_string_list_column(df[col]) and not _is_struct_list_column(df[col]):
                 compress_list_cols.append(col)
-        print(f"Auto detected columns to compress: {compress_list_cols}")
+        if verbose:
+            print(f"Auto detected columns to compress: {compress_list_cols}")
     else:
-        print(f"Manually specified columns to compress: {compress_list_cols}")
+        if verbose:
+            print(f"Manually specified columns to compress: {compress_list_cols}")
 
     arrays: list[pa.Array] = []
     fields: list[pa.Field] = []
@@ -652,7 +684,8 @@ def save_parquet_optimized(
 
         # Check if need to compress to Arrow List[string]
         if col in compress_list_cols and _is_simple_string_list_column(s) and not _is_struct_list_column(s):
-            print(f"  Compress column {col}: np.array -> Arrow List[string]")
+            if verbose:
+                print(f"  Compress column {col}: np.array -> Arrow List[string]")
             # Process list column: convert to Arrow List[string]
             values = []
             for v in s.tolist():
@@ -669,7 +702,8 @@ def save_parquet_optimized(
             continue
 
         # Other columns keep original type - convert to Arrow preserving original structure
-        print(f"  Keep column {col} unchanged: {s.dtype}")
+        if verbose:
+            print(f"  Keep column {col} unchanged: {s.dtype}")
         
         # Convert pandas Series to Arrow Array preserving the original data structure
         try:
@@ -681,7 +715,8 @@ def save_parquet_optimized(
             arrays.append(arrow_array)
             fields.append(pa.field(col, arrow_array.type))
         except Exception as e:
-            print(f"    Warning: Could not preserve original type for {col}, falling back to string: {e}")
+            if verbose:
+                print(f"    Warning: Could not preserve original type for {col}, falling back to string: {e}")
             # Fallback to string if conversion fails
             arrays.append(pa.array(s.astype(str)))
             fields.append(pa.field(col, pa.string()))

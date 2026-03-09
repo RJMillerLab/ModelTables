@@ -109,6 +109,8 @@ ln -s data/processed/modelcard_all_title_list_251117.parquet data/processed/mode
 # Save deduplicated titles for querying Semantic Scholar (S2ORC). Cross-row dedup: same normalize. Output: modelcard_dedup_titles_<tag>.json, s2orc_cross_row_dedup_groups_<tag>.json
 python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_save_251117.log 2>&1
 
+# Optional / non-main pipeline scripts are documented in `docs/depre_scripts.md`.
+
 <details>
 #### Option1:
 # Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits). Input: modelcard_dedup_titles_<tag>.json (from step2_s2orc_save) Output: s2orc_query_results_<tag>.parquet, s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet, s2orc_titles2ids_<tag>.parquet
@@ -121,36 +123,21 @@ python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_s
 #cp -r data/processed/s2orc_references_cache.parquet data/processed/s2orc_references_cache_251117.parquet
 
 python -m src.data_preprocess.s2orc_API_query --tag 251117 > logs/s2orc_API_query_251117_3.log 2>&1
- # Optional: Local exact title:id batch (supplement API results, then manually concat). I: s2orc_titles2ids_<tag>.parquet O: s2orc_titles2ids_local_<tag>.parquet. Requires papers_index (build_mini_s2orc_es --mode build). Uses same ES setup as build_mini_citation_es.sh.
- #- bash src/data_localindexing/local_exact_title2id.sh 251117 > logs/local_exact_title2id_251117.log 2>&1
- # (Patches)
- #- PYTHONPATH=. python bak/s2orc_log_parser --tag 251117 --logdir logs # extract from s2orc_API_query*.log → s2orc_titles2ids_251117_5.parquet
- #- PYTHONPATH=. python bak/merge_s2orc_titles.py --file1 data/processed/s2orc_titles2ids_251117.parquet --file2 data/processed/s2orc_titles2ids_251117_2.parquet --output data/processed/s2orc_titles2ids_251117_3.parquet
- #- PYTHONPATH=. python bak/filter_s2orc_titles_by_dedup.py --tag 251117  # I: _3, dedup_titles | O: _4 (filter by dedup, success first)
- # mv data/processed/s2orc_titles2ids_251117_4.parquet data/processed/s2orc_titles2ids_251117.parquet
- # (Patches for 429 rate limit error)
- #- python -m src.data_preprocess.s2orc_log_429 --tag 251117 --logfile logs/s2orc_API_query_251117.log --error 429 > logs/s2orc_log_429_251117.log 2>&1 # if 429 errors, extract failed titles to modelcard_dedup_titles_251117_429.json
- #- python -m src.data_preprocess.s2orc_retry_missing --tag 251117 > logs/s2orc_retry_missing_251117.log 2>&1 # make up for the missing items (use after s2orc_log_429 if needed)
- # python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet. 
- - bash src/data_localindexing/build_mini_citation_es.sh > logs/build_mini_citation_es.log 2>&1 # I: xx | O: batch_results
+ python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet. 
+ #- bash src/data_localindexing/build_mini_citation_es.sh > logs/build_mini_citation_es.log 2>&1 # I: xx | O: batch_results
 # Extract full records from batch query results. Input: batch_results + hit_ids.txt utput: full_hits.jsonl
 python -m src.data_localindexing.extract_full_records --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1
 # Merge extracted full records. Input: full_hits.jsonl Output: s2orc_*_<tag>.parquet
 python -m src.data_localindexing.extract_full_records_to_merge --tag 251117 > logs/extract_full_records_to_merge_251117.log 2>&1
 - python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet Add --add-missing if you ran s2orc_retry_missing
- # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query |
-  # I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
+ # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query | I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
  - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext -> ref/cit info
 # I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_merged_df.parquet, tmp_extracted_lines.parquet
-
-### Option2:
-# batch querying papers_index
-python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json
-# getting full tables
+### Option2: batch querying papers_index
+python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json # getting full tables
 </details>
 
-# Download arXiv HTML content for table extraction. Input: extracted_annotations_<tag>.parquet, arxiv_titles_cache_<tag>.json Output: title2arxiv_new_cache_<tag>.json, arxiv_html_cache_<tag>.json, missing_titles_tmp_<tag>.txt, arxiv_fulltext_html_<tag>/*.html
-# ln -s /Users/doradong/Repo/CitationLake/data/processed/extracted_annotations.parquet /Users/doradong/Repo/CitationLake/data/processed/extracted_annotations_251117.parquet
+# Download arXiv HTML content for table extraction. Input: s2orc_titles2ids_<tag>.parquet, arxiv_titles_cache_<tag>.json Output: title2arxiv_new_cache_<tag>.json, arxiv_html_cache_<tag>.json, missing_titles_tmp_<tag>.txt, arxiv_fulltext_html_<tag>/*.html
 python -m src.data_preprocess.step2_arxiv_get_html --tag 251117 > logs/step2_arxiv_get_html_251117.log 2>&1
 
 # Extract tables from arXiv HTML files. Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional) Output: html_table.parquet, tables_output/*.csv
@@ -159,6 +146,7 @@ python -m src.data_preprocess.step2_arxiv_parse --tag 251117 > logs/step2_arxiv_
 python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --output_dir data/processed/tables_output_v2_251117 --tag 251117 --save_mode csv > logs/step2_arxiv_parse_v2_251117.log 2>&1  #/duckdb/sqlite 
 
 # Integrate all processed table data (arXiv HTML + S2ORC extracted annotations) and process with LLM.
+# ln -s data/processed/extracted_annotations.parquet data/processed/extracted_annotations_251117.parquet
 # Input: title2arxiv_new_cache_<tag>.json, html_table_<tag>.parquet/html_parsing_results_v2_<tag>.parquet, extracted_annotations_<tag>.parquet, pdf_download_cache_<tag>.json
 # Output: batch_input_<tag>.jsonl, batch_output_<tag>.jsonl, llm_markdown_table_results_<tag>.parquet
 python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 > logs/step2_integration_s2orc_llm_251117.log 2>&1
@@ -485,27 +473,6 @@ python -m src.data_preprocess.query_compare_API_local > logs/query_compare_API_l
 TODO: add statistics analysis from dataset_processed.ipynb
 ```
 
-(Deprecated scripts: Previously we download pdfs and try to parse them. However, we find semantic scholar dataset includes it.)
-```bash
-# deprecated as we don't use PDF for extraction at this time
-#python -m bak.step2_get_pdf #TODO: wait se_url_tab and then test
-python -m bak.step_down_pdf
-python -m bak.step_add_pdftab # Issue: deterministic PDF2table is not accurate enough. Try LLM based image extraction (not implemented here)
-python -m bak.step_down_tex # Issue: IP rate limit on accessing tex files, Possible solution: use arxiv bulk downloading
-python -m bak.step_add_textab
-python -m bak.step_add_gittab
-python -m bak.tmp_extract_url # Update PDF url from extracted url (some don't have .pdf, need to extract from html or add)
-python -m bak.tmp_extract_table # Extract table/figures caption and cited text from s2orc dumped data, but don't contain text and figure detailed content!
-python -m bak.step4 # process groundtruth (work for API, not work for dump data)
-python -m bak.step2_Citation_Info
-# (Optional) python -m bak.step3_statistic_table # get statistic tables
-python -m bak.step1_parsetags # Parse tags into columns with name start with `card_tag_xx`
-bash bak/symlink_trick_str.sh # too slow
-bash bak/symlink_trick_tr.sh # too slow
-bash bak/symlink_trick_tr_str.sh # too slow
-bash bak/symlink_ln_scilake_large.sh # too slow
-bash bak/symlink_ln_scilake_final.sh
-```
 
 ```bash
 # get parquet schema

@@ -18,7 +18,8 @@ echo "========Removing stale lock files..."
 rm -f /u501/z6dong/shared_data/elasticsearch-8.11.1/data/_state/write.lock
 rm -rf /u501/z6dong/shared_data/elasticsearch-8.11.1/data/snapshot_cache
 
-export ES_JAVA_OPTS="-Xms4g -Xmx4g"
+# Reduce heap if node has limited memory (avoid OOM). Increase if you have more RAM.
+export ES_JAVA_OPTS="-Xms2g -Xmx2g"
 ES_DATA_DIR="/u501/z6dong/shared_data/es_data_persistent"
 rm -f ${ES_DATA_DIR}/node.lock
 rm -rf ${ES_DATA_DIR}/snapshot_cache/write.lock
@@ -58,8 +59,10 @@ curl -XPUT "http://${NODE_IP}:9200/_all/_settings" -H 'Content-Type: application
 sleep 5
 curl -XGET "http://${NODE_IP}:9200/_cluster/health?wait_for_status=yellow&timeout=120s"
 
+# Python must connect to same host as curl (NODE_IP). localhost may fail on some clusters.
+export ES_HOST="http://${NODE_IP}:9200"
 echo "========Running local exact title2id batch query..."
-python -m src.data_localindexing.local_exact_title2id --tag "${TAG}" --index_name papers_index
+python -m local_exact_title2id --tag "${TAG}" --index_name papers_index
 
 echo "========Done. Stopping Elasticsearch..."
 kill ${ES_PID}

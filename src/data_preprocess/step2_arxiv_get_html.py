@@ -10,17 +10,11 @@ import json
 import time
 import argparse
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 from src.data_preprocess.step2_arxiv_github_title import extract_arxiv_id
 from urllib.parse import quote
 import requests
 import xml.etree.ElementTree as ET
-from src.utils import load_config
-
-HTML_CACHE_FILE = "data/processed/arxiv_html_cache.json"  ########
-HTML_FOLDER = "arxiv_fulltext_html"  ########
-NEW_CACHE_PATH = "data/processed/title2arxiv_new_cache.json"
+from src.utils import load_config, extract_non_empty_column_list_sql
 
 def normalize_title(title):
     """
@@ -70,7 +64,7 @@ def search_arxiv_title(title_query, max_results=5):
         "sortBy": "relevance",
         "sortOrder": "descending"
     }
-    print(f"[DEBUG] Final arXiv API URL: {base_url}?{'&'.join(f'{k}={v}' for k,v in params.items())}")
+    # print(f"[DEBUG] arXiv URL: {base_url}?{'&'.join(f'{k}={v}' for k,v in params.items())}")  # verbose per-query
     try:
         resp = requests.get(base_url, params=params, timeout=15)
         resp.raise_for_status()
@@ -104,13 +98,13 @@ def parse_arxiv_atom(xml_text):
             entries_info.append(info)
     return entries_info
 
-def fetch_ar5iv_html(arxiv_id):
+def fetch_ar5iv_html(arxiv_id, html_folder):
     """
     Fetch HTML from ar5iv (ar5iv.labs.arxiv.org) given an arXiv ID.
-    Save the HTML to a local file in folder HTML_FOLDER with filename '{arxiv_id}.html'
+    Save the HTML to a local file in folder html_folder with filename '{arxiv_id}.html'
     and return the file path, or None on failure.
     """
-    file_path = os.path.join(HTML_FOLDER, f"{arxiv_id}.html")  ########
+    file_path = os.path.join(html_folder, f"{arxiv_id}.html")  ########
     if os.path.exists(file_path):
         return file_path
     url = f"https://ar5iv.labs.arxiv.org/html/{arxiv_id}"
@@ -118,7 +112,6 @@ def fetch_ar5iv_html(arxiv_id):
         resp = requests.get(url, timeout=15)
         if resp.status_code == 200:
             html_text = resp.text
-            os.makedirs(HTML_FOLDER, exist_ok=True)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(html_text)
             return file_path
@@ -131,7 +124,7 @@ def fetch_ar5iv_html(arxiv_id):
             base_arxiv_id = re.sub(r'v\d+$', '', arxiv_id)  ########
             if base_arxiv_id != arxiv_id:
                 print(f"[INFO] Fallback: trying base arXiv ID '{base_arxiv_id}' for {arxiv_id}.")  ########
-                base_file_path = os.path.join(HTML_FOLDER, f"{base_arxiv_id}.html")  ########
+                base_file_path = os.path.join(html_folder, f"{base_arxiv_id}.html")  ########
                 if os.path.exists(base_file_path):
                     return base_file_path  ########
                 base_url = f"https://ar5iv.labs.arxiv.org/html/{base_arxiv_id}"  ########
@@ -139,7 +132,6 @@ def fetch_ar5iv_html(arxiv_id):
                     base_resp = requests.get(base_url, timeout=15)  ########
                     if base_resp.status_code == 200:
                         html_text = base_resp.text  ########
-                        os.makedirs(HTML_FOLDER, exist_ok=True)  ########
                         with open(base_file_path, "w", encoding="utf-8") as f:  ########
                             f.write(html_text)  ########
                         return base_file_path  ########
@@ -155,7 +147,7 @@ def fetch_ar5iv_html(arxiv_id):
         return None
 
 ######## NEW: Single function that (1) searches by title, (2) picks ID, (3) fetches HTML ########
-def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
+def fetch_id_and_html_for_title(title, html_folder, max_results=3, html_cache=None):
     """
     Given a title, query arXiv, parse the Atom feed, pick the first result's ID,
     and then fetch HTML from ar5iv.
@@ -192,7 +184,7 @@ def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
         else:
             # Path is invalid or empty, attempt to re-fetch
             print(f"[INFO] Cached HTML missing for {arxiv_id}, re-fetching...")
-            html_file_path = fetch_ar5iv_html(arxiv_id)
+            html_file_path = fetch_ar5iv_html(arxiv_id, html_folder)
             if html_file_path:
                 html_cache[arxiv_id] = html_file_path
             else:
@@ -200,7 +192,7 @@ def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
             return arxiv_id, html_file_path, True
         print(f"[INFO] Already in HTML cache: {arxiv_id} (file: {html_file_path})")
     else:
-        html_file_path = fetch_ar5iv_html(arxiv_id)
+        html_file_path = fetch_ar5iv_html(arxiv_id, html_folder)
         if html_file_path:
             html_cache[arxiv_id] = html_file_path
             #file_size = os.path.getsize(html_file_path)
@@ -210,7 +202,7 @@ def fetch_id_and_html_for_title(title, max_results=3, html_cache=None):
             print(f"[INFO] No valid HTML for {arxiv_id}. Marked empty in cache.")
     return arxiv_id, html_file_path, True
 
-def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
+def real_batch_title_to_arxiv_id(titles, html_folder, html_cache_path):
     """
     For each title in 'titles':
       1) Query arXiv for the ID.
@@ -223,7 +215,7 @@ def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
     new_rows = []
     for t in titles:
         t_stripped = t.strip()
-        arxiv_id, html_file_path, need_wait = fetch_id_and_html_for_title(t_stripped, max_results=3, html_cache=html_cache)
+        arxiv_id, html_file_path, need_wait = fetch_id_and_html_for_title(t_stripped, html_folder, max_results=3, html_cache=html_cache)
         new_rows.append((t_stripped, arxiv_id))
         ######## Save HTML cache after each fetch to avoid losing progress ########
         save_json_cache(html_cache, html_cache_path)
@@ -240,40 +232,36 @@ def real_batch_title_to_arxiv_id(titles, html_cache_path=HTML_CACHE_FILE):
 
 def main():
     parser = argparse.ArgumentParser(description="Download arXiv HTML pages for retrieved titles")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input-annotations', dest='input_annotations', default=None,
-                        help='Path to extracted annotations parquet (default: auto-detect from tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     args = parser.parse_args()
 
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
     processed_base_path = os.path.join(base_path, 'processed')
     tag = args.tag
-
     suffix = f"_{tag}" if tag else ""
 
-    # Determine input annotations path
-    if args.input_annotations:
-        parquet_path = args.input_annotations
-    else:
-        parquet_path = os.path.join(processed_base_path, f"extracted_annotations{suffix}.parquet")
-
-    # Update global paths based on tag
-    global HTML_CACHE_FILE, HTML_FOLDER, NEW_CACHE_PATH
+    #parquet_path = os.path.join(processed_base_path, f"extracted_annotations{suffix}.parquet")
+    parquet_path = os.path.join(processed_base_path, f"s2orc_titles2ids{suffix}.parquet")
     HTML_CACHE_FILE = os.path.join(processed_base_path, f"arxiv_html_cache{suffix}.json")
-    HTML_FOLDER = os.path.join(base_path, f"arxiv_fulltext_html{suffix}") if tag else os.path.join(base_path, "arxiv_fulltext_html")
     NEW_CACHE_PATH = os.path.join(processed_base_path, f"title2arxiv_new_cache{suffix}.json")
-
-    print(f"📁 Input annotations: {parquet_path}")
+    HTML_FOLDER = os.path.join(base_path, f"arxiv_fulltext_html{suffix}")
+    os.makedirs(HTML_FOLDER, exist_ok=True)
+    print(f"📁 Input: {parquet_path}")
     print(f"📁 HTML cache: {HTML_CACHE_FILE}")
     print(f"📁 HTML folder: {HTML_FOLDER}")
     print(f"📁 Title→arxiv cache: {NEW_CACHE_PATH}")
 
     ######## 1) Load a local Parquet file with "retrieved_title" column ########
-    df_parquet = pd.read_parquet(parquet_path)
-    all_titles = set(df_parquet["retrieved_title"].dropna().unique())
-    print(f"[INFO] Loaded {len(df_parquet)} rows from {parquet_path}, found {len(all_titles)} unique 'retrieved_title'.")
+    #df_parquet = pd.read_parquet(parquet_path, columns=["retrieved_title"])
+    #all_titles = set(df_parquet["retrieved_title"].dropna().unique())
+    #print(f"[INFO] Loaded {len(df_parquet)} rows from {parquet_path}, found {len(all_titles)} unique 'retrieved_title'.")
+
+    ######## 1) Load titles from parquet using SQL helper (same logic as s2orc_API_query) ########
+    all_titles_list = extract_non_empty_column_list_sql(parquet_path, "retrieved_title")
+    all_titles_list = [t for t in all_titles_list if t.lower() not in {"nan", "none"}]
+    all_titles = set(all_titles_list)
+    print(f"[INFO] Loaded {len(all_titles_list)} non-empty rows from {parquet_path}, found {len(all_titles)} unique 'retrieved_title'.")
     ######## 2) Load the new JSON-based cache for {title -> arxiv_id} ########
     new_cache = load_json_cache(NEW_CACHE_PATH)
     if new_cache:
@@ -330,7 +318,7 @@ def main():
             print(f"[INFO] HTML exists: {aid} -> {cached_path}")
             continue
         # Attempt to fetch HTML
-        html_file_path = fetch_ar5iv_html(aid)
+        html_file_path = fetch_ar5iv_html(aid, HTML_FOLDER)
         if html_file_path:
             html_cache[aid] = html_file_path
             print(f"[INFO] Downloaded HTML for {aid} to {html_file_path}")
@@ -341,7 +329,7 @@ def main():
 
     if missing:
         print(f"[INFO] Fetching IDs + HTML for {len(missing)} missing titles...")
-        df_new = real_batch_title_to_arxiv_id(missing)  ########
+        df_new = real_batch_title_to_arxiv_id(missing, HTML_FOLDER, HTML_CACHE_FILE)  ########
         print(f"[INFO] real_batch_title_to_arxiv_id returned {len(df_new)} rows.")
         new_fetched = dict(zip(df_new["title"], df_new["arxiv_id"]))
         for t, aid in new_fetched.items():
