@@ -499,7 +499,7 @@ if __name__ == "__main__":
     print(f"  To query/retry:    {n_to_query} (429, no_results, or new)")
     print("=" * 60 + "\n")
 
-    mapping_df = update_titles_to_paper_ids(TITLES, sleep_time=1.5, cache_file=titles_cache_file)
+    mapping_df = update_titles_to_paper_ids(TITLES, sleep_time=1.01, cache_file=titles_cache_file)
     print(f"\n💾 Titles mapping updated and saved. Total mapped rows: {len(mapping_df)}")
     
     # 2. Batch query paper details and merge with titles mapping.
@@ -512,7 +512,7 @@ if __name__ == "__main__":
     paper_ids = mapping_df[mapping_df["paperId"].notna() & (mapping_df["paperId"].astype(str) != "")]["paperId"].tolist()
     update_all_single_citations(
         paper_ids,
-        sleep_time=1.5,
+        sleep_time=1.01,
         timeout=60,
         force_refresh=force_refresh,
         cache_file=citations_cache_file,
@@ -522,7 +522,7 @@ if __name__ == "__main__":
     # 4. Update all single references for all paperIds from mapping.
     update_all_single_references(
         paper_ids,
-        sleep_time=1.5,
+        sleep_time=1.01,
         timeout=60,
         force_refresh=force_refresh,
         cache_file=references_cache_file,

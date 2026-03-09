@@ -112,6 +112,7 @@ python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_s
 <details>
 #### Option1:
 # Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits). Input: modelcard_dedup_titles_<tag>.json (from step2_s2orc_save) Output: s2orc_query_results_<tag>.parquet, s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet, s2orc_titles2ids_<tag>.parquet
+# Why API over local (build_mini_citation_es): (1) API provides fresher citations/references; (2) API's title fuzzy matching is more accurate (commercialized) than our local ES fuzzy match.
 
 # copy from searched results, save some searched results, only search the missing titles
 #cp -r data/processed/s2orc_titles2ids.parquet data/processed/s2orc_titles2ids_251117.parquet
@@ -120,6 +121,8 @@ python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_s
 #cp -r data/processed/s2orc_references_cache.parquet data/processed/s2orc_references_cache_251117.parquet
 
 python -m src.data_preprocess.s2orc_API_query --tag 251117 > logs/s2orc_API_query_251117_3.log 2>&1
+ # Optional: Local exact title:id batch (supplement API results, then manually concat). I: s2orc_titles2ids_<tag>.parquet O: s2orc_titles2ids_local_<tag>.parquet. Requires papers_index (build_mini_s2orc_es --mode build). Uses same ES setup as build_mini_citation_es.sh.
+ #- bash src/data_localindexing/local_exact_title2id.sh 251117 > logs/local_exact_title2id_251117.log 2>&1
  # (Patches)
  #- PYTHONPATH=. python bak/s2orc_log_parser --tag 251117 --logdir logs # extract from s2orc_API_query*.log → s2orc_titles2ids_251117_5.parquet
  #- PYTHONPATH=. python bak/merge_s2orc_titles.py --file1 data/processed/s2orc_titles2ids_251117.parquet --file2 data/processed/s2orc_titles2ids_251117_2.parquet --output data/processed/s2orc_titles2ids_251117_3.parquet
@@ -142,7 +145,7 @@ python -m src.data_localindexing.extract_full_records_to_merge --tag 251117 > lo
 
 ### Option2:
 # batch querying papers_index
-python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles.json --cache_file data/processed/query_cache.json
+python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json
 # getting full tables
 </details>
 
