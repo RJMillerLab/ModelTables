@@ -251,14 +251,7 @@ def process_single_html(html_path, paper_id, output_dir='data/processed/tables_o
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Process HTML files and extract tables')
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input_dir', default=None,
-                        help='Directory containing HTML files (default: auto-detect from tag)')
-    parser.add_argument('--output_dir', default=None,
-                        help='Directory to write processed CSVs (default: auto-detect from tag)')
-    parser.add_argument('--db_path', default=None,
-                        help='DuckDB path (default: auto-detect from tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     parser.add_argument('--preserve_bold', action='store_true')
     parser.add_argument('--save_mode', default='csv', choices=['csv', 'duckdb'])
     parser.add_argument('--n_jobs', type=int, default=4)
@@ -267,17 +260,12 @@ def main():
 
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
+    suffix = f"_{args.tag}" if args.tag else ""
 
-    if args.input_dir:
-        input_dir = args.input_dir
-    else:
-        input_dir = os.path.join(base_path, f"arxiv_fulltext_html_{tag}") if tag else os.path.join(base_path, "arxiv_fulltext_html")
-    output_dir = args.output_dir or os.path.join(processed_base_path, f"tables_output_v2{suffix}")
-    db_path = args.db_path or os.path.join(processed_base_path, f"tables_output{suffix}.db")
-    results_parquet = os.path.join(processed_base_path, f"html_parsing_results_v2{suffix}.parquet")
+    input_dir = os.path.join(base_path, f"arxiv_fulltext_html{suffix}")
+    output_dir = os.path.join(base_path, 'processed', f"tables_output_v2{suffix}")
+    db_path = os.path.join(base_path, 'processed', f"tables_output{suffix}.db")
+    results_parquet = os.path.join(base_path, 'processed', f"html_parsing_results_v2{suffix}.parquet")
 
     print(f"📁 Input dir: {input_dir}")
     print(f"📁 Output dir: {output_dir}")

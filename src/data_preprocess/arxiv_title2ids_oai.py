@@ -2,12 +2,14 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-03-28
-Last Modified: 2025-03-29
+Last Modified: 2026-03-10
 Description: This script is used to get the arXiv ID for the title extracted from the PDF file.
 
 arXiv API rate limit (Terms of Use, https://info.arxiv.org/help/api/tou.html):
   - At most one request every 3 seconds; single connection at a time.
   - Exceeding this leads to 429 and possible blocking. We enforce 3s delay between each query.
+
+To resume oai querying, it only accept resume token
 """
 import os, re
 import json
@@ -16,8 +18,9 @@ import argparse
 import pandas as pd
 import requests
 import xml.etree.ElementTree as ET
+import duckdb
 from src.data_preprocess.step2_arxiv_github_title import extract_arxiv_id
-from src.utils import load_config, extract_non_empty_column_list_sql
+from src.utils import load_config
 
 FINAL_QUERY_STATUSES = {"found", "not_found"}  # treated as "successfully validated"
 
@@ -81,7 +84,7 @@ def extract_arxiv_id_from_identifier(identifier_text):
     return None
 
 
-def harvest_oai(metadata_prefix="oai_dc", set_spec=None, limit=None):
+def harvest_oai(metadata_prefix="oai_dc", set_spec=None, limit=None, start_token=None):
     """
     Yield (norm_title, arxiv_id) from OAI-PMH ListRecords.
     Uses resumptionToken for paging.
@@ -90,8 +93,15 @@ def harvest_oai(metadata_prefix="oai_dc", set_spec=None, limit=None):
     params = {"verb": "ListRecords", "metadataPrefix": metadata_prefix}
     if set_spec:
         params["set"] = set_spec
-    next_params = params
-    next_url = None  # first request uses params; later use resumptionToken URL
+    # If start_token is provided, resume from that token; otherwise start from initial params.
+    if start_token:
+        token = start_token.strip()
+        next_url = f"{OAI_BASE}?verb=ListRecords&resumptionToken={requests.utils.quote(token)}"
+        next_params = None
+        print(f"[OAI] Resuming from provided resumptionToken (truncated): {token[:80]}...")
+    else:
+        next_params = params
+        next_url = None  # first request uses params; later use resumptionToken URL
 
     while True:
         try:
@@ -135,15 +145,371 @@ def harvest_oai(metadata_prefix="oai_dc", set_spec=None, limit=None):
         if resumption is None or not (resumption.text or "").strip():
             break
         token = (resumption.text or "").strip()
+        print(f"[OAI] resumptionToken (truncated): {token[:80]}...")
         next_url = f"{OAI_BASE}?verb=ListRecords&resumptionToken={requests.utils.quote(token)}"
         next_params = None
         time.sleep(OAI_DELAY_SEC)
+
+
+def build_or_update_oai_index(oai_index_path: str, oai_set: str | None = None, oai_limit: int | None = None, oai_start_token: str | None = None) -> None:
+    """
+    Build or update the local OAI index parquet at `oai_index_path`.
+
+    Parameters
+    ----------
+    oai_index_path : str
+        Target Parquet path for the index (norm_title, arxiv_id).
+    oai_set, oai_limit, oai_start_token :
+        Parameters forwarded to harvest_oai().
+
+    This function is intentionally side-effect limited:
+      - It only reads/writes the OAI index parquet.
+      - It does NOT touch the main cache parquet or any other state.
+      - It does NOT return anything; callers read the parquet separately if needed.
+    """
+    existing_rows = []
+    if os.path.isfile(oai_index_path):
+        df_existing_oai = pd.read_parquet(oai_index_path, columns=["norm_title", "arxiv_id"])
+        existing_rows = df_existing_oai.to_dict("records")
+        print(f"[INFO] Loaded existing OAI index with {len(df_existing_oai)} rows from {oai_index_path}")
+
+    print(f"[INFO] Updating OAI index via OAI-PMH...")
+    new_rows = []
+    for norm_title, arxiv_id in harvest_oai(
+        metadata_prefix="oai_dc",
+        set_spec=oai_set,
+        limit=oai_limit,
+        start_token=oai_start_token,
+    ):
+        new_rows.append({"norm_title": norm_title, "arxiv_id": arxiv_id})
+        if len(new_rows) % 5000 == 0:
+            print(f"[INFO] OAI harvest so far: {len(new_rows)} records...")
+
+    if not new_rows and not existing_rows:
+        print("[WARN] OAI harvest returned no records; nothing to write to OAI index.")
+        return
+
+    df_oai = pd.DataFrame(existing_rows + new_rows)
+    df_oai = df_oai.drop_duplicates(subset=["norm_title"], keep="first")
+    os.makedirs(os.path.dirname(oai_index_path), exist_ok=True)
+    df_oai.to_parquet(oai_index_path, index=False)
+    print(f"[INFO] Wrote updated OAI index with {len(df_oai)} rows to {oai_index_path}")
+
+def print_cache_stats_sql(cache_parquet_path: str) -> None:
+    """SQL-based cache stats using DuckDB over the Parquet file (read-only)."""
+    if not os.path.isfile(cache_parquet_path):
+        print(f"[WARN] Cache parquet not found: {cache_parquet_path}")
+        return
+    con = duckdb.connect(database=":memory:")
+    try:
+        total_rows = con.execute("SELECT COUNT(*) FROM read_parquet(?)", [cache_parquet_path]).fetchone()[0]
+    except Exception as e:
+        print(f"[ERROR] Failed to read cache parquet in DuckDB: {e}")
+        return
+    if total_rows == 0:
+        print(f"[STATS] Cache parquet is empty: {cache_parquet_path}")
+        return
+    try:
+        unique_titles = con.execute("SELECT COUNT(DISTINCT title) FROM read_parquet(?)", [cache_parquet_path]).fetchone()[0]
+    except Exception as e:
+        print(f"[WARN] Could not compute unique_titles (likely missing 'title' column): {e}")
+        unique_titles = 0
+    try:
+        rows_with_arxiv_id = con.execute(
+            "SELECT COUNT(*) FROM read_parquet(?) WHERE arxiv_id IS NOT NULL AND TRIM(CAST(arxiv_id AS VARCHAR)) <> ''",
+            [cache_parquet_path],
+        ).fetchone()[0]
+    except Exception as e:
+        print(f"[WARN] Could not compute rows_with_arxiv_id: {e}")
+        rows_with_arxiv_id = 0
+    try:
+        searched_but_not_found_rows = con.execute("SELECT COUNT(*) FROM read_parquet(?) WHERE query_status = 'not_found'", [cache_parquet_path]).fetchone()[0]
+    except Exception as e:
+        print(f"[WARN] Could not compute searched_but_not_found_rows: {e}")
+        searched_but_not_found_rows = 0
+    final_status_list = ",".join(f"'{s}'" for s in FINAL_QUERY_STATUSES)
+    try:
+        remaining_to_search_rows = con.execute(
+            f"SELECT COUNT(*) FROM read_parquet(?) WHERE (arxiv_id IS NULL OR TRIM(CAST(arxiv_id AS VARCHAR)) = '') AND (query_status IS NULL OR query_status NOT IN ({final_status_list}))",
+            [cache_parquet_path],
+        ).fetchone()[0]
+    except Exception as e:
+        print(f"[WARN] Could not compute remaining_to_search_rows: {e}")
+        remaining_to_search_rows = 0
+    print(f"[STATS] Cache parquet (SQL): {cache_parquet_path}")
+    print(f"        total_rows: {total_rows}")
+    print(f"        unique_titles: {unique_titles}")
+    print(f"        rows_with_arxiv_id: {rows_with_arxiv_id}")
+    print(f"        searched_but_not_found_rows (query_status=='not_found'): {searched_but_not_found_rows}")
+    print(
+        "        remaining_to_search_rows (arxiv_id empty & query_status not in FINAL_QUERY_STATUSES): "
+        f"{remaining_to_search_rows}"
+    )
+
+
+def write_final_missing_titles_from_cache_sql(cache_parquet_path: str, output_txt_path: str) -> None:
+    """SQL-based export of final missing titles from cache parquet."""
+    if not os.path.isfile(cache_parquet_path):
+        print(f"[WARN] Cache parquet not found: {cache_parquet_path}")
+        return
+    con = duckdb.connect(database=":memory:")
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT TRIM(CAST(title AS VARCHAR)) AS title FROM read_parquet(?) "
+            "WHERE (arxiv_id IS NULL OR TRIM(CAST(arxiv_id AS VARCHAR)) = '') "
+            "AND query_status = 'not_found' "
+            "AND title IS NOT NULL "
+            "AND TRIM(CAST(title AS VARCHAR)) <> '' "
+            "ORDER BY title",
+            [cache_parquet_path],
+        ).fetchall()
+    except Exception as e:
+        print(
+            "[WARN] Could not select final missing titles "
+            "(likely missing columns 'title', 'arxiv_id', or 'query_status'): "
+            f"{e}"
+        )
+        return
+    titles = [r[0] for r in rows]
+    if not titles:
+        print("[INFO] No final missing titles found in cache parquet (SQL); nothing written.")
+        return
+    os.makedirs(os.path.dirname(output_txt_path), exist_ok=True)
+    with open(output_txt_path, "w", encoding="utf-8") as f:
+        for t in titles:
+            f.write(t + "\n")
+    print(f"[INFO] (SQL) Wrote {len(titles)} unique final missing titles to {output_txt_path}")
+
+
+def rescue_cache_from_oai_index_sql(cache_parquet_path: str, oai_index_parquet_path: str) -> None:
+    """
+    SQL-based "dry-run" OAI rescue:
+
+    - Uses DuckDB to JOIN cache (missing arxiv_id) with OAI index by normalized title.
+    - Prints how many rows *would* be matched, and how many would remain missing,
+      but does NOT modify the parquet files.
+
+    Normalization (approx SQL version of normalize_title + preprocess_title):
+      norm1 = lower(regexp_replace(trim(title), '\\s+', ' ', 'g'))
+      norm2 = lower(
+                regexp_replace(
+                  trim(
+                    regexp_replace(title, '[-:_*@&''\"]+', ' ', 'g')
+                  ),
+                  '\\s+', ' ', 'g'
+                )
+              )
+    """
+    if not os.path.isfile(cache_parquet_path):
+        print(f"[WARN] Cache parquet not found: {cache_parquet_path}")
+        return
+    if not os.path.isfile(oai_index_parquet_path):
+        print(f"[WARN] OAI index parquet not found: {oai_index_parquet_path}")
+        return
+    con = duckdb.connect(database=":memory:")
+    start_time = time.time()
+    try:
+        total_missing_before = con.execute(
+            "SELECT COUNT(*) FROM read_parquet(?) WHERE (arxiv_id IS NULL OR TRIM(CAST(arxiv_id AS VARCHAR)) = '')",
+            [cache_parquet_path],
+        ).fetchone()[0]
+    except Exception as e:
+        print(f"[ERROR] Could not compute total missing rows in cache (SQL): {e}")
+        return
+    if total_missing_before == 0:
+        print("[INFO] (SQL) No rows without arxiv_id in cache; nothing for OAI rescue to do.")
+        return
+    try:
+        rows = con.execute(
+            "WITH cache_missing AS ("
+            "  SELECT TRIM(CAST(title AS VARCHAR)) AS title,"
+            "         LOWER(REGEXP_REPLACE(TRIM(CAST(title AS VARCHAR)), '\\\\s+', ' ', 'g')) AS norm1,"
+            "         LOWER(REGEXP_REPLACE(TRIM(REGEXP_REPLACE(CAST(title AS VARCHAR), '[-:_*@&''\"]+', ' ', 'g')), '\\\\s+', ' ', 'g')) AS norm2 "
+            "  FROM read_parquet(?) "
+            "  WHERE (arxiv_id IS NULL OR TRIM(CAST(arxiv_id AS VARCHAR)) = '') "
+            "    AND title IS NOT NULL "
+            "    AND TRIM(CAST(title AS VARCHAR)) <> ''"
+            "), "
+            "oai AS ("
+            "  SELECT "
+            "    LOWER(TRIM(CAST(norm_title AS VARCHAR))) AS norm_title,"
+            "    LOWER(REGEXP_REPLACE(TRIM(REGEXP_REPLACE(CAST(norm_title AS VARCHAR), '[-:_*@&''\"]+', ' ', 'g')), '\\\\s+', ' ', 'g')) AS norm_title2,"
+            "    TRIM(CAST(arxiv_id AS VARCHAR)) AS arxiv_id "
+            "  FROM read_parquet(?) "
+            "  WHERE norm_title IS NOT NULL "
+            "    AND arxiv_id IS NOT NULL "
+            "    AND TRIM(CAST(norm_title AS VARCHAR)) <> '' "
+            "    AND TRIM(CAST(arxiv_id AS VARCHAR)) <> ''"
+            "), "
+            "joined AS ("
+            "  SELECT DISTINCT c.title, c.norm1, o.arxiv_id "
+            "  FROM cache_missing c "
+            "  JOIN oai o ON "
+            "       c.norm1 = o.norm_title "
+            "    OR c.norm2 = o.norm_title "
+            "    OR c.norm1 = o.norm_title2 "
+            "    OR c.norm2 = o.norm_title2"
+            ") "
+            "SELECT title, norm1, arxiv_id FROM joined",
+            [cache_parquet_path, oai_index_parquet_path],
+        ).fetchall()
+    except Exception as e:
+        print(f"[ERROR] (SQL) Failed to compute OAI rescue matches via JOIN: {e}")
+        return
+
+    matched_rows = len(rows)
+    remaining_after = max(total_missing_before - matched_rows, 0)
+    elapsed = time.time() - start_time
+    print("[INFO] (SQL OAI rescue)")
+    print(f"        total_missing_before: {total_missing_before}")
+    print(f"        matched_via_OAI_index (now applied): {matched_rows}")
+    print(f"        remaining_missing_after: {remaining_after}")
+    print(f"        time_spent_seconds: {elapsed:.3f}")
+
+    if matched_rows == 0:
+        return
+
+    try:
+        con.execute("CREATE TEMP TABLE oai_updates (title VARCHAR, norm_title_new VARCHAR, arxiv_id_new VARCHAR)")
+        con.executemany("INSERT INTO oai_updates (title, norm_title_new, arxiv_id_new) VALUES (?, ?, ?)", rows)
+        # DuckDB COPY TO does not support ? placeholder for output path; use escaped path literal.
+        path_escaped = cache_parquet_path.replace("'", "''")
+        con.execute(
+            "COPY (WITH cache AS (SELECT * FROM read_parquet(?)), joined AS (SELECT c.*, u.norm_title_new, u.arxiv_id_new FROM cache c LEFT JOIN oai_updates u ON TRIM(CAST(c.title AS VARCHAR)) = TRIM(CAST(u.title AS VARCHAR))) SELECT * EXCLUDE (norm_title, arxiv_id, query_status), CASE WHEN (arxiv_id IS NULL OR TRIM(CAST(arxiv_id AS VARCHAR)) = '') AND arxiv_id_new IS NOT NULL THEN norm_title_new ELSE norm_title END AS norm_title, CASE WHEN (arxiv_id IS NULL OR TRIM(CAST(arxiv_id AS VARCHAR)) = '') AND arxiv_id_new IS NOT NULL THEN TRIM(CAST(arxiv_id_new AS VARCHAR)) ELSE arxiv_id END AS arxiv_id, CASE WHEN (arxiv_id IS NULL OR TRIM(CAST(arxiv_id AS VARCHAR)) = '') AND arxiv_id_new IS NOT NULL THEN 'found' ELSE query_status END AS query_status FROM joined) TO '"
+            + path_escaped
+            + "' (FORMAT PARQUET)",
+            [cache_parquet_path],
+        )
+    except Exception as e:
+        print(f"[ERROR] (SQL) Failed to apply OAI rescue updates back to cache parquet: {e}")
+
+
+def sync_html_paths_from_folder(cache_parquet_path: str, html_folder: str, project_root: str | None = None) -> int:
+    """
+    Scan html_folder for *.html files, match filename (stem) to arxiv_id in cache parquet,
+    and fill html_path for rows where html_path is empty. Supports symlinks (ln).
+
+    Stored paths are relative to project_root (e.g. data/arxiv_fulltext_html_251117/xxx.html),
+    not absolute (/Users/...).
+
+    Returns number of rows updated.
+    """
+    if not os.path.isdir(html_folder):
+        print(f"[WARN] HTML folder not found: {html_folder}; skipping sync.")
+        return 0
+    if not os.path.isfile(cache_parquet_path):
+        print(f"[WARN] Cache parquet not found: {cache_parquet_path}; skipping sync.")
+        return 0
+
+    html_folder_abs = os.path.abspath(html_folder)
+    if project_root is None:
+        project_root = os.getcwd()
+    project_root_abs = os.path.abspath(project_root)
+
+    # Build arxiv_id -> stored path (relative to project_root)
+    file_id_to_path: dict[str, str] = {}
+    for f in os.listdir(html_folder):
+        if not f.endswith(".html"):
+            continue
+        stem = f[:-5]  # strip .html
+        if not stem:
+            continue
+        full_path = os.path.join(html_folder, f)
+        if not os.path.isfile(full_path):  # skip dirs; symlinks to files are fine
+            continue
+        try:
+            rel = os.path.relpath(os.path.abspath(full_path), project_root_abs)
+        except ValueError:
+            rel = os.path.join(os.path.basename(html_folder), f)
+        file_id_to_path[stem] = rel
+
+    if not file_id_to_path:
+        print(f"[INFO] No *.html files in {html_folder}; nothing to sync.")
+        return 0
+    print(f"[INFO] Found {len(file_id_to_path)} HTML files in folder; syncing to cache.")
+
+    df = pd.read_parquet(cache_parquet_path)
+    if "html_path" not in df.columns:
+        df["html_path"] = ""
+    if "arxiv_id" not in df.columns:
+        print("[WARN] Cache has no arxiv_id column; skipping sync.")
+        return 0
+
+    empty_mask = (df["html_path"].isna()) | (df["html_path"].astype(str).str.strip().eq(""))
+    has_id_mask = df["arxiv_id"].notna() & (df["arxiv_id"].astype(str).str.strip().ne(""))
+    to_update_mask = empty_mask & has_id_mask
+
+    n_updated = 0
+    for idx in df.index[to_update_mask]:
+        aid = str(df.at[idx, "arxiv_id"]).strip()
+        if not aid:
+            continue
+        # Match base id (e.g. 2101.12345 matches 2101.12345.html or 2101.12345v2.html)
+        base_id = re.sub(r"v\d+$", "", aid)
+        path_val = file_id_to_path.get(aid) or file_id_to_path.get(base_id)
+        if path_val:
+            df.at[idx, "html_path"] = path_val
+            n_updated += 1
+
+    if n_updated > 0:
+        os.makedirs(os.path.dirname(cache_parquet_path), exist_ok=True)
+        df.to_parquet(cache_parquet_path, index=False)
+        print(f"[STATS] Synced {n_updated} html_path from folder to cache.")
+    return n_updated
+
+
+def rescue_cache_from_bibtex(cache_parquet_path: str, bibtex_parquet_path: str) -> None:
+    """
+    Use bibtex (title, arxiv_id) to fill missing arxiv_ids in cache. Updates df_cache in place and saves to file.
+    """
+    if not os.path.isfile(cache_parquet_path):
+        print(f"[INFO] Cache parquet not found; skipping bibtex rescue.")
+        return
+    if not os.path.isfile(bibtex_parquet_path):
+        print(f"[INFO] Bibtex parquet not found: {bibtex_parquet_path}; skipping rescue.")
+        return
+
+    df_cache = pd.read_parquet(cache_parquet_path)
+
+    df_bib = pd.read_parquet(bibtex_parquet_path, columns=["title", "arxiv_id"])
+    df_bib = df_bib[df_bib["title"].notna() & df_bib["arxiv_id"].notna()]
+    df_bib = df_bib[df_bib["title"].astype(str).str.strip().ne("") & df_bib["arxiv_id"].astype(str).str.strip().ne("")]
+    df_bib = df_bib.assign(norm_title=df_bib["title"].apply(normalize_title))
+    df_bib = df_bib.drop_duplicates(subset=["norm_title"], keep="first")
+    bib_map = dict(zip(df_bib["norm_title"], df_bib["arxiv_id"]))
+
+    missing_mask = (df_cache["arxiv_id"].isna()) | (df_cache["arxiv_id"].astype(str).str.strip().eq(""))
+    if not missing_mask.any():
+        print("[INFO] No rows without arxiv_id in cache; nothing for bibtex rescue.")
+        return
+
+    df_missing = df_cache.loc[missing_mask].copy()
+    df_missing["_norm"] = df_missing["norm_title"].fillna(df_missing["title"].apply(normalize_title))
+    df_missing["_norm2"] = df_missing["title"].apply(lambda t: normalize_title(preprocess_title(str(t))) if pd.notna(t) else "")
+    df_missing["_arxiv_id"] = df_missing["_norm"].map(bib_map).fillna(df_missing["_norm2"].map(bib_map))
+
+    to_update = df_missing["_arxiv_id"].notna()
+    if not to_update.any():
+        print("[INFO] bibtex had no new titles to rescue.")
+        return
+
+    idxs = df_missing.index[to_update]
+    df_cache.loc[idxs, "arxiv_id"] = df_missing.loc[idxs, "_arxiv_id"].values
+    df_cache.loc[idxs, "norm_title"] = df_missing.loc[idxs, "_norm"].values
+    df_cache.loc[idxs, "query_status"] = "found"
+
+    n = to_update.sum()
+    os.makedirs(os.path.dirname(cache_parquet_path), exist_ok=True)
+    df_cache.to_parquet(cache_parquet_path, index=False)
+    print(f"[STATS] Rescued {n} titles from bibtex; saved cache to {cache_parquet_path}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Resolve titles to arXiv IDs using legacy caches + OAI-PMH")
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     parser.add_argument('--oai-set', dest='oai_set', default=None, help='OAI set (e.g., cs, physics:hep-th). Omit for full harvest.')
     parser.add_argument('--oai-limit', dest='oai_limit', type=int, default=None, help='Stop OAI harvest after N records (for quick testing).')
+    parser.add_argument('--oai-start-token', dest='oai_start_token', default=None, help='Optional OAI resumptionToken to resume harvesting manually.')
     args = parser.parse_args()
 
     config = load_config('config.yaml')
@@ -159,125 +525,61 @@ def main():
     #NEW_CACHE_PATH = os.path.join(processed_base_path, f"title2arxiv_new_cache{suffix}.json")
     # unified schema cache (primary storage)
     CACHE_PARQUET_PATH = os.path.join(processed_base_path, f"title2arxiv_cache{suffix}.parquet")
+    bibtex_parquet_path = os.path.join(processed_base_path, f"bibtex_title_arxiv{suffix}.parquet")
     print(f"📁 Input titles parquet: {parquet_path}")
     print(f"📁 Unified title/id/HTML cache (Parquet, primary): {CACHE_PARQUET_PATH}")
-    #print(f"📁 Legacy HTML cache JSON (optional seed): {HTML_CACHE_FILE}")
-    #print(f"📁 Legacy title→arxiv cache JSON (optional seed): {NEW_CACHE_PATH}")
 
-    ######## 1) Extract all titles from the main parquet ########
-    all_titles_list = extract_non_empty_column_list_sql(parquet_path, "retrieved_title")
-    all_titles_list = [t for t in all_titles_list if str(t).lower() not in {"nan", "none"}]
-    all_titles = set(all_titles_list)
-    print(f"[INFO] Loaded {len(all_titles_list)} non-empty rows from {parquet_path}, found {len(all_titles)} unique 'retrieved_title'.")
-
-    ######## 2) Load / initialize the unified cache parquet (schema‑based cache) ########
     if os.path.isfile(CACHE_PARQUET_PATH):
-        df_cache = pd.read_parquet(CACHE_PARQUET_PATH)
-        print(f"[INFO] Loaded unified cache parquet with {len(df_cache)} rows from {CACHE_PARQUET_PATH}")
-        # Ensure required schema columns exist
-        if "title" not in df_cache.columns:
-            df_cache["title"] = ""
-        if "arxiv_id" not in df_cache.columns:
-            df_cache["arxiv_id"] = ""
-        if "html_path" not in df_cache.columns:
-            df_cache["html_path"] = ""
-        if "norm_title" not in df_cache.columns:
-            df_cache["norm_title"] = df_cache["title"].astype(str).map(normalize_title)
-        if "query_status" not in df_cache.columns:
-            # Backward compat: infer "found" only when we actually have a non-empty arxiv_id.
-            has_id = df_cache["arxiv_id"].notna() & (df_cache["arxiv_id"].astype(str).str.strip() != "")
-            df_cache["query_status"] = has_id.map(lambda x: "found" if x else "unknown")
+        print(f"[INFO] Unified cache parquet found.")
     else:
-        # JSON caches are deprecated; start from an empty unified cache and let OAI/bibtex fill it.
-        df_cache = pd.DataFrame(columns=["title", "norm_title", "arxiv_id", "html_path", "query_status"])
-        print(f"[INFO] Unified cache parquet not found; starting from empty cache (no legacy JSON).")
+        # Initialize from s2orc: SQL extract retrieved_title as title, norm_title; arxiv_id/html_path/query_status empty.
+        # Bibtex rescue runs later.
+        if not os.path.isfile(parquet_path):
+            raise FileNotFoundError(f"s2orc_titles2ids parquet not found: {parquet_path}")
+        os.makedirs(os.path.dirname(CACHE_PARQUET_PATH), exist_ok=True)
+        con = duckdb.connect(database=":memory:")
+        con.execute(
+            "COPY ("
+            "  SELECT DISTINCT "
+            "    TRIM(CAST(retrieved_title AS VARCHAR)) AS title,"
+            "    LOWER(REGEXP_REPLACE(TRIM(CAST(retrieved_title AS VARCHAR)), '\\\\s+', ' ', 'g')) AS norm_title,"
+            "    '' AS arxiv_id,"
+            "    '' AS html_path,"
+            "    '' AS query_status "
+            "  FROM read_parquet(?) "
+            "  WHERE retrieved_title IS NOT NULL "
+            "    AND TRIM(CAST(retrieved_title AS VARCHAR)) <> '' "
+            "    AND LOWER(TRIM(CAST(retrieved_title AS VARCHAR))) NOT IN ('nan', 'none')"
+            ") TO ? (FORMAT PARQUET)",
+            [parquet_path, CACHE_PARQUET_PATH],
+        )
+        n = con.execute("SELECT COUNT(*) FROM read_parquet(?)", [CACHE_PARQUET_PATH]).fetchone()[0]
+        print(f"[INFO] Initialized cache from s2orc ({n} unique titles) and saved to {CACHE_PARQUET_PATH}.")
 
-    ######## 3) Set of titles we have in cache vs missing (need to query) ########
-    # Only treat "found" / "not_found" as "successfully validated" cache entries.
-    ok_mask = df_cache["query_status"].isin(FINAL_QUERY_STATUSES)
-    cache_norm_set = set(df_cache.loc[ok_mask, "norm_title"].dropna())
-    need_norm_set = set(normalize_title(t) for t in all_titles)
-    missing_norm_set = need_norm_set - cache_norm_set
+    print_cache_stats_sql(CACHE_PARQUET_PATH)
+    rescue_cache_from_bibtex(CACHE_PARQUET_PATH, bibtex_parquet_path)
 
-    ######## 3.1) Rescue: bibtex_title_arxiv parquet has (title, arxiv_id); title is already normalized ########
-    bibtex_parquet_path = os.path.join(processed_base_path, f"bibtex_title_arxiv{suffix}.parquet")
-    if os.path.isfile(bibtex_parquet_path):
-        df_bib = pd.read_parquet(bibtex_parquet_path, columns=["title", "arxiv_id"])
-        df_bib = df_bib[df_bib["title"].notna() & df_bib["arxiv_id"].notna()]
-        df_bib = df_bib[df_bib["title"].ne("") & df_bib["arxiv_id"].ne("")]
-        # Only keep rows whose title is in the missing set (still need to query)
-        to_rescue = df_bib[df_bib["title"].isin(missing_norm_set)]
-        to_rescue = to_rescue[~to_rescue["title"].isin(cache_norm_set)].drop_duplicates(subset=["title"])
-        if not to_rescue.empty:
-            to_rescue = to_rescue.assign(norm_title=to_rescue["title"], html_path="", query_status="found")
-            df_cache = pd.concat([df_cache, to_rescue[["title", "norm_title", "arxiv_id", "html_path", "query_status"]]], ignore_index=True)
-            cache_norm_set = set(df_cache["norm_title"].dropna())
-            missing_norm_set = need_norm_set - cache_norm_set
-            print(f"[STATS] Rescued {len(to_rescue)} titles from bibtex_title_arxiv (added to cache); they will not be queried.")
-        else:
-            print(f"[INFO] bibtex_title_arxiv had no new titles to rescue (all already in cache or not in source list).")
-    else:
-        print(f"[INFO] No bibtex_title_arxiv{suffix}.parquet found; skipping rescue.")
-
-    ######## 4) OAI-PMH index: resolve missing titles from bulk metadata (avoids 5000 API calls) ########
+    ######## 4) OAI-PMH index: resolve missing titles from bulk metadata########
+    SKIP_QUERY_OAI = True  # OAI harvest is slow; default to using existing local index only.
     oai_index_path = os.path.join(processed_base_path, f"title2arxiv_oai_index{suffix}.parquet")
-    if os.path.isfile(oai_index_path):
-        df_oai = pd.read_parquet(oai_index_path, columns=["norm_title", "arxiv_id"])
+    if not SKIP_QUERY_OAI:
+        print(f"[INFO] Building OAI index...")
+        build_or_update_oai_index(oai_index_path=oai_index_path, oai_set=getattr(args, "oai_set", None), oai_limit=getattr(args, "oai_limit", None), oai_start_token=getattr(args, "oai_start_token", None))
     else:
-        print(f"[INFO] No title2arxiv_oai_index{suffix}.parquet found; harvesting OAI index on the fly (this may take a long time).")
-        rows = []
-        for norm_title, arxiv_id in harvest_oai(metadata_prefix="oai_dc", set_spec=args.oai_set, limit=args.oai_limit):
-            rows.append({"norm_title": norm_title, "arxiv_id": arxiv_id})
-            if len(rows) % 5000 == 0:
-                print(f"[INFO] OAI harvest so far: {len(rows)} records...")
-        if not rows:
-            print("[WARN] OAI harvest returned no records; skipping OAI rescue.")
-            df_oai = None
-        else:
-            df_oai = pd.DataFrame(rows)
-            df_oai = df_oai.drop_duplicates(subset=["norm_title"], keep="first")
-            os.makedirs(processed_base_path, exist_ok=True)
-            df_oai.to_parquet(oai_index_path, index=False)
-            print(f"[INFO] Wrote OAI index with {len(df_oai)} rows to {oai_index_path}")
+        print(f"[INFO] SKIP_QUERY_OAI=True; using existing OAI index only.")
 
-    if df_oai is not None:
-        df_oai = df_oai[df_oai["norm_title"].notna() & df_oai["arxiv_id"].notna()]
-        df_oai = df_oai[df_oai["norm_title"].astype(str).str.strip().ne("") & df_oai["arxiv_id"].astype(str).str.strip().ne("")]
-        oai_lookup = df_oai.set_index("norm_title")["arxiv_id"].to_dict()
-        to_rescue_oai = []
-        for norm_t in list(missing_norm_set):
-            aid = oai_lookup.get(norm_t)
-            if aid and str(aid).strip():
-                to_rescue_oai.append((norm_t, norm_t, str(aid).strip(), ""))
-        if to_rescue_oai:
-            df_rescue = pd.DataFrame(to_rescue_oai, columns=["title", "norm_title", "arxiv_id", "html_path"])
-            df_rescue["query_status"] = "found"
-            df_cache = pd.concat([df_cache, df_rescue], ignore_index=True)
-            cache_norm_set = set(df_cache["norm_title"].dropna())
-            missing_norm_set = need_norm_set - cache_norm_set
-            print(f"[STATS] Rescued {len(to_rescue_oai)} titles from OAI-PMH index; they will not be queried via other means.")
-        else:
-            print(f"[INFO] OAI index had no new titles to rescue for current missing set.")
+    rescue_cache_from_oai_index_sql(CACHE_PARQUET_PATH, oai_index_path)
 
-    ######## 3) in_cache / missing (for reporting and downstream) ########
-    in_cache = need_norm_set & cache_norm_set
-    missing = missing_norm_set
-    print(f"[INFO] Titles in Parquet: {len(all_titles)}")
-    print(f"[INFO] Already in unified cache: {len(in_cache)}")
-    print(f"[INFO] Missing (need fetch): {len(missing)}")
-    print(f"[STATS] Remaining to query (after rescue): {len(missing)}")
+    ######## 5) Sync html_path from existing HTML folder (only fill empty) ########
+    html_folder = os.path.join(base_path, f"arxiv_fulltext_html{suffix}")
+    base_abs = os.path.abspath(base_path)
+    project_root = os.path.dirname(base_abs) if os.path.isdir(base_abs) else os.getcwd()
+    sync_html_paths_from_folder(CACHE_PARQUET_PATH, html_folder, project_root=project_root)
 
-    ######## 4) Save missing titles to a txt file for manual inspection ########
-    tmp_missing_file = os.path.join(processed_base_path, f"missing_titles_tmp{suffix}.txt")
-    with open(tmp_missing_file, "w", encoding="utf-8") as f:
-        for title in sorted(missing):
-            f.write(title + "\n")
-    print(f"[INFO] Saved {len(missing)} missing titles to {tmp_missing_file}")
+    print_cache_stats_sql(CACHE_PARQUET_PATH)
 
-    ######## 5) Save final unified schema parquet and coverage stats (OAI/legacy only) ########
-    df_cache.to_parquet(CACHE_PARQUET_PATH, index=False)
-    print(f"[INFO] Unified Parquet cache written with {len(df_cache)} rows to {CACHE_PARQUET_PATH}")
+    final_missing_txt = os.path.join(processed_base_path, f"final_missing_titles_from_cache{suffix}.txt")
+    write_final_missing_titles_from_cache_sql(CACHE_PARQUET_PATH, final_missing_txt)
 
-    cache_norm_set = set(df_cache["norm_title"])
-    covered = sum(1 for t in all_titles if normalize_title(t) in cache_norm_set)
-    print(f"[INFO] Coverage: {covered}/{len(all_titles)} titles present in unified cache.")
+if __name__ == "__main__":
+    main()

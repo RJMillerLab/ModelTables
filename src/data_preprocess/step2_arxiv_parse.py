@@ -102,30 +102,19 @@ def process_item(item, output_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Classify HTML pages and extract basic tables")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--html-cache', dest='html_cache', default=None,
-                        help='Path to arxiv_html_cache JSON (default: auto-detect from tag)')
-    parser.add_argument('--html-dir', dest='html_dir', default=None,
-                        help='Directory containing HTML files (default: auto-detect from tag)')
-    parser.add_argument('--output-dir', dest='output_dir', default=None,
-                        help='Directory to save extracted tables (default: auto-detect from tag)')
-    parser.add_argument('--results-parquet', dest='results_parquet', default=None,
-                        help='Path to html_table parquet (default: auto-detect from tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     parser.add_argument('--n_jobs', type=int, default=-1, help='Parallel jobs for extraction')
     args = parser.parse_args()
 
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
     processed_base_path = os.path.join(base_path, 'processed')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
+    suffix = f"_{args.tag}" if args.tag else ""
 
-    html_cache_path = args.html_cache or os.path.join(processed_base_path, f"arxiv_html_cache{suffix}.json")
-    html_dir = args.html_dir or (os.path.join(base_path, f"arxiv_fulltext_html_{tag}") if tag else os.path.join(base_path, "arxiv_fulltext_html"))
-    tables_output_dir = args.output_dir or os.path.join(processed_base_path, f"tables_output{suffix or ''}")
-    parquet_file = args.results_parquet or os.path.join(processed_base_path, f"html_table{suffix}.parquet")
-
+    html_cache_path = os.path.join(processed_base_path, f"arxiv_html_cache{suffix}.json")
+    html_dir = os.path.join(base_path, f"arxiv_fulltext_html{suffix}")
+    tables_output_dir = os.path.join(processed_base_path, f"tables_output{suffix or ''}")
+    parquet_file = os.path.join(processed_base_path, f"html_table{suffix}.parquet")
     print(f"📁 HTML cache: {html_cache_path}")
     print(f"📁 HTML directory: {html_dir}")
     print(f"📁 Tables output dir: {tables_output_dir}")
@@ -185,6 +174,5 @@ if __name__ == "__main__":
     else:
         # If there is nothing new, just keep the old
         df_final = df_existing
-    ######## # 4) Save final results back to the parquet file
     to_parquet(df_final, parquet_file)
     print(f"Done! Updated {parquet_file} with {len(df_final)} total records.")
