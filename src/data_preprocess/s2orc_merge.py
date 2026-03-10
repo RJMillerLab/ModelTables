@@ -8,9 +8,11 @@ Usage:
 """
 
 import argparse
-import pandas as pd
 import json
 from pathlib import Path
+
+import duckdb
+import pandas as pd
 from collections import Counter, defaultdict
 from glob import glob
 from src.utils import to_parquet
@@ -73,22 +75,34 @@ def parse_cit_papers(json_str, id_key = "citingcorpusid"):
     overall_infl_ids = []
 
     if pd.isna(json_str) or not isinstance(json_str, str):
-        return (method_ids, method_contexts,
-                background_ids, background_contexts,
-                result_ids, result_contexts,
+        # Keep return signature consistent with the main return below:
+        # only *_ids lists, no contexts.
+        return (method_ids,
+                background_ids,
+                result_ids,
+                # method_contexts
+                # background_contexts
+                # result_contexts
                 overall_ids,
-                method_infl_ids, method_infl_ctxs,                   
-                background_infl_ids, background_infl_ctxs,           
-                result_infl_ids, result_infl_ctxs,                   
+                method_infl_ids,
+                background_infl_ids,
+                result_infl_ids,
+                # method_infl_ctxs
+                # background_infl_ctxs
+                # result_infl_ctxs
                 overall_infl_ids)
     #try:
     if True:
         data = json.loads(json_str)
         cit_papers = data[cit_key]
         for item in cit_papers:
-            paper_id = item[id_key]
+            # Some records may miss the expected id_key; treat them as having no valid paper_id.
+            '''paper_id = item[id_key]
             intents_nested = item["intents"]
-            contexts = item["contexts"]
+            contexts = item["contexts"]'''
+            paper_id = item.get(id_key)
+            intents_nested = item.get("intents")
+            contexts = item.get("contexts")
             if paper_id is None or not intents_nested:
                 none_ids.append(paper_id)
                 overall_ids.append(paper_id)
@@ -238,7 +252,7 @@ def merge_all_results(titles_cache, citations_cache, references_cache, merge_key
     Merge the titles mapping, single citations, and single references parquet files into one consolidated parquet.
     The merge is performed by paperId. The columns from the citations data are renamed with suffix _citations,
     and those from references are renamed with suffix _references.
-    
+
     The final merged DataFrame contains:
       - query_title, retrieved_title, paperId, corpusId (from titles mapping)
       - original_response and parsed_response from citations (with suffix _citations)
@@ -255,9 +269,36 @@ def merge_all_results(titles_cache, citations_cache, references_cache, merge_key
     df_merged = merge_cit_ref(df_titles, df_citations, df_references, merge_key)
     return df_merged
 
+
+def merge_all_results_sql(titles_cache, citations_cache, references_cache, merge_key):
+    """
+    SQL-based merge: use DuckDB to join titles, citations, and references parquet files.
+    Same output structure as merge_all_results (titles + original_response_citations + original_response_references).
+    Faster than pandas merge for large datasets.
+
+    Compared with merge_all_results (pandas): output is equivalent except for value types (e.g. str vs int)
+    and row order; no deduplication or join-semantics inconsistency.
+    """
+    con = duckdb.connect()
+    try:
+        query = f"""
+            SELECT
+                t.*,
+                c.original_response AS original_response_citations,
+                r.original_response AS original_response_references
+            FROM read_parquet('{titles_cache}') AS t
+            LEFT JOIN read_parquet('{citations_cache}') AS c
+              ON CAST(t.{merge_key} AS VARCHAR) = CAST(c.{merge_key} AS VARCHAR)
+            LEFT JOIN read_parquet('{references_cache}') AS r
+              ON CAST(t.{merge_key} AS VARCHAR) = CAST(r.{merge_key} AS VARCHAR)
+        """
+        return con.execute(query).fetchdf()
+    finally:
+        con.close()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge S2ORC parquet files and parse citations/references")
-    parser.add_argument("--tag", default=None, help="Tag suffix (e.g. 251117). Must match s2orc_API_query --tag.")
+    parser.add_argument("--tag", default=None, help="Tag suffix (e.g. 251117).")
     args = parser.parse_args()
     data_path = Path("data/processed")
     suffix = f"_{args.tag}" if args.tag else ""
@@ -268,8 +309,14 @@ if __name__ == "__main__":
     citations_cache_file = data_path / f"s2orc_citations_cache{suffix}.parquet"
     references_cache_file = data_path / f"s2orc_references_cache{suffix}.parquet"
     #merged_results_file = data_path / f"s2orc_query_results{suffix}.parquet"
-    # 5. Merge all caches into one consolidated parquet file.
-    final_merged_df = merge_all_results(titles_cache=titles_cache_file, citations_cache=citations_cache_file,  references_cache=references_cache_file, merge_key=MERGE_KEY)
+    # 5. Merge all caches into one consolidated parquet file (SQL-based, faster).
+    # final_merged_df = merge_all_results(titles_cache=titles_cache_file, citations_cache=citations_cache_file,  references_cache=references_cache_file, merge_key=MERGE_KEY)
+    final_merged_df = merge_all_results_sql(
+        titles_cache=titles_cache_file,
+        citations_cache=citations_cache_file,
+        references_cache=references_cache_file,
+        merge_key=MERGE_KEY,
+    )
     print("\n💾 Merge process complete.")
 
     #final_merged_df = pd.read_parquet(merged_results_file)
@@ -277,14 +324,8 @@ if __name__ == "__main__":
         lambda x: pd.Series(
             parse_cit_papers(x, id_key="citingcorpusid"),
             index=[
-                "cit_papers_methodology_ids", 
-                "cit_papers_background_ids",
-                "cit_papers_result_ids", 
-                "cit_papers_overall_ids",
-                "cit_papers_methodology_infl_ids", 
-                "cit_papers_background_infl_ids", 
-                "cit_papers_result_infl_ids",
-                "cit_papers_overall_infl_ids"
+                "cit_papers_methodology_ids", "cit_papers_background_ids", "cit_papers_result_ids", "cit_papers_overall_ids",
+                "cit_papers_methodology_infl_ids", "cit_papers_background_infl_ids", "cit_papers_result_infl_ids", "cit_papers_overall_infl_ids"
             ]
         )
     )
@@ -292,14 +333,8 @@ if __name__ == "__main__":
         lambda x: pd.Series(
             parse_cit_papers(x, id_key="citedcorpusid"),
             index=[
-                "ref_papers_methodology_ids",
-                "ref_papers_background_ids", 
-                "ref_papers_result_ids", 
-                "ref_papers_overall_ids",
-                "ref_papers_methodology_infl_ids",
-                "ref_papers_background_infl_ids",
-                "ref_papers_result_infl_ids", 
-                "ref_papers_overall_infl_ids"
+                "ref_papers_methodology_ids", "ref_papers_background_ids", "ref_papers_result_ids", "ref_papers_overall_ids",
+                "ref_papers_methodology_infl_ids", "ref_papers_background_infl_ids", "ref_papers_result_infl_ids", "ref_papers_overall_infl_ids"
             ]
         )
     )
@@ -312,7 +347,6 @@ if __name__ == "__main__":
     print("Intent Counter Stats:")
     for intent, count in intents_counter.items():
         print(f"{intent}: {count}")
-    
     # Compute and print the co-occurrence statistics of intents and the isInfluential flag
     intent_influential_stats = analyze_intent_influential_correlation(final_merged_df["original_response_references"])
     print("\nIntent and isInfluential Co-occurrence Stats:")

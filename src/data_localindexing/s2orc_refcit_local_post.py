@@ -1,6 +1,6 @@
 """
 Convert full_hits.jsonl (local citation edges) to three parquet files
-that mimic s2orc_API_query – with STRICT 1‑row‑per‑whitelist‑ID rule.
+that mimic s2orc_refcit_API – with STRICT 1‑row‑per‑whitelist‑ID rule.
 
 Author: Zhengyuan Dong 
 Created: 2025‑05‑04
@@ -27,7 +27,6 @@ if __name__ == "__main__":
     ID_LIST_TXT       = DATA_DIR / f"tmp_local_ids{suffix}.txt"        # ← whitelist
     CITATIONS_PQ      = DATA_DIR / f"s2orc_citations_cache{suffix}.parquet"
     REFERENCES_PQ     = DATA_DIR / f"s2orc_references_cache{suffix}.parquet"
-    TITLES_CACHE_FILE = DATA_DIR / f"s2orc_titles2ids{suffix}.parquet"
     # ---------- ❷ Read whitelist ----------
     with ID_LIST_TXT.open() as f:
         WL = [line.strip() for line in f if line.strip()]

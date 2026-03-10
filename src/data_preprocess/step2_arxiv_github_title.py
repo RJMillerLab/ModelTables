@@ -49,16 +49,21 @@ def get_cache_paths(base_path, suffix=""):
 
 
 def extract_titles(bibtex_list):
+    """Extract titles from a list of BibTeX entry dicts, or a single entry (one dict)."""
+    #if isinstance(bibtex_list, dict):
+    #    bibtex_list = [bibtex_list]
     if not is_list_like(bibtex_list):
         return []
     return [
         d.get("title", "")
+        #(d.get("title") or d.get("Title") or "")
          .replace("{", "")
          .replace("}", "")
          .lower()
          .strip()
         for d in bibtex_list
         if isinstance(d, dict) and d.get("title")
+        #if isinstance(d, dict) and (d.get("title") or d.get("Title"))
     ]
 
 def load_cache(file_path):

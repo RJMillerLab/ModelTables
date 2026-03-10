@@ -53,7 +53,7 @@
 [P] s2orc_citations_cache.parquet
 [P] s2orc_references_cache.parquet
   ↓
-[C] src.data_preprocess.step2_se_url_tab.sh
+[C] src.data_preprocess.s2orc_fulltext_local.sh
   ↓
 [P] extracted_annotations.parquet
   ↓

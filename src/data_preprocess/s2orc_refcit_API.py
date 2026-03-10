@@ -7,7 +7,6 @@ Description:
     2. Save the results to parquet files.
     3. Merge the results into a final output file.
     4. Handle API rate limits and errors.
-TODO: add tqdm for following steps (already tqdm for step1)
 """
 
 import os
@@ -24,11 +23,8 @@ from src.utils import to_parquet, extract_non_empty_column_list_sql
 ######## HYPER PATHS & FILES (in uppercase for clarity)
 prefix = "" #"_429"
 
-SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search/match"  ######## API endpoint for search/match
-BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"  ######## API endpoint for batch query
 CITATION_URL_TEMPLATE = "https://api.semanticscholar.org/graph/v1/paper/{paper_id}/citations"  ######## Citation endpoint template
 REFERENCE_URL_TEMPLATE = "https://api.semanticscholar.org/graph/v1/paper/{paper_id}/references"  ######## Reference endpoint template
-BATCH_FIELDS = "corpusId,paperId,title,authors,year,venue,citations,references"  ######## Fields for batch query
 
 
 load_dotenv()
@@ -36,10 +32,6 @@ API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY")
 HEADERS = {"Content-Type": "application/json"}
 if API_KEY:
     HEADERS["x-api-key"] = API_KEY
-
-CACHE_COLUMNS = ["query_title", "retrieved_title", "paperId", "corpusId", "paper_identifier", "query_status"]
-# Statuses that we will NOT retry on next run (404 = not found, success = done)
-SKIP_RETRY_STATUSES = {"success", "404"}
 
 def get_single_citations_row(paper_id, sleep_time=1.5, timeout=60, merge_key="corpusId"):
     """

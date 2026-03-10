@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=step2_se_url_tab            
+#SBATCH --job-name=s2orc_fulltext_local            
 #SBATCH --output=slurm-%j.out                  
 #SBATCH --mem=32G                              
 #SBATCH --cpus-per-task=4                      
-python src/data_preprocess/step2_se_url_tab.py \
+python src/data_preprocess/s2orc_fulltext_local.py \
 --directory /u501/z6dong/shared_data/se_s2orc_250218 \
 --db_path /u501/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db \
 --parquet_cache data/processed/s2orc_rerun.parquet \

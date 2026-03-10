@@ -10,7 +10,7 @@ Description:
 
 Optimized batch extraction from ES cache → SQLite → NDJSON lines → Annotations extraction.
 
-python step2_se_url_tab.py \
+python s2orc_fulltext_local.py \
     --directory /u501/z6dong/shared_data/se_s2orc_250218 \
     --db_path /u501/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db \
     --parquet_cache data/processed/s2orc_rerun.parquet \

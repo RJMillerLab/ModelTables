@@ -13,7 +13,7 @@ For the streamlined main workflow, see `scripts.md`.
 #cp -r data/processed/s2orc_citations_cache.parquet data/processed/s2orc_citations_cache_251117.parquet
 #cp -r data/processed/s2orc_references_cache.parquet data/processed/s2orc_references_cache_251117.parquet
 
-python -m src.data_preprocess.s2or_title2ids_API --tag 251117 > logs/s2orc_title2ids_API_251117.log 2>&1
+python -m src.data_preprocess.s2orc_title2ids_API --tag 251117 > logs/s2orc_title2ids_API_251117.log 2>&1
 python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_API_251117.log 2>&1
  # Optional: Local exact title:id batch (supplement API results, then manually concat). I: s2orc_titles2ids_<tag>.parquet O: s2orc_titles2ids_local_<tag>.parquet. Requires papers_index (build_mini_s2orc_es --mode build). Uses same ES setup as build_mini_citation_es.sh.
  #- bash src/data_localindexing/local_exact_title2id.sh 251117 > logs/local_exact_title2id_251117.log 2>&1
@@ -34,7 +34,7 @@ python -m src.data_localindexing.s2orc_refcit_local --tag 251117 --src_dir /u501
 python -m src.data_localindexing.s2orc_refcit_local_post --tag 251117 > logs/s2orc_local_query_ref_cit_251117.log 2>&1
 - python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet Add --add-missing if you ran s2orc_retry_missing
  # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query | I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
- - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext -> ref/cit info
+ - bash src/data_preprocess/s2orc_fulltext_local.sh # extract fulltext -> ref/cit info
 # I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_merged_df.parquet, tmp_extracted_lines.parquet
 ### Option2: batch querying papers_index
 python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json # getting full tables

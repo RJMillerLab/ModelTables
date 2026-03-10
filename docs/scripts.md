@@ -104,40 +104,40 @@ python -m src.data_preprocess.step2_hugging_github_extract --tag 251117 > logs/s
 # (Output but not used anymore) github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
 python -m src.data_preprocess.step2_arxiv_github_title --tag 251117 > logs/step2_arxiv_github_title_251117.log 2>&1 # This one is slow..
 ln -s data/processed/modelcard_all_title_list_251117.parquet data/processed/modelcard_all_title_list_v2_251117.parquet
-# (One-time fix without rerun: PYTHONPATH=. python bak/dedup_all_title_list_intra_row_251117.py)
+# (One-time fix without run all: PYTHONPATH=. python bak/dedup_all_title_list_intra_row_251117.py)
 
 # Save deduplicated titles for querying Semantic Scholar (S2ORC). Cross-row dedup: same normalize. Output: modelcard_dedup_titles_<tag>.json, s2orc_cross_row_dedup_groups_<tag>.json
 python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_save_251117.log 2>&1
 
 # Optional / non-main pipeline scripts are documented in `docs/depre_scripts.md`.
-
 <details>
 #### Option1:
-# Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits). Input: modelcard_dedup_titles_<tag>.json (from step2_s2orc_save) Output:  s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet, s2orc_titles2ids_<tag>.parquet
-# Why API over local (build_mini_citation_es): (1) API provides fresher citations/references; (2) API's title fuzzy matching is more accurate (commercialized) than our local ES fuzzy match.
-
-# copy from searched results, save some searched results, only search the missing titles
+# save some searched results, only search the missing titles
 #cp -r data/processed/s2orc_titles2ids.parquet data/processed/s2orc_titles2ids_251117.parquet
 #cp -r data/processed/s2orc_citations_cache.parquet data/processed/s2orc_citations_cache_251117.parquet
 #cp -r data/processed/s2orc_references_cache.parquet data/processed/s2orc_references_cache_251117.parquet
-python -m src.data_preprocess.s2orc_title2ids_API --tag 251117 > logs/s2orc_title2ids_API_251117.log 2>&1
-python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_API_251117.log 2>&1
 
- python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_*_251117.parquet, O: s2orc_rerun_251117.parquet
+# Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits).
+# Why API over local (build_mini_citation_es): (1) API provides fresher citations/references; (2) API's title fuzzy matching is more accurate (commercialized) than our local ES fuzzy match.
+python -m src.data_preprocess.s2orc_title2ids_API --tag 251117 > logs/s2orc_title2ids_API_251117.log 2>&1 #  Input: modelcard_dedup_titles_<tag>.json  Output: s2orc_titles2ids_<tag>.parquet
+python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_API_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet Output: s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet
+# Or 
+python -m src.data_localindexing.s2orc_refcit_local --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1 # Input: batch_results + hit_ids_<tag>.txt, output: full_hits_<tag>.jsonl
+python -m src.data_localindexing.s2orc_refcit_local_post --tag 251117 > logs/s2orc_local_query_ref_cit_251117.log 2>&1 # Input: full_hits_<tag>.jsonl (or fallback full_hits.jsonl), Output: s2orc_*_<tag>.parquet
+# (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query | I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
+python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_cit/ref_cache_251117.parquet, O: s2orc_rerun_251117.parquet
  #- bash src/data_localindexing/build_mini_citation_es.sh > logs/build_mini_citation_es.log 2>&1 # I: xx | O: batch_results
-# Extract full records from batch query results. Input: batch_results + hit_ids_<tag>.txt, output: full_hits_<tag>.jsonl
-python -m src.data_localindexing.s2orc_refcit_local --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1
-# Merge extracted full records. Input: full_hits_<tag>.jsonl (or fallback full_hits.jsonl), Output: s2orc_*_<tag>.parquet
-python -m src.data_localindexing.s2orc_refcit_local_post --tag 251117 > logs/s2orc_local_query_ref_cit_251117.log 2>&1
- # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query | I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
- - bash src/data_preprocess/step2_se_url_tab.sh # extract fulltext -> ref/cit info
+bash src/data_preprocess/s2orc_fulltext_local.sh # extract fulltext -> ref/cit info
 # I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_merged_df.parquet, tmp_extracted_lines.parquet
 ### Option2: batch querying papers_index
 python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json # getting full tables
 </details>
 
-# Download arXiv HTML content for table extraction. Input: s2orc_titles2ids_<tag>.parquet, arxiv_titles_cache_<tag>.json Output: title2arxiv_new_cache_<tag>.json, arxiv_html_cache_<tag>.json, missing_titles_tmp_<tag>.txt, arxiv_fulltext_html_<tag>/*.html
-python -m src.data_preprocess.step2_arxiv_get_html --tag 251117 > logs/step2_arxiv_get_html_251117.log 2>&1
+#python -m bak.analyze_bibtex_arxiv_ids --tag 251117 > logs/analyze_bibtex_arxiv_ids_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, Output: bibte_title_arxiv_s2orc_<tag>.parquet  # try saving some title:arxiv from bibtex
+# Resolve title→arxiv_id from parquet only (no JSON). Optional: bibtex_title_arxiv_<tag>.parquet (Optional), title2arxiv_oai_index_<tag>.parquet (or harvest OAI on the fly with --oai-set/--oai-limit).
+python -m src.data_preprocess.arxiv_title2ids_oai --tag 251117 > logs/arxiv_title2ids_oai_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet (retrieved_title). Output: title2arxiv_cache_<tag>.parquet, missing_titles_tmp_<tag>.txt; title2arxiv_oai_index_<tag>.parquet
+python -m src.data_preprocess.arxiv_fulltext_api --tag 251117 > logs/arxiv_fulltext_api_251117.log 2>&1 # Input: title2arxiv_cache_<tag>.parquet. Output: title2arxiv_cache_<tag>.parquet (updated html_path), data/arxiv_fulltext_html_<tag>/*.html
+#python -m src.data_preprocess.step2_arxiv_get_html --tag 251117 > logs/step2_arxiv_get_html_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet, arxiv_titles_cache_<tag>.json Output: title2arxiv_new_cache_<tag>.json, title2arxiv_oai_index_<tag>.parquet, rxiv_html_cache_<tag>.json, missing_titles_tmp_<tag>.txt, arxiv_fulltext_html_<tag>/*.html
 
 # Extract tables from arXiv HTML files. Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional) Output: html_table.parquet, tables_output/*.csv
 ###############################################
