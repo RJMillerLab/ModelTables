@@ -133,12 +133,21 @@ bash src/data_preprocess/s2orc_fulltext_local.sh # extract fulltext -> ref/cit i
 python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json # getting full tables
 </details>
 
-#python -m bak.analyze_bibtex_arxiv_ids --tag 251117 > logs/analyze_bibtex_arxiv_ids_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, Output: bibte_title_arxiv_s2orc_<tag>.parquet  # try saving some title:arxiv from bibtex
-# Resolve title→arxiv_id from parquet only (no JSON). Optional: bibtex_title_arxiv_<tag>.parquet (Optional), title2arxiv_oai_index_<tag>.parquet (or harvest OAI on the fly with --oai-set/--oai-limit).
-python -m src.data_preprocess.arxiv_title2ids_oai --tag 251117 > logs/arxiv_title2ids_oai_251117_4.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet. Output: title2arxiv_cache_<tag>.parquet; missing_titles_tmp_<tag>.txt; title2arxiv_oai_index_<tag>.parquet
 
-bash scripts/ln_arxiv_html.sh 251117
-python -m src.data_preprocess.arxiv_fulltext_api --tag 251117 > logs/arxiv_fulltext_api_251117.log 2>&1 # Input: title2arxiv_cache_<tag>.parquet. Output: title2arxiv_cache_<tag>.parquet (updated html_path), data/arxiv_fulltext_html_<tag>/*.html ;;;;;;;;# (Deprecated) Input: arxiv_titles_cache_<tag>.json Output: title2arxiv_new_cache_<tag>.json, rxiv_html_cache_<tag>.json,
+
+# Download arXiv HTML, extract tables from arXiv HTML files.
+#python -m bak.analyze_bibtex_arxiv_ids --tag 251117 > logs/analyze_bibtex_arxiv_ids_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, Output: bibte_title_arxiv_s2orc_<tag>.parquet  # try saving some title:arxiv from bibtex
+
+# Resolve title→arxiv_id. Init: s2orc + arxiv_titles_cache concat; then bibtex + OAI rescue; sync html_path from folder.
+# Input: s2orc_titles2ids_<tag>.parquet (query_title, retrieved_title), arxiv_titles_cache_<tag>.json (url→title, init only)
+#       bibtex_title_arxiv_<tag>.parquet (optional), title2arxiv_oai_index_<tag>.parquet (optional)
+# Output: title2arxiv_cache_<tag>.parquet, final_missing_titles_from_cache_<tag>.txt
+python -m src.data_preprocess.arxiv_title2ids_oai --tag 251117 > logs/arxiv_title2ids_oai_251117_5.log 2>&1
+bash scripts/ln_arxiv_html.sh 251117  # ln data/arxiv_fulltext_html/*.html → data/arxiv_fulltext_html_<tag>/, save downloading
+# Download HTML for arxiv_ids in cache. Input: title2arxiv_cache_<tag>.parquet. Output: data/arxiv_fulltext_html_<tag>/*.html (no parquet write)
+python -m src.data_preprocess.arxiv_fulltext_api --tag 251117 > logs/arxiv_fulltext_api_251117.log 2>&1
+# run python -m src.data_preprocess.arxiv_title2ids_oai --tag 251117 > logs/arxiv_title2ids_oai_251117_4.log 2>&1 again to sync html_path from folder to cache.
+
 
 # Extract tables from arXiv HTML files. Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional) Output: html_table.parquet, tables_output/*.csv
 ###############################################

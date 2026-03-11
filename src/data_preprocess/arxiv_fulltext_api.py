@@ -1,75 +1,98 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Download arXiv HTML (via ar5iv) for titles that already have arxiv_id in `title2arxiv_cache_<tag>.parquet`.
+Download arXiv HTML (via ar5iv) for arxiv_ids in title2arxiv_cache_<tag>.parquet.
+Run arxiv_title2ids_oai first (which merges s2orc + arxiv_titles_cache + bibtex + OAI).
 """
 
 import os
 import re
 import argparse
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
 import pandas as pd
 
+from tqdm import tqdm
+
 from src.utils import load_config
 
-
-def fetch_ar5iv_html(arxiv_id: str, html_folder: str) -> str | None:
+def fetch_ar5iv_html(arxiv_id: str, html_folder: str) -> str:
     """
-    Fetch HTML from ar5iv (ar5iv.labs.arxiv.org) given an arXiv ID.
-    Save the HTML to a local file in folder html_folder with filename '{arxiv_id}.html'
-    and return the file path, or None on failure.
+    Fetch HTML from ar5iv. Save to html_folder/{arxiv_id}.html if 200 and real fulltext.
+    Ar5iv redirects to arxiv.org/abs/ for papers it hasn't converted; we reject those.
+    Writes .redirect marker to skip retries. Returns status in ("success", "exists", "404", "429", "500", "redirect", "error").
     """
     file_path = os.path.join(html_folder, f"{arxiv_id}.html")
     if os.path.exists(file_path):
-        return file_path
+        return "exists"
+    redirect_marker = os.path.join(html_folder, f"{arxiv_id}.redirect")
+    if os.path.exists(redirect_marker):
+        return "redirect"
 
     url = f"https://ar5iv.labs.arxiv.org/html/{arxiv_id}"
     try:
         resp = requests.get(url, timeout=15)
         if resp.status_code == 200:
-            html_text = resp.text
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(html_text)
-            return file_path
+            # Ar5iv redirects to arxiv.org/abs/ for unconverted papers - reject, don't save abstract page
+            if "ar5iv" not in resp.url:
+                open(redirect_marker, "w").close()
+                return "redirect"
+            tmp_path = os.path.join(html_folder, f"{arxiv_id}.html.tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(resp.text)
+            os.rename(tmp_path, file_path)
+            return "success"
         elif resp.status_code == 404:
-            print(f"[WARN] HTML not exist: {arxiv_id}")
-            return None
+            return "404"
+        elif resp.status_code == 429:
+            return "429"
+        elif resp.status_code >= 500:
+            return "500"
         else:
-            print(f"[WARN] ar5iv HTML not found for {arxiv_id}, status={resp.status_code}")
-            # Fallback: try base arXiv ID without version suffix (e.g. 2101.12345v3 -> 2101.12345)
-            base_arxiv_id = re.sub(r"v\\d+$", "", arxiv_id)
-            if base_arxiv_id != arxiv_id:
-                print(f"[INFO] Fallback: trying base arXiv ID '{base_arxiv_id}' for {arxiv_id}.")
-                base_file_path = os.path.join(html_folder, f"{base_arxiv_id}.html")
-                if os.path.exists(base_file_path):
-                    return base_file_path
-                base_url = f"https://ar5iv.labs.arxiv.org/html/{base_arxiv_id}"
+            # try fallback: base id without version
+            base_id = re.sub(r"v\d+$", "", arxiv_id)
+            if base_id != arxiv_id:
+                base_path = os.path.join(html_folder, f"{base_id}.html")
+                if os.path.exists(base_path):
+                    return "exists"
+                base_redirect = os.path.join(html_folder, f"{base_id}.redirect")
+                if os.path.exists(base_redirect):
+                    return "redirect"
+                base_url = f"https://ar5iv.labs.arxiv.org/html/{base_id}"
                 try:
-                    base_resp = requests.get(base_url, timeout=15)
-                    if base_resp.status_code == 200:
-                        html_text = base_resp.text
-                        with open(base_file_path, "w", encoding="utf-8") as f:
-                            f.write(html_text)
-                        return base_file_path
-                    else:
-                        print(
-                            f"[WARN] Fallback ar5iv HTML not found for {base_arxiv_id}, "
-                            f"status={base_resp.status_code}"
-                        )
-                        return None
-                except Exception as ex:
-                    print(f"[ERROR] Fallback ar5iv HTML fetch error for {base_arxiv_id}: {ex}")
-                    return None
-            return None
+                    br = requests.get(base_url, timeout=15)
+                    if br.status_code == 200:
+                        if "ar5iv" not in br.url:
+                            open(base_redirect, "w").close()
+                            return "redirect"
+                        tmp_path = os.path.join(html_folder, f"{base_id}.html.tmp")
+                        with open(tmp_path, "w", encoding="utf-8") as f:
+                            f.write(br.text)
+                        os.rename(tmp_path, base_path)
+                        return "success"
+                    elif br.status_code == 404:
+                        return "404"
+                    elif br.status_code == 429:
+                        return "429"
+                    elif br.status_code >= 500:
+                        return "500"
+                except Exception:
+                    return "error"
+            return "error"
+    except requests.exceptions.Timeout:
+        return "error"
     except Exception as e:
-        print(f"[ERROR] ar5iv HTML fetch error for {arxiv_id}: {e}")
-        return None
+        print(f"[ERROR] ar5iv fetch {arxiv_id}: {e}", flush=True)
+        return "error"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download arXiv HTML via ar5iv for titles that already have arxiv_id in title2arxiv_cache_<tag>.parquet")
     parser.add_argument("--tag", dest="tag", default=None, help="Tag suffix for versioning (e.g., 251117).")
+    parser.add_argument("--workers", type=int, default=2, help="Parallel workers (default: 2).")
+    parser.add_argument("--delay", type=float, default=1.5, help="Seconds between requests per worker (default: 1.5).")
     args = parser.parse_args()
 
     config = load_config("config.yaml")
@@ -81,76 +104,49 @@ def main() -> None:
     cache_parquet_path = os.path.join(processed_base_path, f"title2arxiv_cache{suffix}.parquet")
     html_folder = os.path.join(base_path, f"arxiv_fulltext_html{suffix}")
     os.makedirs(html_folder, exist_ok=True)
+    for f in os.listdir(html_folder):
+        if f.endswith(".html.tmp"):
+            try:
+                os.remove(os.path.join(html_folder, f))
+            except OSError:
+                pass
 
-    print(f"[INFO] Cache parquet: {cache_parquet_path}")
-    print(f"[INFO] HTML folder: {html_folder}")
+    print(f"[INFO] Cache: {cache_parquet_path}", flush=True)
+    print(f"[INFO] HTML folder: {html_folder}", flush=True)
 
     if not os.path.isfile(cache_parquet_path):
-        raise FileNotFoundError(f"title2arxiv_cache parquet not found at {cache_parquet_path}. Run arxiv_title2ids_oai.py first.")
+        raise FileNotFoundError(
+            f"title2arxiv_cache not found at {cache_parquet_path}. Run arxiv_title2ids_oai.py first."
+        )
+    # Only download for rows where html_path is empty (no existing HTML): this only work when each time we update cache right after running this script
+    df = pd.read_parquet(cache_parquet_path, columns=["arxiv_id", "html_path"])
+    has_id = df["arxiv_id"].notna() & (df["arxiv_id"].astype(str).str.strip() != "")
+    no_html = df["html_path"].isna() | (df["html_path"].astype(str).str.strip() == "")
+    all_ids = df.loc[has_id & no_html, "arxiv_id"].astype(str).str.strip().unique()
+    all_ids = sorted([x for x in all_ids if x and x.lower() not in ("nan", "none")])
+    workers = max(1, min(args.workers, 8))
+    delay = max(0.0, args.delay)
+    print(f"[INFO] arxiv_id without html_path to download: {len(all_ids)} (workers={workers}, delay={delay}s)", flush=True)
 
-    df_cache = pd.read_parquet(cache_parquet_path)
-    print(f"[INFO] Loaded cache with {len(df_cache)} rows from {cache_parquet_path}")
+    stats = {"exists": 0, "success": 0, "404": 0, "429": 0, "500": 0, "redirect": 0, "error": 0}
 
-    # Ensure expected columns exist
-    for col in ["title", "norm_title", "arxiv_id", "html_path", "query_status"]:
-        if col not in df_cache.columns:
-            if col == "query_status":
-                df_cache[col] = "unknown"
-            else:
-                df_cache[col] = ""
+    def _fetch(aid: str) -> str:
+        time.sleep(delay)
+        return fetch_ar5iv_html(aid, html_folder)
 
-    # Build in‑memory html_cache (arxiv_id -> html_path)
-    html_cache: dict[str, str] = {}
-    for _, row in df_cache.iterrows():
-        aid = str(row.get("arxiv_id") or "").strip()
-        path = row.get("html_path") or ""
-        if aid:
-            html_cache[aid] = path
-
-    all_ids = [str(a).strip() for a in df_cache["arxiv_id"].dropna() if str(a).strip()]
-    unique_ids = sorted(set(all_ids))
-    print(f"[INFO] Found {len(unique_ids)} unique arxiv_id values in cache.")
-
-    n_already = 0
-    n_downloaded = 0
-    n_failed = 0
-
-    for idx, aid in enumerate(unique_ids, start=1):
-        cached_path = html_cache.get(aid, "")
-        if cached_path and os.path.isfile(cached_path):
-            n_already += 1
-            continue
-
-        html_file_path = fetch_ar5iv_html(aid, html_folder)
-        if html_file_path:
-            html_cache[aid] = html_file_path
-            n_downloaded += 1
-        else:
-            html_cache[aid] = ""
-            n_failed += 1
-
-        if idx % 100 == 0:
-            print(
-                f"[STATS] Processed {idx}/{len(unique_ids)} IDs "
-                f"(existing={n_already}, downloaded={n_downloaded}, failed={n_failed})"
-            )
-            # Be a bit polite to ar5iv, short sleep
-            time.sleep(1.0)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_fetch, aid): aid for aid in all_ids}
+        for future in tqdm(as_completed(futures), total=len(futures), desc="ar5iv HTML", unit="id"):
+            status = future.result()
+            stats[status] = stats.get(status, 0) + 1
 
     print(
-        f"[INFO] Finished HTML pass over {len(unique_ids)} IDs: "
-        f"{n_already} already had files, {n_downloaded} downloaded, {n_failed} failed."
+        f"[DONE] exists={stats['exists']}, success={stats['success']}, 404={stats['404']}, "
+        f"429={stats['429']}, 5xx={stats['500']}, redirect={stats['redirect']}, error={stats['error']}",
+        flush=True,
     )
-
-    # Update html_path column in cache from html_cache
-    df_cache["html_path"] = df_cache["arxiv_id"].map(
-        lambda aid: html_cache.get(str(aid).strip(), "") if str(aid).strip() else ""
-    )
-
-    df_cache.to_parquet(cache_parquet_path, index=False)
-    print(f"[INFO] Updated cache written back to {cache_parquet_path}")
-
+    print("[INFO] html_path: run arxiv_title2ids_oai (sync) or scan folder when needed.", flush=True)
+    print("Run `python -m src.data_preprocess.arxiv_title2ids_oai --tag <tag>` to sync html_path from folder to cache.", flush=True)
 
 if __name__ == "__main__":
     main()
-

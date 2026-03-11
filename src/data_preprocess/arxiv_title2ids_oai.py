@@ -532,29 +532,55 @@ def main():
     if os.path.isfile(CACHE_PARQUET_PATH):
         print(f"[INFO] Unified cache parquet found.")
     else:
-        # Initialize from s2orc: SQL extract retrieved_title as title, norm_title; arxiv_id/html_path/query_status empty.
-        # Bibtex rescue runs later.
+        # Initialize: s2orc titles + arxiv_titles_cache (url->title, extract arxiv_id). Concat, dedup, save.
         if not os.path.isfile(parquet_path):
             raise FileNotFoundError(f"s2orc_titles2ids parquet not found: {parquet_path}")
         os.makedirs(os.path.dirname(CACHE_PARQUET_PATH), exist_ok=True)
-        con = duckdb.connect(database=":memory:")
-        con.execute(
-            "COPY ("
-            "  SELECT DISTINCT "
-            "    TRIM(CAST(retrieved_title AS VARCHAR)) AS title,"
-            "    LOWER(REGEXP_REPLACE(TRIM(CAST(retrieved_title AS VARCHAR)), '\\\\s+', ' ', 'g')) AS norm_title,"
-            "    '' AS arxiv_id,"
-            "    '' AS html_path,"
-            "    '' AS query_status "
-            "  FROM read_parquet(?) "
-            "  WHERE retrieved_title IS NOT NULL "
-            "    AND TRIM(CAST(retrieved_title AS VARCHAR)) <> '' "
-            "    AND LOWER(TRIM(CAST(retrieved_title AS VARCHAR))) NOT IN ('nan', 'none')"
-            ") TO ? (FORMAT PARQUET)",
-            [parquet_path, CACHE_PARQUET_PATH],
-        )
-        n = con.execute("SELECT COUNT(*) FROM read_parquet(?)", [CACHE_PARQUET_PATH]).fetchone()[0]
-        print(f"[INFO] Initialized cache from s2orc ({n} unique titles) and saved to {CACHE_PARQUET_PATH}.")
+
+        # 1) df from s2orc_titles2ids: title=query_title (raw), norm_title=normalize(retrieved_title)
+        #    Same as original SQL: norm_title = LOWER(REGEXP_REPLACE(TRIM(retrieved_title), '\s+', ' ', 'g'))
+        df_s2orc = pd.read_parquet(parquet_path, columns=["query_title", "retrieved_title"])
+        df_s2orc = df_s2orc[df_s2orc["retrieved_title"].notna() & (df_s2orc["retrieved_title"].astype(str).str.strip() != "")]
+        df_s2orc = df_s2orc[~df_s2orc["retrieved_title"].astype(str).str.lower().isin(["nan", "none"])]
+        df_s2orc["title"] = df_s2orc["query_title"].fillna(df_s2orc["retrieved_title"]).astype(str).str.strip()
+        df_s2orc["norm_title"] = df_s2orc["retrieved_title"].astype(str).str.strip().apply(normalize_title)
+        df_s2orc["_norm_key"] = df_s2orc["norm_title"]  # for cross-source dedup
+        df_s2orc = df_s2orc.drop_duplicates(subset=["_norm_key"])
+        df_s2orc["arxiv_id"] = ""
+        df_s2orc["html_path"] = ""
+        df_s2orc["query_status"] = ""
+
+        # 2) df from arxiv_titles_cache: title=t (extracted), norm_title=normalize(t)
+        titles_cache_path = os.path.join(processed_base_path, f"arxiv_titles_cache{suffix}.json")
+        rows_titles = []
+        if os.path.isfile(titles_cache_path):
+            url_to_title = load_json_cache(titles_cache_path)
+            for url, extracted_title in url_to_title.items():
+                aid = extract_arxiv_id(url)
+                if aid and extracted_title and str(extracted_title).strip():
+                    t = str(extracted_title).strip()
+                    norm_t = normalize_title(t)
+                    rows_titles.append({
+                        "title": t,
+                        "norm_title": norm_t,
+                        "_norm_key": norm_t,
+                        "arxiv_id": aid,
+                        "html_path": "",
+                        "query_status": "found",
+                    })
+        df_titles = pd.DataFrame(rows_titles) if rows_titles else pd.DataFrame(columns=["title", "norm_title", "_norm_key", "arxiv_id", "html_path", "query_status"])
+        if not df_titles.empty:
+            df_titles = df_titles.drop_duplicates(subset=["_norm_key"], keep="first")
+
+        # 3) Concat, dedup by _norm_key (keep row with arxiv_id when duplicate)
+        df_s2orc_cols = ["title", "norm_title", "_norm_key", "arxiv_id", "html_path", "query_status"]
+        df_s2orc = df_s2orc[df_s2orc_cols]
+        df_init = pd.concat([df_s2orc, df_titles], ignore_index=True)
+        df_init["_has_id"] = df_init["arxiv_id"].notna() & (df_init["arxiv_id"].astype(str).str.strip() != "")
+        df_init = df_init.sort_values("_has_id", ascending=False).drop_duplicates(subset=["_norm_key"], keep="first")
+        df_init = df_init.drop(columns=["_has_id", "_norm_key"])
+        df_init.to_parquet(CACHE_PARQUET_PATH, index=False)
+        print(f"[INFO] Initialized cache: s2orc={len(df_s2orc)}, arxiv_titles_cache={len(df_titles)}, merged={len(df_init)} rows.")
 
     print_cache_stats_sql(CACHE_PARQUET_PATH)
     rescue_cache_from_bibtex(CACHE_PARQUET_PATH, bibtex_parquet_path)
