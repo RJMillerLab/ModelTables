@@ -1,7 +1,7 @@
 """
 Author: Zhengyuan Dong
 Created: 25-09-25
-Edited: 25-10-16
+Edited: 26-03-10
 Description: HTML table parsing with rowspan/colspan fix and DuckDB/SQLite/CSV support.
 """
 
@@ -162,7 +162,7 @@ def clean_final_dataframe(df):
     return df
 
 
-def extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path='data/processed/tables_output.db', preserve_bold=False):
+def extract_tables_and_save_to_duckdb(html_path, paper_id, duckdb_path='data/processed/tables_output_v2.db', preserve_bold=False):
     table_names = []
     if not os.path.exists(html_path):
         return table_names
@@ -232,7 +232,7 @@ def extract_tables_and_save(html_path, paper_id, output_dir='data/processed/tabl
     return table_paths
 
 
-def process_single_html(html_path, paper_id, output_dir='data/processed/tables_output_v2', duckdb_path='data/processed/tables_output.db', preserve_bold=False, save_mode='csv'):
+def process_single_html(html_path, paper_id, output_dir='data/processed/tables_output_v2', duckdb_path='data/processed/tables_output_v2.db', preserve_bold=False, save_mode='csv'):
     result = {'paper_id': paper_id, 'html_path': html_path, 'page_type': None, 'csv_paths': [], 'db_tables': [], 'error': None}
     import time
     t0 = time.perf_counter()
@@ -256,6 +256,7 @@ def main():
     parser.add_argument('--save_mode', default='csv', choices=['csv', 'duckdb'])
     parser.add_argument('--n_jobs', type=int, default=4)
     parser.add_argument('--sequential', action='store_true')
+    parser.add_argument('--overwrite', action='store_true', help='Force full reprocess; by default runs incrementally and skips already-processed paper_ids.')
     args = parser.parse_args()
 
     config = load_config('config.yaml')
@@ -264,7 +265,7 @@ def main():
 
     input_dir = os.path.join(base_path, f"arxiv_fulltext_html{suffix}")
     output_dir = os.path.join(base_path, 'processed', f"tables_output_v2{suffix}")
-    db_path = os.path.join(base_path, 'processed', f"tables_output{suffix}.db")
+    db_path = os.path.join(base_path, 'processed', f"tables_output_v2{suffix}.db")
     results_parquet = os.path.join(base_path, 'processed', f"html_parsing_results_v2{suffix}.parquet")
 
     print(f"📁 Input dir: {input_dir}")
@@ -276,22 +277,42 @@ def main():
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
 
     html_files = [(os.path.join(input_dir, f), f.replace('.html', '')) for f in os.listdir(input_dir) if f.endswith('.html')]
-    print(f"Found {len(html_files)} HTML files to process")
+    print(f"Found {len(html_files)} HTML files in folder")
+
+    # Incremental: skip paper_ids already in results parquet (unless --overwrite)
+    to_process = html_files
+    df_existing = pd.DataFrame(columns=['paper_id', 'html_path', 'page_type', 'csv_paths', 'db_tables', 'error'])
+    if not args.overwrite and os.path.exists(results_parquet):
+        df_existing = pd.read_parquet(results_parquet)
+        existing_ids = set(df_existing['paper_id'].astype(str))
+        to_process = [(p, i) for p, i in html_files if i not in existing_ids]
+        print(f"Incremental mode: {len(df_existing)} existing, {len(to_process)} new to process")
+    else:
+        print(f"Full run (--overwrite={args.overwrite}): processing all {len(html_files)} files")
+
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
     results = []
-    if args.sequential or args.n_jobs <= 1:
-        for html_path, paper_id in tqdm(html_files):
-            results.append(process_single_html(html_path, paper_id, output_dir, db_path, args.preserve_bold, args.save_mode))
+    if len(to_process) > 0:
+        if args.sequential or args.n_jobs <= 1:
+            for html_path, paper_id in tqdm(to_process, desc="Processing HTML files"):
+                results.append(process_single_html(html_path, paper_id, output_dir, db_path, args.preserve_bold, args.save_mode))
+        else:
+            with tqdm_joblib(tqdm(total=len(to_process), desc="Processing HTML files")):
+                results = Parallel(n_jobs=args.n_jobs)(delayed(process_single_html)(
+                    html_path, paper_id, output_dir, db_path, args.preserve_bold, args.save_mode
+                ) for html_path, paper_id in to_process)
+
+    df_new = pd.DataFrame(results) if results else pd.DataFrame(columns=['paper_id', 'html_path', 'page_type', 'csv_paths', 'db_tables', 'error'])
+    if not args.overwrite and len(df_existing) > 0:
+        # Keep existing records for paper_ids we did not process; add/overwrite with new
+        df_final = pd.concat([df_existing, df_new], ignore_index=True)
+        df_final = df_final.drop_duplicates(subset=['paper_id'], keep='last')
     else:
-        with tqdm_joblib(tqdm(total=len(html_files), desc="Processing HTML files")):
-            results = Parallel(n_jobs=args.n_jobs)(delayed(process_single_html)(
-                html_path, paper_id, output_dir, db_path, args.preserve_bold, args.save_mode
-            ) for html_path, paper_id in html_files)
-    df = pd.DataFrame(results)
-    to_parquet(df, results_parquet)
-    print(f"✅ Done. Saved {len(df)} results.")
+        df_final = df_new
+    to_parquet(df_final, results_parquet)
+    print(f"✅ Done. Saved {len(df_final)} results to {results_parquet}.")
 
 
 if __name__ == "__main__":

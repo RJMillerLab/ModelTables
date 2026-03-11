@@ -17,19 +17,10 @@ from tqdm import tqdm
 from typing import Tuple, List
 from src.llm.model import LLM_response
 from src.utils import to_parquet, load_config, is_list_like, to_list_safe
-
+from src.llm.batch import main_batch_query
 
 # --------------- Fixed Path Constants --------------- #
 # These will be updated dynamically in main()
-TITLE2ARXIV_JSON = "data/processed/title2arxiv_new_cache.json"
-HTML_TABLE_PARQUET = "data/processed/html_table.parquet"
-HTML_TABLE_PARQUET_V2 = "data/processed/html_parsing_results_v2.parquet"
-ANNOTATIONS_PARQUET = "data/processed/extracted_annotations.parquet"
-PDF_CACHE_PATH = "data/processed/pdf_download_cache.json"
-FINAL_OUTPUT_CSV = "data/processed/llm_markdown_table_results.parquet"
-BATCH_OUTPUT_PATH = "data/processed/batch_output.jsonl"
-BATCH_INPUT_PATH = "data/processed/batch_input.jsonl"
-
 MAX_CONTEXT = 16384
 TOKEN_BUFFER = 300 # for symbol like ```markdown ```
 MODEL_NAME = "gpt-4o-mini"
@@ -37,12 +28,8 @@ MODEL_NAME = "gpt-4o-mini"
 # Debug: if the below is set is False, we just update FINAL_OUTPUT_CSV file
 RUN_LLM = False ##### whether we re-run llm, set to False if we want to skip the LLM call and use previous results
 RUN_REBUILD_BATCHINPUT = False ### whether we want to rebuild the batch input file
-# ---------------------- Imports ---------------------- #
 
-
-from src.llm.batch import main_batch_query
 # ---------------------- Helper Functions ---------------------- #
-
 def normalize_title(title):
     """
     Normalize the title by converting to lower-case and reducing whitespace.
@@ -228,43 +215,21 @@ prompt_template = (
 
 def main():
     parser = argparse.ArgumentParser(description="Integrate HTML/PDF/annotation tables and prepare LLM inputs")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--annotations', dest='annotations', default=None,
-                        help='Path to extracted annotations parquet (default: auto-detect from tag)')
-    parser.add_argument('--title2arxiv', dest='title2arxiv', default=None,
-                        help='Path to title→arxiv cache JSON (default: auto-detect from tag)')
-    parser.add_argument('--html-table', dest='html_table', default=None,
-                        help='Path to html_table parquet (default: auto-detect from tag)')
-    parser.add_argument('--html-table-v2', dest='html_table_v2', default=None,
-                        help='Path to html_parsing_results_v2 parquet (default: auto-detect from tag)')
-    parser.add_argument('--pdf-cache', dest='pdf_cache', default=None,
-                        help='Path to pdf_download_cache JSON (default: auto-detect from tag)')
-    parser.add_argument('--output', dest='output', default=None,
-                        help='Path to final llm_markdown_table_results parquet (default: auto-detect from tag)')
-    parser.add_argument('--batch-input', dest='batch_input', default=None,
-                        help='Path to batch input JSONL (default: auto-detect from tag)')
-    parser.add_argument('--batch-output', dest='batch_output', default=None,
-                        help='Path to batch output JSONL (default: auto-detect from tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     args = parser.parse_args()
 
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
+    suffix = f"_{args.tag}" if args.tag else ""
 
-    global TITLE2ARXIV_JSON, HTML_TABLE_PARQUET, HTML_TABLE_PARQUET_V2, ANNOTATIONS_PARQUET
-    global PDF_CACHE_PATH, FINAL_OUTPUT_CSV, BATCH_INPUT_PATH, BATCH_OUTPUT_PATH
-
-    TITLE2ARXIV_JSON = args.title2arxiv or os.path.join(processed_base_path, f"title2arxiv_new_cache{suffix}.json")
-    HTML_TABLE_PARQUET = args.html_table or os.path.join(processed_base_path, f"html_table{suffix}.parquet")
-    HTML_TABLE_PARQUET_V2 = args.html_table_v2 or os.path.join(processed_base_path, f"html_parsing_results_v2{suffix}.parquet")
-    ANNOTATIONS_PARQUET = args.annotations or os.path.join(processed_base_path, f"extracted_annotations{suffix}.parquet")
-    PDF_CACHE_PATH = args.pdf_cache or os.path.join(processed_base_path, f"pdf_download_cache{suffix}.json")
-    FINAL_OUTPUT_CSV = args.output or os.path.join(processed_base_path, f"llm_markdown_table_results{suffix}.parquet")
-    BATCH_INPUT_PATH = args.batch_input or os.path.join(processed_base_path, f"batch_input{suffix}.jsonl")
-    BATCH_OUTPUT_PATH = args.batch_output or os.path.join(processed_base_path, f"batch_output{suffix}.jsonl")
+    TITLE2ARXIV_JSON = os.path.join(base_path, 'processed', f"title2arxiv_new_cache{suffix}.json")
+    HTML_TABLE_PARQUET = os.path.join(base_path, 'processed', f"html_table{suffix}.parquet")
+    HTML_TABLE_PARQUET_V2 = os.path.join(base_path, 'processed', f"html_parsing_results_v2{suffix}.parquet")
+    ANNOTATIONS_PARQUET = os.path.join(base_path, 'processed', f"extracted_annotations{suffix}.parquet")
+    PDF_CACHE_PATH = os.path.join(base_path, 'processed', f"pdf_download_cache{suffix}.json")
+    FINAL_OUTPUT_CSV = os.path.join(base_path, 'processed', f"llm_markdown_table_results{suffix}.parquet")
+    BATCH_INPUT_PATH = os.path.join(base_path, 'processed', f"batch_input{suffix}.jsonl")
+    BATCH_OUTPUT_PATH = os.path.join(base_path, 'processed', f"batch_output{suffix}.jsonl")
 
     print("📁 Paths in use:")
     print(f"   Annotations:        {ANNOTATIONS_PARQUET}")
@@ -345,45 +310,22 @@ def main():
     df_html_merged = pd.merge(df_title2arxiv, df_html,left_on="arxiv_id_pure", right_on="arxiv_id_pure",how="left")
     #df_html_merged = pd.merge(df_title2arxiv, df_html,left_on="arxiv_id", right_on="paper_id",how="left")
     
-    df_html_merged.rename(columns={
-        "html_path": "html_html_path", 
-        "page_type": "html_page_type", 
-        "table_list": "html_table_list", 
-        "paper_id": "html_paper_id"
-    }, inplace=True)
+    df_html_merged.rename(columns={"html_path": "html_html_path", "page_type": "html_page_type", "table_list": "html_table_list", "paper_id": "html_paper_id"}, inplace=True)
     #print(df_html_merged[df_html_merged['html_paper_id'] == '1508.00305'].iloc[0])
     print("📝 df_html_merged shape:", df_html_merged.shape)
     # --- Step 5: Merge annotations with the title-HTML mapping on retrieved_title ---
-    df_merged = pd.merge(
-        df_anno,
-        df_html_merged,
-        on="retrieved_title",
-        how="left",
-        suffixes=("", "_temp")
-    )
+    df_merged = pd.merge(df_anno, df_html_merged, on="retrieved_title", how="left", suffixes=("", "_temp"))
 
     mask_missing = df_merged["arxiv_id"].isna()
     if mask_missing.any():
         df_missing = df_merged[mask_missing].copy()
-        df_missing2 = pd.merge(
-            df_missing.drop(columns=["arxiv_id"]),
-            df_title2arxiv[["norm_title", "arxiv_id"]],
-            left_on="norm_title",
-            right_on="norm_title",
-            how="left"
-        )
+        df_missing2 = pd.merge(df_missing.drop(columns=["arxiv_id"]), df_title2arxiv[["norm_title", "arxiv_id"]], left_on="norm_title", right_on="norm_title", how="left")
         df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values
 
     mask_missing = df_merged["arxiv_id"].isna()
     if mask_missing.any():
         df_missing = df_merged[mask_missing].copy()
-        df_missing2 = pd.merge(
-            df_missing.drop(columns=["arxiv_id"]),
-            df_title2arxiv[["preproc_title", "arxiv_id"]],
-            left_on="preproc_title",
-            right_on="preproc_title",
-            how="left"
-        )
+        df_missing2 = pd.merge(df_missing.drop(columns=["arxiv_id"]), df_title2arxiv[["preproc_title", "arxiv_id"]], left_on="preproc_title", right_on="preproc_title", how="left")
         df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values
 
     df_merged.drop(columns=["norm_title", "preproc_title"], inplace=True)
@@ -403,13 +345,7 @@ def main():
     print("📝 df_pdf shape:", df_pdf.shape)
 
     # --- Step 7: Merge PDF info into extraction based on extracted_openaccessurl --- 
-    df_final = pd.merge(
-        df_merged,
-        df_pdf,
-        left_on="extracted_openaccessurl",
-        right_on="openaccessurl",
-        how="left"
-    )
+    df_final = pd.merge(df_merged, df_pdf, left_on="extracted_openaccessurl", right_on="openaccessurl", how="left")
     # Optionally, drop the redundant 'openaccessurl' column from df_pdf 
     df_final.drop(columns=["openaccessurl"], inplace=True)
     print("📝 After merging PDF info, final shape:", df_final.shape)
@@ -425,9 +361,7 @@ def main():
     print(f"Remaining items with local PDF path: {len(df_pdf_items)}")
 
     df_final.loc[:, "combined_text"] = df_final.apply(combine_table_and_figure_text, axis=1) 
-    #df_final["llm_prompt"] = df_final["combined_text"].apply(
-    #    lambda x: prompt_template.format(x) if isinstance(x, str) and x.strip() else ""
-    #)
+    #df_final["llm_prompt"] = df_final["combined_text"].apply(lambda x: prompt_template.format(x) if isinstance(x, str) and x.strip() else "")
     df_final["llm_prompt_truncated"] = df_final.apply(lambda row: get_truncated_prompts(row, max_tokens=16384, token_buffer=TOKEN_BUFFER, model=MODEL_NAME) if isinstance(row["combined_text"], str) and row["combined_text"].strip() else "[]", axis=1)
     df_extracted = df_final[df_final["combined_text"].str.strip().astype(bool)]
 

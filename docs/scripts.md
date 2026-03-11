@@ -149,18 +149,22 @@ python -m src.data_preprocess.arxiv_fulltext_api --tag 251117 > logs/arxiv_fullt
 # run python -m src.data_preprocess.arxiv_title2ids_oai --tag 251117 > logs/arxiv_title2ids_oai_251117_4.log 2>&1 again to sync html_path from folder to cache.
 
 
-# Extract tables from arXiv HTML files. Input: arxiv_html_cache.json, arxiv_fulltext_html/*.html, html_table.parquet (optional) Output: html_table.parquet, tables_output/*.csv
+# Extract tables from arXiv HTML files (v2: rowspan/colspan, ltx_table).
+# Input: arxiv_fulltext_html_<tag>/*.html. Output: tables_output_v2_<tag>/*.csv, html_parsing_results_v2_<tag>.parquet
+# Incremental by default (skips paper_ids already in parquet). Use --overwrite for full reprocess.
 ###############################################
-python -m src.data_preprocess.step2_arxiv_parse --tag 251117 > logs/step2_arxiv_parse_251117.log 2>&1
-python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --output_dir data/processed/tables_output_v2_251117 --tag 251117 --save_mode csv > logs/step2_arxiv_parse_v2_251117.log 2>&1  #/duckdb/sqlite 
+#python -m src.data_preprocess.step2_arxiv_parse --tag 251117 > logs/step2_arxiv_parse_251117.log 2>&1  # deprecated v1
+# we don't ln v1 to v2, because we change parsing logic
+python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --tag 251117 --save_mode csv > logs/step2_arxiv_parse_v2_251117.log 2>&1  # --overwrite for full run; save_mode: csv|duckdb 
 
 # Integrate all processed table data (arXiv HTML + S2ORC extracted annotations) and process with LLM.
 # ln -s data/processed/extracted_annotations.parquet data/processed/extracted_annotations_251117.parquet
-# Input: title2arxiv_new_cache_<tag>.json, html_table_<tag>.parquet/html_parsing_results_v2_<tag>.parquet, extracted_annotations_<tag>.parquet, pdf_download_cache_<tag>.json
-# Output: batch_input_<tag>.jsonl, batch_output_<tag>.jsonl, llm_markdown_table_results_<tag>.parquet
-python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 > logs/step2_integration_s2orc_llm_251117.log 2>&1
+# Input: title2arxiv_new_cache_<tag>.json, html_parsing_results_v2_<tag>.parquet, extracted_annotations_<tag>.parquet, pdf_download_cache_<tag>.json
+# Output: llm_markdown_table_results_<tag>.parquet (optional: batch_input/output if running LLM)
+# Use --skip-llm to skip LLM entirely (merge only, empty llm_response_raw) when not updating LLM
+python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 --skip-llm > logs/step2_integration_s2orc_llm_251117.log 2>&1
 # (Optional) Check OpenAI batch job status (if using LLM for table processing)
-bash src/data_preprocess/openai_batchjob_status.sh > logs/openai_batchjob_status.log 2>&1
+# bash src/data_preprocess/openai_batchjob_status.sh > logs/openai_batchjob_status.log 2>&1
 
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro

@@ -384,10 +384,44 @@ def rescue_cache_from_oai_index_sql(cache_parquet_path: str, oai_index_parquet_p
         print(f"[ERROR] (SQL) Failed to apply OAI rescue updates back to cache parquet: {e}")
 
 
+def _find_best_html_match_for_arxiv_id(aid: str, file_id_to_path: dict[str, str]) -> str | None:
+    """
+    Find the best matching HTML path for arxiv_id.
+    - First try exact match (e.g. 2412.57483v2.html).
+    - If not found, find all files with same base_id (2412.57483, 2412.57483v1, 2412.57483v2, ...)
+    - Return the path for the one with maximum version number.
+    """
+    path_val = file_id_to_path.get(aid)
+    if path_val:
+        return path_val
+
+    base_id = re.sub(r"v\d+$", "", aid)
+    candidates: list[tuple[int, str]] = []  # (version, path)
+
+    # Check base_id (no version) -> version 0
+    if base_id in file_id_to_path:
+        candidates.append((0, file_id_to_path[base_id]))
+
+    # Check base_idv1, base_idv2, ...
+    prefix = base_id + "v"
+    for stem, path in file_id_to_path.items():
+        if stem.startswith(prefix) and len(stem) > len(prefix) and stem[len(prefix):].isdigit():
+            ver = int(stem[len(prefix):])
+            candidates.append((ver, path))
+
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda x: x[0])
+    return best[1]
+
+
 def sync_html_paths_from_folder(cache_parquet_path: str, html_folder: str, project_root: str | None = None) -> int:
     """
     Scan html_folder for *.html files, match filename (stem) to arxiv_id in cache parquet,
     and fill html_path for rows where html_path is empty. Supports symlinks (ln).
+
+    Matching logic: exact match first; if not found, collect all files with same base_id
+    (e.g. 2412.57483, 2412.57483v1, 2412.57483v2) and pick the one with maximum version.
 
     Stored paths are relative to project_root (e.g. data/arxiv_fulltext_html_251117/xxx.html),
     not absolute (/Users/...).
@@ -444,9 +478,7 @@ def sync_html_paths_from_folder(cache_parquet_path: str, html_folder: str, proje
         aid = str(df.at[idx, "arxiv_id"]).strip()
         if not aid:
             continue
-        # Match base id (e.g. 2101.12345 matches 2101.12345.html or 2101.12345v2.html)
-        base_id = re.sub(r"v\d+$", "", aid)
-        path_val = file_id_to_path.get(aid) or file_id_to_path.get(base_id)
+        path_val = _find_best_html_match_for_arxiv_id(aid, file_id_to_path)
         if path_val:
             df.at[idx, "html_path"] = path_val
             n_updated += 1
