@@ -1,38 +1,23 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-03-11
-Last Modified: 2025-09-21
-Description: Merge tables from df2 and df based on query and title.
+Last Modified: 2026-03-11
+Description: Map from (paper) title back to model-level ID. Joins final_integration (title→html/llm table paths)
+             with modelcard_all_title_list (modelId→all_title_list). Links HuggingFace/GitHub tables via
+             readme_hash and readme_path from modelcard_step2. Output: modelId + html/llm/hugging/github table lists.
 Usage:
-    python -m src.data_preprocess.step2_merge_tables
+    python -m src.data_preprocess.step2_merge_tables --tag v2_251117
 """
 
 import ast  ########
 import os
 import argparse
-import json
-import pickle
-import numpy as np
 import pandas as pd
-from tqdm import tqdm
-from collections import defaultdict
 from src.utils import to_parquet, load_config, is_list_like, to_list_safe
-
-def _combine_lists(series):
-    """
-    Helper to combine lists while dropping NaN/None.
-    """
-    all_items = []
-    for x in series.dropna():
-        if is_list_like(x):
-            all_items.extend(to_list_safe(x))
-        else:
-            pass
-    return list(set(all_items))
 
 def _safe_parse_list(val):
     """Parse list-like strings into actual list, or return as-is."""
-    if isinstance(val, str) and val.startswith("[") and val.endswith("]"):
+    if isinstance(val, str) and val.strip().startswith("[") and val.strip().endswith("]"):
         try:
             parsed = ast.literal_eval(val.replace('\n', '').replace('\r', ''))
             if is_list_like(parsed):
@@ -44,202 +29,150 @@ def _safe_parse_list(val):
     else:
         return []
 
-def populate_hugging_table_list(df_merged, processed_base_path, tag=None):
+def populate_hugging_table_list(tmp_df, hugging_map_json_path):
     """
-    Populate 'hugging_table_list' using hugging_deduped_mapping. Tag = full suffix (e.g. v2_251117 → hugging_deduped_mapping_v2_251117.json).
+    Populate 'hugging_table_list' using hugging_deduped_mapping.
     """
-    suffix = f"_{tag}" if tag else ""
-    hugging_map_json_path = os.path.join(processed_base_path, f"hugging_deduped_mapping{suffix}.json")
     print(f"📦 Using HuggingFace mapping: {hugging_map_json_path}")
-    
-    with open(hugging_map_json_path, 'r', encoding='utf-8') as jf:
-        hash_to_csv_map = json.load(jf)
-    df_merged['hugging_table_list'] = [[] for _ in range(len(df_merged))]
-    for i, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Populating Hugging table list"):
-        hval = row['readme_hash']
-        if not isinstance(hval, str):
-            continue
-        deduped_csv_list = hash_to_csv_map.get(hval, [])
-        df_merged.at[i, 'hugging_table_list'] = [p[p.index("data/processed/"):] if "data/processed/" in p else p 
-                                                  for p in deduped_csv_list]
-    return df_merged
+    mapping_s = pd.read_json(hugging_map_json_path, typ="series")
+    def normalize_path_list(paths):
+        if not is_list_like(paths):
+            return []
+        paths = to_list_safe(paths)
+        return [
+            p[p.index("data/processed/"):] if isinstance(p, str) and "data/processed/" in p else p
+            for p in paths
+        ]
+    map_dict = mapping_s.apply(normalize_path_list).to_dict()
+    tmp_df = tmp_df.copy()
+    tmp_df["hugging_table_list"] = tmp_df["readme_hash"].map(
+        lambda x: map_dict.get(x, []) if isinstance(x, str) else []
+    )
+    return tmp_df
 
-def populate_github_table_list(df_merged, processed_base_path, tag=None):
+def populate_github_table_list(tmp_df, github_csvs_folder, github_mapping_path):
     """
-    Populate 'github_table_list' using md_to_csv_mapping.json. Tag = full suffix (e.g. deduped_github_csvs_<tag>).
+    Populate 'github_table_list' using md_to_csv_mapping.json.
     """
-    suffix = f"_{tag}" if tag else ""
-    github_csvs_folder = os.path.join(processed_base_path, f"deduped_github_csvs{suffix}")
-    github_mapping_path = os.path.join(github_csvs_folder, "md_to_csv_mapping.json")
     print(f"📦 Using GitHub mapping: {github_mapping_path}")
-    
-    with open(github_mapping_path, 'r', encoding='utf-8') as jf:
-        md_to_csv_mapping = json.load(jf)
-    df_merged['github_table_list'] = [[] for _ in range(len(df_merged))]
-    for i, row in tqdm(df_merged.iterrows(), total=len(df_merged), desc="Populating GitHub table list"):
-        readme_paths = row['readme_path']
-        # Handle different types: str, list, tuple, numpy.ndarray, or None
+
+    mapping_s = pd.read_json(github_mapping_path, typ="series")
+
+    def normalize_readme_paths(readme_paths):
         if readme_paths is None:
-            readme_paths = []
-        elif isinstance(readme_paths, str):
-            readme_paths = [readme_paths]
+            return []
+        if isinstance(readme_paths, str):
+            return [readme_paths]
         elif is_list_like(readme_paths):
-            # Safely handle numpy arrays / list-like without ambiguous pd.isna checks
-            readme_paths = to_list_safe(readme_paths)
+            return to_list_safe(readme_paths)
         else:
-            # Fallback for unexpected scalar values (e.g., NaN)
             try:
-                if hasattr(pd, "isna") and pd.isna(readme_paths):
-                    readme_paths = []
-                else:
-                    readme_paths = []
+                if pd.isna(readme_paths):
+                    return []
+                return []
             except Exception:
-                readme_paths = []
+                return []
+
+    def build_github_table_list(readme_paths):
+        readme_paths = normalize_readme_paths(readme_paths)
+
         combined_csvs = []
+        seen = set()
+
         for md_file in readme_paths:
             if not md_file or not isinstance(md_file, str):
                 continue
             md_basename = os.path.basename(md_file).replace(".md", "")
-            value = md_to_csv_mapping.get(md_basename)
-            if value not in [None, []]:
-                combined_csvs.extend(value)
-        combined_csvs = list(set(combined_csvs))
-        full_csv_paths = []
-        for csv_basename in combined_csvs:
-            csv_full_path = os.path.join(github_csvs_folder, csv_basename)
-            full_csv_paths.append(csv_full_path)
-        df_merged.at[i, "github_table_list"] = full_csv_paths
-    return df_merged
+            value = mapping_s.get(md_basename)
+            if value in [None, []]:
+                continue
 
-def map_tables_by_dict(df2, df):
+            for csv_basename in value:
+                if csv_basename not in seen:
+                    seen.add(csv_basename)
+                    combined_csvs.append(os.path.join(github_csvs_folder, csv_basename))
+
+        return combined_csvs
+
+    tmp_df = tmp_df.copy()
+    tmp_df["github_table_list"] = tmp_df["readme_path"].apply(build_github_table_list)
+    return tmp_df
+
+def map_tables_by_title(model_level_df, query_to_tablist_df):
     """
-    Accelerate the process by using a dictionary mapping:
-    1) Build a mapping from query to (html_table_list, llm_table_list)
-    2) For each row in df2, look up and merge results from all_title_list
+    Map model all_title_list to html/llm table lists via query lookup.
+    Content-equivalent to the other implementations, ignoring order.
     """
-    # turn comment into english
-    # Turn stringified lists into actual lists
-    df['html_table_list'] = df['html_table_list'].apply(_safe_parse_list)
-    df['llm_table_list']  = df['llm_table_list'].apply(_safe_parse_list)
-    # Build lookup: dict[query] = (html_table_list, llm_table_list)
-    df_lookup = {}
-    for row in df.itertuples(index=False):
-        # row: query, html_table_list, llm_table_list
-        # Handle both list and numpy.ndarray types
-        html_list = to_list_safe(row.html_table_list) if is_list_like(row.html_table_list) else []
-        llm_list = to_list_safe(row.llm_table_list) if is_list_like(row.llm_table_list) else []
-        df_lookup[row.query] = (html_list, llm_list)
-    # add col to df2：html_table_list_mapped, llm_table_list_mapped
-    df2["html_table_list_mapped"] = [[] for _ in range(len(df2))]
-    df2["llm_table_list_mapped"]  = [[] for _ in range(len(df2))]
-    # loop through df2, for each row, check all_title_list
-    for i, row in df2.iterrows():
-        title_list = row["all_title_list"]
-        if not is_list_like(title_list):
-            continue
-        title_list = to_list_safe(title_list)
+    html_lookup = {}
+    llm_lookup = {}
+
+    for row in query_to_tablist_df.itertuples(index=False):
+        html_lookup[row.query] = to_list_safe(row.html_table_list) if is_list_like(row.html_table_list) else []
+        llm_lookup[row.query] = to_list_safe(row.llm_table_list) if is_list_like(row.llm_table_list) else []
+
+    def normalize_title_list(title_list):
+        return list(dict.fromkeys(to_list_safe(title_list))) if is_list_like(title_list) else []
+
+    def collect_tables(title_list):
+        title_list = normalize_title_list(title_list)
         combined_html = []
-        combined_llm  = []
+        combined_llm = []
+
         for title in title_list:
-            if title in df_lookup:
-                hlist, llist = df_lookup[title]
-                combined_html.extend(hlist)
-                combined_llm.extend(llist)
-        # deduplicate
-        combined_html = list(set(combined_html))
-        combined_llm  = list(set(combined_llm))
-        df2.at[i, "html_table_list_mapped"] = combined_html
-        df2.at[i, "llm_table_list_mapped"]  = combined_llm
-    return df2
+            combined_html.extend(html_lookup.get(title, []))
+            combined_llm.extend(llm_lookup.get(title, []))
 
-def merge_table_list_to_df2(final_integration_path, all_title_path, merge_path, side_path, tag=None):
-    df = pd.read_parquet(final_integration_path, columns=['query', 'html_table_list', 'llm_table_list']) # , 'corpusid'
-    print(f"  df loaded with shape: {df.shape}")
-
-    # Clean stringified lists ########
-    df['html_table_list'] = df['html_table_list'].apply(_safe_parse_list)  ########
-    df['llm_table_list'] = df['llm_table_list'].apply(_safe_parse_list)  ########
-
-    df2 = pd.read_parquet(all_title_path, columns=['modelId', 'all_title_list'])
-    print(f"  df2 loaded with shape: {df2.shape}")
-    print("\nStep 1: Expanding df2 to match df (on df2.all_title_list vs df.query)...")
-
-    mode = 'normal' # accelerated, normal
-    if mode=='accelerated':
-        df2_merged = map_tables_by_dict(df2, df)
-    else:
-        all_title_list_key = "all_title_list"
-        df2[all_title_list_key] = df2[all_title_list_key].apply(lambda x: list(dict.fromkeys(to_list_safe(x))) if is_list_like(x) else x)
-        df2_exploded = df2.explode(all_title_list_key).rename(columns={all_title_list_key: 'explode_title'})
-        merged = pd.merge(
-            df2_exploded,
-            df,
-            how='left',
-            left_on='explode_title',
-            right_on='query'
+        return (
+            list(dict.fromkeys(combined_html)),
+            list(dict.fromkeys(combined_llm)),
         )
-        print("Step 2: Grouping & assembling lists back by modelId...")
-        grouped = merged.groupby('modelId').agg({
-            'html_table_list': lambda x: _combine_lists(x),
-            'llm_table_list': lambda x: _combine_lists(x),
-        }).reset_index()
-        grouped.rename(columns={
-            'html_table_list': 'html_table_list_mapped',
-            'llm_table_list': 'llm_table_list_mapped'
-        }, inplace=True)
 
-        print("Step 3: Merging the grouped columns back into df2...")
-        df2_merged = pd.merge(df2, grouped, on='modelId', how='left')
-        df2_merged['html_table_list_mapped'] = df2_merged['html_table_list_mapped'].apply(
-            lambda v: to_list_safe(v) if is_list_like(v) else []
-        )
-        df2_merged['llm_table_list_mapped'] = df2_merged['llm_table_list_mapped'].apply(
-            lambda v: to_list_safe(v) if is_list_like(v) else []
-        )
-    # load side data and merge to df with modelId
-    # Try v2 first, fallback to v1
-    print(f"📦 Loading side data from: {side_path}")
-    side_df = pd.read_parquet(side_path, columns=['modelId', 'readme_path', 'readme_hash'])
-    processed_base_path = os.path.dirname(side_path)
-    side_df = populate_hugging_table_list(side_df, processed_base_path, tag=tag)
-    side_df = populate_github_table_list(side_df, processed_base_path, tag=tag)
-    df_final = pd.merge(df2_merged, side_df[['modelId', 'github_table_list', 'hugging_table_list']], on='modelId', how='left')
-    df_final.drop(columns=['card_tags', 'downloads', 'github_link', 'pdf_link'], inplace=True, errors='ignore')
-    to_parquet(df_final, merge_path)
-    return df_final
+    out = model_level_df.copy()
+    mapped = out["all_title_list"].apply(collect_tables)
+    out["html_table_list_mapped"] = mapped.str[0]
+    out["llm_table_list_mapped"] = mapped.str[1]
+    return out
 
-if __name__ == "__main__":
+
+def main():
     parser = argparse.ArgumentParser(description="Merge all table lists into a unified model ID file")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input-integration', dest='input_integration', default=None,
-                        help='Path to final_integration_with_paths parquet (default: auto-detect from tag)')
-    parser.add_argument('--input-title-list', dest='input_title_list', default=None,
-                        help='Path to modelcard_all_title_list parquet (default: auto-detect from tag)')
-    parser.add_argument('--input-step2', dest='input_step2', default=None,
-                        help='Path to modelcard_step2 parquet (default: auto-detect from tag)')
-    parser.add_argument('--output', dest='output', default=None,
-                        help='Path to modelcard_step3_merged parquet (default: auto-detect from tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
+    suffix = f"_{args.tag}" if args.tag else ""
     
     # Determine input/output paths: tag is full suffix (no _v2 in template)
-    final_integration_path = args.input_integration or os.path.join(processed_base_path, f"final_integration_with_paths{suffix}.parquet")
-    all_title_path = args.input_title_list or os.path.join(processed_base_path, f"modelcard_all_title_list{suffix}.parquet")
-    side_path = args.input_step2 or os.path.join(processed_base_path, f"modelcard_step2{suffix}.parquet")
-    merge_path = args.output or os.path.join(processed_base_path, f"modelcard_step3_merged{suffix}.parquet")
+    query_to_tablist_path = os.path.join(base_path, 'processed', f"final_integration_with_paths{suffix}.parquet")
+    modelid2titles_path = os.path.join(base_path, 'processed', f"modelcard_all_title_list{suffix}.parquet")
+    modelid2readmeinfo_path = os.path.join(base_path, 'processed', f"modelcard_step2{suffix}.parquet")
+    modelid2tablist_path = os.path.join(base_path, 'processed', f"modelcard_step3_merged{suffix}.parquet")
     
-    print("📁 Paths in use:")
-    print(f"   Final integration:  {final_integration_path}")
-    print(f"   All title list:      {all_title_path}")
-    print(f"   Step2 side data:     {side_path}")
-    print(f"   Output merged:       {merge_path}")
+    hugging_map_json_path = os.path.join(base_path, 'processed', f"hugging_deduped_mapping{suffix}.json")
+    github_csvs_folder = os.path.join(base_path, 'processed', f"deduped_github_csvs{suffix}")
+    github_mapping_path = os.path.join(github_csvs_folder, f"md_to_csv_mapping{suffix}.json")
     
     print(f"\nMerging all tables list...")
-    merge_table_list_to_df2(final_integration_path, all_title_path, merge_path, side_path, tag=tag)
-    print(f"\n🎉 All tables merged and saved to {merge_path}.")
+    query_to_tablist_df = pd.read_parquet(query_to_tablist_path, columns=['query', 'html_table_list', 'llm_table_list']) # , 'corpusid'
+    print(f"  query_to_tablist_df loaded with shape: {query_to_tablist_df.shape}")
+    # Clean stringified lists ########
+    query_to_tablist_df['html_table_list'] = query_to_tablist_df['html_table_list'].apply(_safe_parse_list)  ########
+    query_to_tablist_df['llm_table_list'] = query_to_tablist_df['llm_table_list'].apply(_safe_parse_list)  ########
+    
+    model_level_df = pd.read_parquet(modelid2titles_path, columns=['modelId', 'all_title_list'])
+    print(f"  modelid2titles loaded with shape: {model_level_df.shape}")
+    print("\nStep 1: Expanding modelid2titles to match df (on modelid2titles.all_title_list vs df.query)...")
+    model_w_html_llm = map_tables_by_title(model_level_df, query_to_tablist_df)
+    
+    # load side data and merge to df with modelId
+    side_df = pd.read_parquet(modelid2readmeinfo_path, columns=['modelId', 'readme_path', 'readme_hash'])
+    side_df = populate_hugging_table_list(side_df, hugging_map_json_path) # readme_hash -> hugging_table_list
+    side_df = populate_github_table_list(side_df, github_csvs_folder, github_mapping_path) # readme_path -> github_table_list
+    model_w_all_tab = pd.merge(side_df, model_w_html_llm, on='modelId', how='left')
+    to_parquet(model_w_all_tab[['modelId', 'hugging_table_list', 'github_table_list', 'html_table_list_mapped', 'llm_table_list_mapped']], modelid2tablist_path)
+    print(f"\n🎉 All tables merged and saved to {modelid2tablist_path}.")
+
+
+if __name__ == "__main__":
+    main()

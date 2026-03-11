@@ -34,21 +34,15 @@ def normalize_title(title):
     """
     Normalize the title by converting to lower-case and reducing whitespace.
     """
+    if not isinstance(title, str):
+        return ""
     return " ".join(title.lower().split())
 
 def preprocess_title(title):
+    if not isinstance(title, str):
+        return ""
     title = re.sub(r"[-:_*@&'\"]+", " ", title)
     return " ".join(title.split())
-
-def load_json_cache(path):
-    if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {}
-
-def save_json_cache(cache, path):
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(cache, f, indent=2)
 
 def is_valid_pdf(pdf_path):
     """Check PDF validity by reading header."""
@@ -100,6 +94,13 @@ def non_empty(x):
     if isinstance(x, str):
         return len(x.strip()) > 0
     return False
+
+def _validate_pdf_path(path):
+    if not path or not isinstance(path, str):
+        return None
+    if not os.path.isfile(path):
+        return None
+    return path if is_valid_pdf(path) else None
 
 def get_extracted_blocks(row):
     """
@@ -211,6 +212,28 @@ prompt_template = (
     "Here is the input text:\n{}\nNow, please provide your answer:"
 )
 
+# 2502.12345v1 => (2502.12345, 1)
+def parse_arxiv_id(arxiv_id):
+    match = re.match(r"(\d{4}\.\d{5})(v(\d+))?", str(arxiv_id))
+    if match:
+        arxiv_id_pure = match.group(1)
+        arxiv_id_version = int(match.group(3)) if match.group(3) else 1
+        return pd.Series([arxiv_id_pure, arxiv_id_version])
+    else:
+        return pd.Series([arxiv_id, 1])
+
+def convert_to_list(x):
+    if is_list_like(x):
+        return to_list_safe(x)
+    if x is None:
+        return []
+    try:
+        if pd.isna(x):
+            return []
+    except Exception:
+        # For unexpected container types, fall back to empty
+        return []
+    return []
 # ---------------------- Main Process ---------------------- #
 
 def main():
@@ -222,20 +245,19 @@ def main():
     base_path = config.get('base_path', 'data')
     suffix = f"_{args.tag}" if args.tag else ""
 
-    TITLE2ARXIV_JSON = os.path.join(base_path, 'processed', f"title2arxiv_new_cache{suffix}.json")
-    HTML_TABLE_PARQUET = os.path.join(base_path, 'processed', f"html_table{suffix}.parquet")
+    TITLE2ARXIV_PARQUET = os.path.join(base_path, 'processed', f"title2arxiv_cache{suffix}.parquet")
     HTML_TABLE_PARQUET_V2 = os.path.join(base_path, 'processed', f"html_parsing_results_v2{suffix}.parquet")
     ANNOTATIONS_PARQUET = os.path.join(base_path, 'processed', f"extracted_annotations{suffix}.parquet")
     PDF_CACHE_PATH = os.path.join(base_path, 'processed', f"pdf_download_cache{suffix}.json")
     FINAL_OUTPUT_CSV = os.path.join(base_path, 'processed', f"llm_markdown_table_results{suffix}.parquet")
+
     BATCH_INPUT_PATH = os.path.join(base_path, 'processed', f"batch_input{suffix}.jsonl")
     BATCH_OUTPUT_PATH = os.path.join(base_path, 'processed', f"batch_output{suffix}.jsonl")
 
     print("📁 Paths in use:")
     print(f"   Annotations:        {ANNOTATIONS_PARQUET}")
-    print(f"   Title→arxiv cache:  {TITLE2ARXIV_JSON}")
+    print(f"   Title→arxiv cache:  {TITLE2ARXIV_PARQUET} (primary)")
     print(f"   HTML table v2:      {HTML_TABLE_PARQUET_V2}")
-    print(f"   HTML table v1:      {HTML_TABLE_PARQUET}")
     print(f"   PDF cache:          {PDF_CACHE_PATH}")
     print(f"   Output parquet:     {FINAL_OUTPUT_CSV}")
     print(f"   Batch input JSONL:  {BATCH_INPUT_PATH}")
@@ -251,112 +273,69 @@ def main():
     print("📝 df_anno shape:", df_anno.shape)
 
     # --- Step 2: Load title2arxiv mapping (title -> arxiv_id) ---
-    title2arxiv_map = load_json_cache(TITLE2ARXIV_JSON) # Example: { "Some paper title": "2301.12345v2", ... }
+    '''title2arxiv_map = load_json_cache(TITLE2ARXIV_JSON) # Example: { "Some paper title": "2301.12345v2", ... }
     df_title2arxiv = pd.DataFrame(
         [(t, a) for t, a in title2arxiv_map.items()],
         columns=["retrieved_title", "arxiv_id"]
     )
     df_title2arxiv["norm_title"] = df_title2arxiv["retrieved_title"].apply(normalize_title) ########
-    df_title2arxiv["preproc_title"] = df_title2arxiv["retrieved_title"].apply(preprocess_title) ########
+    df_title2arxiv["preproc_title"] = df_title2arxiv["retrieved_title"].apply(preprocess_title) ########'''
+    df_cache = pd.read_parquet(TITLE2ARXIV_PARQUET, columns=["title", "arxiv_id", "norm_title"])
+    df_title2arxiv = df_cache[df_cache["arxiv_id"].notna() & (df_cache["arxiv_id"].astype(str).str.strip() != "")][["title", "arxiv_id", "norm_title"]].copy()
+    df_title2arxiv = df_title2arxiv.rename(columns={"title": "retrieved_title"}).drop_duplicates(subset=["retrieved_title"], keep="first")
+    #df_title2arxiv["norm_title"] = df_title2arxiv["retrieved_title"].apply(normalize_title)
+    df_title2arxiv["preproc_title"] = df_title2arxiv["retrieved_title"].apply(preprocess_title)
+    print(f"📦 Loaded title2arxiv from parquet: {TITLE2ARXIV_PARQUET}")
     print("📝 df_title2arxiv shape:", df_title2arxiv.shape)
 
-    # --- Step 3: Load html_table.parquet which contains HTML info including table_list ---
-    # Try v2 first, fallback to v1
-    if os.path.exists(HTML_TABLE_PARQUET_V2):
-        print(f"📦 Loading HTML tables from v2: {HTML_TABLE_PARQUET_V2}")
-        df_html = pd.read_parquet(HTML_TABLE_PARQUET_V2) # Columns: [paper_id, html_path, page_type, csv_paths]
-        # Rename csv_paths to table_list for compatibility
-        if 'csv_paths' in df_html.columns and 'table_list' not in df_html.columns:
-            # Handle both list and numpy.ndarray types
-            def convert_to_list(x):
-                if is_list_like(x):
-                    return to_list_safe(x)
-                if x is None:
-                    return []
-                if hasattr(pd, "isna"):
-                    try:
-                        if pd.isna(x):
-                            return []
-                    except Exception:
-                        # For unexpected container types, fall back to empty
-                        return []
-                return []
-            df_html['table_list'] = df_html['csv_paths'].apply(convert_to_list)
-    else:
-        print(f"📦 Loading HTML tables from v1: {HTML_TABLE_PARQUET}")
-        df_html = pd.read_parquet(HTML_TABLE_PARQUET) # Columns: [paper_id, html_path, page_type, table_list]
+    # --- Step 3: Merge df_html with df_title2arxiv based on arxiv id pure version ---
+    print(f"📦 Loading HTML tables from v2: {HTML_TABLE_PARQUET_V2}")
+    df_html = pd.read_parquet(HTML_TABLE_PARQUET_V2) # Columns: [paper_id, html_path, page_type, csv_paths]
+    ############ Enforce this to be list type
+    if 'csv_paths' in df_html.columns and 'table_list' not in df_html.columns:
+        # Handle both list and numpy.ndarray types
+        df_html['table_list'] = df_html['csv_paths'].apply(convert_to_list)
     print("📝 df_html shape:", df_html.shape)
-
-    # 2502.12345v1 => (2502.12345, 1)
-    def parse_arxiv_id(paper_id):
-        match = re.match(r"(\d{4}\.\d{5})(v(\d+))?", paper_id)
-        if match:
-            arxiv_id_pure = match.group(1)
-            arxiv_id_version = int(match.group(3)) if match.group(3) else 1
-            return pd.Series([arxiv_id_pure, arxiv_id_version])
-        else:
-            return pd.Series([paper_id, 1])  # fallback
+    ########### Merge df based on arxiv id pure version
     df_html[['arxiv_id_pure', 'arxiv_id_version']] = df_html['paper_id'].apply(parse_arxiv_id)
     # keep the latest version
     df_html = df_html.sort_values('arxiv_id_version', ascending=False).drop_duplicates('arxiv_id_pure', keep='first')
-    # --- Step 4: Merge title mapping with HTML table info on arxiv_id/paper_id ---
-    def parse_arxiv_id_simple(arxiv_id):
-        match = re.match(r"(\d{4}\.\d{5})(v(\d+))?", str(arxiv_id))
-        if match:
-            return match.group(1)
-        else:
-            return arxiv_id
-    df_title2arxiv['arxiv_id_pure'] = df_title2arxiv['arxiv_id'].apply(parse_arxiv_id_simple)
+    df_title2arxiv['arxiv_id_pure'] = df_title2arxiv['arxiv_id'].apply(lambda x: parse_arxiv_id(x)[0])
     df_html_merged = pd.merge(df_title2arxiv, df_html,left_on="arxiv_id_pure", right_on="arxiv_id_pure",how="left")
-    #df_html_merged = pd.merge(df_title2arxiv, df_html,left_on="arxiv_id", right_on="paper_id",how="left")
-    
     df_html_merged.rename(columns={"html_path": "html_html_path", "page_type": "html_page_type", "table_list": "html_table_list", "paper_id": "html_paper_id"}, inplace=True)
-    #print(df_html_merged[df_html_merged['html_paper_id'] == '1508.00305'].iloc[0])
+    del df_html
     print("📝 df_html_merged shape:", df_html_merged.shape)
-    # --- Step 5: Merge annotations with the title-HTML mapping on retrieved_title ---
-    df_merged = pd.merge(df_anno, df_html_merged, on="retrieved_title", how="left", suffixes=("", "_temp"))
 
-    mask_missing = df_merged["arxiv_id"].isna()
-    if mask_missing.any():
+
+    # --- Step 4: Merge html info to title, try multiple processed titles---
+    df_merged = pd.merge(df_anno, df_html_merged, on="retrieved_title", how="left", suffixes=("", "_temp")) # main key: query title
+    del df_html_merged, df_anno
+    # try multiple processed titles to map title to arxiv id
+    keys_to_try = [("norm_title", "norm_title"), ("preproc_title", "preproc_title")]
+    for left_key, right_key in keys_to_try:
+        mask_missing = df_merged["arxiv_id"].isna()
+        if not mask_missing.any():
+            break
         df_missing = df_merged[mask_missing].copy()
-        df_missing2 = pd.merge(df_missing.drop(columns=["arxiv_id"]), df_title2arxiv[["norm_title", "arxiv_id"]], left_on="norm_title", right_on="norm_title", how="left")
+        df_missing2 = pd.merge(df_missing.drop(columns=["arxiv_id"]), df_title2arxiv[[right_key, "arxiv_id"]], left_on=left_key, right_on=right_key, how="left")
         df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values
-
-    mask_missing = df_merged["arxiv_id"].isna()
-    if mask_missing.any():
-        df_missing = df_merged[mask_missing].copy()
-        df_missing2 = pd.merge(df_missing.drop(columns=["arxiv_id"]), df_title2arxiv[["preproc_title", "arxiv_id"]], left_on="preproc_title", right_on="preproc_title", how="left")
-        df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values
-
     df_merged.drop(columns=["norm_title", "preproc_title"], inplace=True)
     print("📝 After merging title mapping, shape:", df_merged.shape)
-    #print("📝 After merging HTML info, shape:", df_merged.shape) 
     
-    # --- Step 6: Load PDF cache (already downloaded PDFs) ---
-    pdf_cache = load_json_cache(PDF_CACHE_PATH)
-    print("🔎 PDF cache loaded with", len(pdf_cache), "entries.")
-    # Filter out invalid PDFs from cache
-    for url, path in pdf_cache.items():
-        if path and os.path.isfile(path):
-            if not is_valid_pdf(path):
-                pdf_cache[url] = None
-    df_pdf = pd.DataFrame([(url, path) for url, path in pdf_cache.items()], columns=["openaccessurl", "pdf_pdf_path"])
-    #df_pdf = pd.read_parquet(PDF_CACHE_PARQUET)
+    # --- Step 5: Merge PDF info into extraction based on extracted_openaccessurl ---
+    df_pdf = pd.read_json(PDF_CACHE_PATH, typ="series").to_frame(name="pdf_pdf_path").reset_index().rename(columns={"index": "openaccessurl"})
+    df_pdf["pdf_pdf_path"] = df_pdf["pdf_pdf_path"].apply(_validate_pdf_path)
     print("📝 df_pdf shape:", df_pdf.shape)
-
-    # --- Step 7: Merge PDF info into extraction based on extracted_openaccessurl --- 
     df_final = pd.merge(df_merged, df_pdf, left_on="extracted_openaccessurl", right_on="openaccessurl", how="left")
-    # Optionally, drop the redundant 'openaccessurl' column from df_pdf 
+    del df_merged, df_pdf
     df_final.drop(columns=["openaccessurl"], inplace=True)
     print("📝 After merging PDF info, final shape:", df_final.shape)
     df_final['orig_index'] = df_final.index
 
-    # --- Step 9: Stats ---
+    # --- Step 6: Stats ---
     df_html_items = df_final[(df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext")]
     print(f"Items with HTML (fulltext): {len(df_html_items)}")
-
     df_remaining = df_final[~((df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext"))]
-
     df_pdf_items = df_remaining[(df_remaining["pdf_pdf_path"].notna()) & (df_remaining["pdf_pdf_path"] != "")]
     print(f"Remaining items with local PDF path: {len(df_pdf_items)}")
 
@@ -368,11 +347,11 @@ def main():
     # Keep only items with non-empty extracted tables or figures
     has_html = (df_final["html_html_path"].notna()) & (df_final["html_html_path"] != "") & (df_final["html_page_type"] == "fulltext")
     has_pdf = (df_final["pdf_pdf_path"].notna()) & (df_final["pdf_pdf_path"] != "")
-    df_remaining = df_final[~has_html & ~has_pdf]
+    df_remaining = df_final[~has_html & ~has_pdf] # missing html or pdf
     # Then filter the remaining items with non-empty extracted tables or figures
     df_remaining_tmp = df_remaining[df_remaining["combined_text"].str.strip().astype(bool)]
-    print(f"Remaining items (no HTML or PDF) with non-empty extracted tables or figures: {len(df_remaining)}")  
-    print(f"Remaining items with non-empty extracted tables or figures: {len(df_remaining_tmp)}")
+    print(f"Missing HTML or PDF items with non-empty extracted tables or figures: {len(df_remaining)}")  
+    print(f"Missing HTML or PDF items with non-empty extracted tables or figures and with non-empty extracted tables or figures: {len(df_remaining_tmp)}")
 
     # count token for the extracted figures
     df_final['token_count_combined_text'] = df_final['combined_text'].apply(count_tokens)
@@ -404,16 +383,7 @@ def main():
             for entry_list in all_entries:
                 if entry_list:
                     for custom_id, prompt_line, max_tok in entry_list:
-                        jsonl_lines.append(json.dumps({
-                            "custom_id": custom_id,
-                            "method": "POST",
-                            "url": "/v1/chat/completions",
-                            "body": {
-                                "model": MODEL_NAME,
-                                "messages": [{"role": "user", "content": prompt_line}],
-                                "max_tokens": max_tok
-                            }
-                        }, ensure_ascii=False))
+                        jsonl_lines.append(json.dumps({"custom_id": custom_id, "method": "POST", "url": "/v1/chat/completions", "body": {"model": MODEL_NAME, "messages": [{"role": "user", "content": prompt_line}], "max_tokens": max_tok}}, ensure_ascii=False))
             with open(BATCH_INPUT_PATH, "w", encoding="utf-8") as f:
                 f.write("\n".join(jsonl_lines) + "\n")
             print(f"✅ Created {BATCH_INPUT_PATH} with {len(jsonl_lines)} entries (parallelized)")

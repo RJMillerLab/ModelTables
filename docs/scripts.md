@@ -133,8 +133,6 @@ bash src/data_preprocess/s2orc_fulltext_local.sh # extract fulltext -> ref/cit i
 python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json # getting full tables
 </details>
 
-
-
 # Download arXiv HTML, extract tables from arXiv HTML files.
 #python -m bak.analyze_bibtex_arxiv_ids --tag 251117 > logs/analyze_bibtex_arxiv_ids_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, Output: bibte_title_arxiv_s2orc_<tag>.parquet  # try saving some title:arxiv from bibtex
 
@@ -159,7 +157,7 @@ python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --tag 251117 --sa
 
 # Integrate all processed table data (arXiv HTML + S2ORC extracted annotations) and process with LLM.
 # ln -s data/processed/extracted_annotations.parquet data/processed/extracted_annotations_251117.parquet
-# Input: title2arxiv_new_cache_<tag>.json, html_parsing_results_v2_<tag>.parquet, extracted_annotations_<tag>.parquet, pdf_download_cache_<tag>.json
+# Input: title2arxiv_cache_<tag>.parquet, html_parsing_results_v2_<tag>.parquet, extracted_annotations_<tag>.parquet, pdf_download_cache_<tag>.json
 # Output: llm_markdown_table_results_<tag>.parquet (optional: batch_input/output if running LLM)
 # Use --skip-llm to skip LLM entirely (merge only, empty llm_response_raw) when not updating LLM
 python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 --skip-llm > logs/step2_integration_s2orc_llm_251117.log 2>&1
@@ -169,20 +167,31 @@ python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 --skip-ll
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
 #cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results.parquet
-
-# Save LLM-processed tables into local CSVs.
-# Input: llm_markdown_table_results_<tag>.parquet
-# Output: llm_tables_<tag>/*.csv, final_integration_with_paths_v2_<tag>.parquet
+# Extract LLM-processed tables. Input: llm_markdown_table_results_<tag>.parquet; Output: llm_tables_<tag>/*.csv, final_integration_with_paths_v2_<tag>.parquet
 python -m src.data_preprocess.step2_llm_save --tag 251117 > logs/step2_llm_save_251117.log 2>&1
+```
+
+Finally, we merge table list from different sources back to modelID level.
+```bash
+python -m src.data_preprocess.step2_merge_tables --tag v2_251117 > logs/step2_merge_tables_v2_251117.log 2>&1  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file.
+# Here <tag> is v2_251117 in this example.
+# Input: final_integration_with_paths_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_<tag>.parquet.
+# Output: modelcard_step3_merged_<tag>.parquet
+```
+
+To substitute step2_integration_s2orc_llm, step2_llm_save (we skip llm tables as it is unstable), step2_merge_tables, we can use step2_merge_tables_simplify to directly generate the final merged table list at modelID level (without running the LLM table extraction pipeline).
+```bash
+python -m src.data_preprocess.step2_merge_tables_simplify --tag v2_251117 > logs/step2_merge_tables_simplify_251117.log 2>&1 \
+  # Input: s2orc_rerun_<tag>.parquet, title2arxiv_cache_<tag>.parquet, html_parsing_results_v2_<tag>.parquet,
+  #        modelcard_all_title_list_<tag>.parquet, modelcard_step2_<tag>.parquet,
+  #        hugging_deduped_mapping_<tag>.json, deduped_github_csvs_<tag>/md_to_csv_mapping_<tag>.json.
+  # Output: modelcard_step3_merged_<tag>.parquet
 ```
 
 ### 4\. Label Ground Truth for Unionable Search Baselines
 
-
 This section details the process of generating ground truth labels for table unionability.
 ```bash
-python -m src.data_preprocess.step2_merge_tables --tag v2_251117 > logs/step2_merge_tables_v2_251117.log 2>&1  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file. Input: final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_v2_<tag>.parquet. Output: modelcard_step3_merged_v2_<tag>.parquet
-
 # for this script, we don't need v2 version, because paper citation won't be affected by the v2
 python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: extracted_annotations_<tag>.parquet. Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
 ln -sf modelcard_citation_all_matrices_251117.pkl.gz data/processed/modelcard_citation_all_matrices_v2_251117.pkl.gz
