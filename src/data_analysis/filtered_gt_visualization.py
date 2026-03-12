@@ -3,7 +3,7 @@
 Filtered GT Analysis Visualization Script
 
 This script creates step-by-step filtering visualizations and table frequency distributions
-for the CitationLake Ground Truth analysis, with proper filtering of generic tables.
+for the ModelTables Ground Truth analysis, with proper filtering of generic tables.
 
 Author: Zhengyuan Dong
 Date: 2025-10-31

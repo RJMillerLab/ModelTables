@@ -227,7 +227,7 @@ def execute_query(con, query, description):
         print(f"❌ Error executing query: {e}")
         raise
 
-def create_visualization(table_df, model_df, output_dir='.', output_suffix=''):
+def create_visualization(table_df, model_df, suffix, v2_suffix):
     """Create visualization with two curves showing table counts and model counts over time."""
     print("\n🎨 Creating visualization...")
     
@@ -286,8 +286,8 @@ def create_visualization(table_df, model_df, output_dir='.', output_suffix=''):
     plt.tight_layout()
     
     # Save figure
-    os.makedirs(output_dir, exist_ok=True)
-    output_base = os.path.join(output_dir, f'table_model_counts_over_time{output_suffix}')
+    os.makedirs('data/analysis', exist_ok=True)
+    output_base = os.path.join('data/analysis', f'table_model_counts_over_time{v2_suffix}{suffix}')
     plt.savefig(f'{output_base}.pdf', dpi=300, bbox_inches='tight')
     plt.savefig(f'{output_base}.png', dpi=300, bbox_inches='tight')
     plt.close()
@@ -300,50 +300,33 @@ def create_visualization(table_df, model_df, output_dir='.', output_suffix=''):
 
 def main():
     """Main function. All paths are determined by --tag only."""
-    parser = argparse.ArgumentParser(
-        description='Visualize table counts and model counts over time'
-    )
-    parser.add_argument('--tag', type=str, default=None,
-                       help='Version tag. With tag: step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet, modelcard_step1_<tag>.parquet (or step1_<short> when tag is v2_<short>), output _<tag>. No tag: untagged parquets and data/raw/train-*-of-00004.parquet.')
-    parser.add_argument('--output-dir', type=str, default='data/analysis',
-                       help='Directory to save output files')
+    parser = argparse.ArgumentParser(description='Visualize table counts and model counts over time')
+    parser.add_argument('--tag', type=str, default=None, help='Version tag. With tag.')
+    parser.add_argument('--v2_mode', action='store_true', help='Use v2 mode.')
     
     args = parser.parse_args()
-    tag = args.tag
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     processed = os.path.expanduser('data/processed')
-    step3_dedup_path = os.path.join(processed, f'modelcard_step3_dedup_{tag}.parquet') if tag else os.path.join(processed, 'modelcard_step3_dedup.parquet')
-    valid_title_path = os.path.join(processed, f'all_title_list_valid_{tag}.parquet') if tag else os.path.join(processed, 'all_title_list_valid.parquet')
-    
-    # Date source (createdAt): with tag -> step1 parquet (write-hardcoded); no tag -> raw parquet (write-hardcoded)
-    if tag:
-        step1_path = os.path.join(processed, f'modelcard_step1_{tag}.parquet')
-        if not os.path.exists(step1_path) and tag.startswith('v2_'):
-            step1_path = os.path.join(processed, f'modelcard_step1_{tag[3:]}.parquet')  # v2_251117 -> 251117
-        if not os.path.exists(step1_path):
-            raise FileNotFoundError(f"Date source not found: {step1_path}")
-        date_source_path = step1_path
-    else:
-        date_source_path = os.path.expanduser('data/raw/train-*-of-00004.parquet')
-    
-    output_suffix = f'_{tag}' if tag else ''
+    step3_dedup_path = os.path.join(processed, f'modelcard_step3_dedup{v2_suffix}{suffix}.parquet')
+    valid_title_path = os.path.join(processed, f'all_title_list_valid{v2_suffix}{suffix}.parquet')
+    date_source_path = os.path.join(processed, f'modelcard_step1{suffix}.parquet')
+    # or 
+    #date_source_path = os.path.expanduser('data/raw/train-*-of-00004.parquet')
     
     print("="*60)
     print("📊 Table and Model Counts Over Time Visualization")
     print("="*60)
     print(f"Step3 dedup: {step3_dedup_path}")
     print(f"Date source (createdAt): {date_source_path}")
-    print(f"Output dir: {args.output_dir}, suffix: {output_suffix or '(none)'}")
     
     con = duckdb.connect()
-    
     table_query = build_table_count_query(step3_dedup_path, valid_title_path, date_source_path)
     model_query = build_model_count_query(step3_dedup_path, valid_title_path, date_source_path)
-    
     table_df = execute_query(con, table_query, "Calculating cumulative table counts")
     model_df = execute_query(con, model_query, "Calculating cumulative model counts")
-    
     # Create visualization
-    merged_df = create_visualization(table_df, model_df, args.output_dir, output_suffix)
+    merged_df = create_visualization(table_df, model_df, suffix, v2_suffix)
     
     # Print summary statistics
     print("\n" + "="*60)

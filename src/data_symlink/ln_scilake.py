@@ -27,9 +27,9 @@ Usage:
     python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode str
     python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode all
     python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode base --tag 251117
-    python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --dir-name scilake_final_251117 --mask-file data/analysis/all_valid_title_valid_251117.txt
-    # Note: When --tag is provided, mask file is auto-loaded from data/analysis/all_valid_title_valid_{tag}.txt if it exists
-"""
+    python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode base --tag 251117 --mask-file data/analysis/all_valid_title_valid_v2_251117.txt
+    # Note: When --tag is provided, mask file is auto-loaded from data/analysis/all_valid_title_valid{v2_suffix}{tag}.txt if it exists
+""" 
 
 import os
 from joblib import Parallel, delayed
@@ -139,32 +139,28 @@ def process_folder(source_folder, target_dir, cache, file_suffix, mask_set=None)
 def main():
     parser = argparse.ArgumentParser(description="Incremental CSV symlinker with mode-based suffixes.")
     parser.add_argument("--repo_root", type=str, default="/u501/z6dong/Repo", help="Repository root path.")
-    parser.add_argument("--mode", type=str, choices=list(MODE_SUFFIX.keys())+["all"], default="base",
-                        help="Mode for folder and file suffix. Use 'all' to run every mode.")
-    parser.add_argument("--dir-name", type=str, default=None,
-                        help="Override target directory name (default: scilake_final{suffix}). E.g., scilake_final_v2")
-    parser.add_argument("--tag", type=str, default=None,
-                        help="Tag suffix for versioning (e.g., 251117). If provided, uses tagged folders like deduped_hugging_csvs_v2_<tag>")
-    parser.add_argument("--mask-file", type=str, default=None,
-                        help="Path to mask file (e.g., data/analysis/all_valid_title_valid_<tag>.txt). If provided, only links files listed in this file.")
-    parser.add_argument("--no-mask", action="store_true", default=False,
-                        help="Disable mask file filtering even if mask file exists. Links all files from source folders.")
+    parser.add_argument("--mode", type=str, choices=list(MODE_SUFFIX.keys())+["all"], default="base", help="Mode for folder and file suffix. Use 'all' to run every mode.")
+    parser.add_argument("--tag", type=str, default=None,help="Tag suffix for versioning (e.g., 251117). If provided, uses tagged folders like deduped_hugging_csvs_v2_<tag>")
+    parser.add_argument("--mask-file", type=str, default=None,help="Path to mask file (e.g., data/analysis/all_valid_title_valid_<tag>.txt). If provided, only links files listed in this file.")
+    parser.add_argument("--no-mask", action="store_true", default=False,help="Disable mask file filtering even if mask file exists. Links all files from source folders.")
+    parser.add_argument("--v2_mode", action="store_true", help="Use v2 mode.")
     args = parser.parse_args()
 
     modes = [args.mode] if args.mode != "all" else list(MODE_SUFFIX.keys())
 
     # Determine tag suffix for source folders
-    tag_suffix = f"_{args.tag}" if args.tag else ""
-    
+    v2_suffix = "_v2" if args.v2_mode else ""
+    suffix = f"_{args.tag}" if args.tag else ""
+
     # Load mask file if provided (unless --no-mask is specified)
     mask_set = None
     if args.no_mask:
         print("Mask file filtering disabled (--no-mask). Will link all files from source folders.")
     elif args.mask_file:
         mask_file_path = args.mask_file
-        # If relative path, make it relative to CitationLake root
+        # If relative path, make it relative to ModelTables root
         if not os.path.isabs(mask_file_path):
-            mask_file_path = os.path.join(args.repo_root, "CitationLake", mask_file_path)
+            mask_file_path = os.path.join(args.repo_root, "ModelTables", mask_file_path)
         mask_set = load_mask_file(mask_file_path)
         if mask_set:
             print(f"Loaded mask file: {mask_file_path} ({len(mask_set)} allowed files)")
@@ -172,7 +168,7 @@ def main():
             print(f"Warning: Mask file {mask_file_path} is empty or invalid")
     elif args.tag:
         # Auto-detect mask file based on tag
-        mask_file_path = os.path.join(args.repo_root, "CitationLake", "data", "analysis", f"all_valid_title_valid_{args.tag}.txt")
+        mask_file_path = os.path.join(args.repo_root, "ModelTables", "data", "analysis", f"all_valid_title_valid{v2_suffix}{suffix}.txt")
         if os.path.exists(mask_file_path):
             mask_set = load_mask_file(mask_file_path)
             if mask_set:
@@ -180,38 +176,17 @@ def main():
 
     for mode in modes:
         dir_suffix, file_suffix = MODE_SUFFIX[mode]
-        # Use v2 source directories for base data; augmented variants append suffixes to v2 dirs
-        base_dirs = {
-            "hugging": "deduped_hugging_csvs_v2",
-            "github":  "deduped_github_csvs_v2",
-            "html":    "tables_output_v2",
-            "llm":     "llm_tables"
-        }
-        # Apply tag_suffix and dir_suffix to create augmented folder names
-        # Note: llm_tables only gets tag_suffix if tag is provided, otherwise stays as "llm_tables"
         src_folders = [
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['hugging']}{tag_suffix}{dir_suffix}"),
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['github']}{tag_suffix}{dir_suffix}"),
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['html']}{tag_suffix}{dir_suffix}"),
-            os.path.join(args.repo_root, "CitationLake", "data", "processed", f"{base_dirs['llm']}{tag_suffix}{dir_suffix}" if args.tag else f"{base_dirs['llm']}{dir_suffix}")
+            os.path.join(args.repo_root, "ModelTables", "data", "processed", f"deduped_hugging_csvs{v2_suffix}{suffix}{dir_suffix}"),
+            os.path.join(args.repo_root, "ModelTables", "data", "processed", f"deduped_github_csvs{v2_suffix}{suffix}{dir_suffix}"),
+            os.path.join(args.repo_root, "ModelTables", "data", "processed", f"tables_output{v2_suffix}{suffix}{dir_suffix}"),
+            os.path.join(args.repo_root, "ModelTables", "data", "processed", f"llm_tables{dir_suffix}")
         ]
         # Default dir_name: include tag if provided, otherwise just use suffix
-        if args.dir_name:
-            dir_name = args.dir_name
-        elif args.tag:
-            dir_name = f"scilake_final_{args.tag}{dir_suffix}"
-        else:
-            dir_name = f"scilake_final{dir_suffix}"
-        target_dir = os.path.join(
-            args.repo_root,
-            "starmie_internal", "data",
-            dir_name,
-            "datalake"
-        )  ######## build correct target directory
+        dir_name = f"scilake_final{suffix}{dir_suffix}"
+        target_dir = os.path.join(args.repo_root, "starmie_internal", "data", dir_name, "datalake")
 
         print(f"\nMode={mode}, target_dir={target_dir}, file_suffix={file_suffix}")
-        if args.tag:
-            print(f"Using tag: {args.tag}")
         print(f"Source folders to scan:")
         for src in src_folders:
             exists = os.path.isdir(src)

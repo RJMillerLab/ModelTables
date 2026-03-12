@@ -120,7 +120,7 @@ def classify_page(html_path):
 
 # Example usage: Call the function for testing
 """if __name__ == '__main__':
-    test_path = '/Users/doradong/Repo/CitationLake/arxiv_fulltext_html/1309.1125v1.html'  # Replace with the actual file path
+    test_path = '/Users/doradong/Repo/ModelTables/arxiv_fulltext_html/1309.1125v1.html'  # Replace with the actual file path
     try:
         page_type = classify_page(test_path)
         print(f"Page type: {page_type}")

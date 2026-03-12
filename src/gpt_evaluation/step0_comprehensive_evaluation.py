@@ -151,7 +151,7 @@ def generate_comprehensive_report(args):
     report_content = f"""# Comprehensive GPT Evaluation Report
 
 ## Overview
-This report presents the results of GPT-based evaluation for both table and model relatedness in the CitationLake dataset.
+This report presents the results of GPT-based evaluation for both table and model relatedness in the ModelTables dataset.
 
 ## Configuration
 - **Table Pairs Evaluated**: {args.num_table_pairs}
@@ -209,7 +209,7 @@ See `model_evaluation_report.md` for detailed model-by-model analysis.
 ## Conclusions
 
 This comprehensive evaluation provides insights into:
-1. The quality of table relationships in the CitationLake dataset
+1. The quality of table relationships in the ModelTables dataset
 2. The semantic relatedness of models based on their metadata
 3. The effectiveness of different sampling strategies
 4. The consistency of LLM-based evaluation across different data types

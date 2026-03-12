@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Relational Parquet Strategies for CitationLake
+Relational Parquet Strategies for ModelTables
 Store multiple related tables with shared primary key (modelId) for efficient querying
 """
 

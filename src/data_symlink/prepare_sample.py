@@ -35,10 +35,10 @@ def main():
 
     # Subdirectories to scan
     subdirs = [
-        "CitationLake/data/processed/llm_tables",
-        "CitationLake/data/processed/deduped_github_csvs",
-        "CitationLake/data/processed/deduped_hugging_csvs",
-        "CitationLake/data/processed/tables_output"
+        "ModelTables/data/processed/llm_tables",
+        "ModelTables/data/processed/deduped_github_csvs",
+        "ModelTables/data/processed/deduped_hugging_csvs",
+        "ModelTables/data/processed/tables_output"
     ]
 
     #with open(args.output_file, 'w') as out_f:

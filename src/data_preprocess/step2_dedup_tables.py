@@ -80,7 +80,7 @@ def get_linked_set_from_parquet(df, cols):
 
 def parquet_path_to_local_path(p, path_by_key):
     """
-    Map a parquet path (any prefix: CitationLake, ModelTables, relative) to local canonical path
+    Map a parquet path (any prefix: ModelTables, ModelTables, relative) to local canonical path
     by (resource, basename). Returns None if not found.
     """
     if not isinstance(p, str):
@@ -96,7 +96,7 @@ def normalize_path_to_relative(path):
     """
     Normalize a path to relative form (data/processed/...) for duplicate_mapping lookup.
     Used in update_row when resolving canonical path. Handles absolute paths under
-    any repo (ModelTables, CitationLake) by stripping to data/processed/...
+    any repo (ModelTables, ModelTables) by stripping to data/processed/...
     """
     if not isinstance(path, str):
         return path
@@ -589,7 +589,7 @@ if __name__ == "__main__":
 
     linked_set = get_linked_set_from_parquet(df, cols)
     linked_set = set(linked_set)
-    # Match by (resource, basename) so CitationLake/ModelTables/relative paths all align
+    # Match by (resource, basename) so ModelTables/relative paths all align
     linked_set_basename_keys = set(
         (infer_resource_from_path(p), os.path.basename(p))
         for p in linked_set
@@ -616,7 +616,7 @@ if __name__ == "__main__":
     resource_totals = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     resource_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
     resource_generic_filtered = {res: 0 for res in RESOURCE_PRIORITY.keys()}
-    # Match by (resource, basename): parquet paths (CitationLake/ModelTables/any) align with local scan
+    # Match by (resource, basename): parquet paths (ModelTables/any) align with local scan
     filtered_files_info = []
     for fi in tqdm(files_info, desc="Filtering files"):
         res = fi["resource"]

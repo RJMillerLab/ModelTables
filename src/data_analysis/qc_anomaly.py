@@ -14,7 +14,6 @@ import csv
 import pandas as pd
 import json
 import matplotlib.pyplot as plt
-import pandas as pd
 import sqlite3
 import duckdb
 from threading import Lock
@@ -136,12 +135,24 @@ def count_rows_including_header(csv_path):
     except Exception:
         return 0
 
-def resolve_resource_dirs(resource):
+def resolve_resource_dirs(resource, suffix, v2_suffix):
+    """
+    Resolve (v1_dir, v2_dir) for a given resource, with optional tag support.
+    """
     if resource == "hugging":
-        return "data/processed/deduped_hugging_csvs", "data/processed/deduped_hugging_csvs_v2"
+        return (
+            f"data/processed/deduped_hugging_csvs{suffix}",
+            f"data/processed/deduped_hugging_csvs{v2_suffix}{suffix}",
+        )
     if resource == "github":
-        return "data/processed/deduped_github_csvs", "data/processed/deduped_github_csvs_v2"
-    return "data/processed/tables_output", "data/processed/tables_output_v2"
+        return (
+            f"data/processed/deduped_github_csvs{suffix}",
+            f"data/processed/deduped_github_csvs{v2_suffix}{suffix}",
+        )
+    return (
+        f"data/processed/tables_output{suffix}",
+        f"data/processed/tables_output{v2_suffix}{suffix}",
+    )
 
 def prepare_file_maps(v1_dir, v2_dir, recursive):
     v1_files = list_csv_files([v1_dir], recursive=recursive)
@@ -168,18 +179,18 @@ def prepare_file_maps(v1_dir, v2_dir, recursive):
     
     return v1_files, v2_file_map, v1_file_map, basenames
 
-def build_resource_mappings(resource):
+def build_resource_mappings(resource, suffix, v2_suffix):
     csv_to_modelid = {}
     csv_to_sourcepath = {}
     if resource == "hugging":
-        csv_to_modelid = build_hugging_modelid_map()
+        csv_to_modelid = build_hugging_modelid_map(suffix, v2_suffix)
     elif resource == "github":
-        csv_to_sourcepath = build_github_source_map()
+        csv_to_sourcepath = build_github_source_map(suffix, v2_suffix)
     else:
-        csv_to_sourcepath = build_arxiv_source_map()
+        csv_to_sourcepath = build_arxiv_source_map(suffix, v2_suffix)
     return csv_to_modelid, csv_to_sourcepath
 
-def build_hugging_modelid_map():
+def build_hugging_modelid_map(suffix, v2_suffix):
     mapping = {}
     sql = build_modelid_sql_query()
     if sql:
@@ -196,7 +207,7 @@ def build_hugging_modelid_map():
                 mapping[base] = first_mid
     else:
         print('running pandas')
-        rel_path = "data/processed/modelcard_step3_merged.parquet"
+        rel_path = f"data/processed/modelcard_step3_merged{v2_suffix}{suffix}.parquet"
         if os.path.exists(rel_path):
             import pandas as pd
             df_rel = pd.read_parquet(rel_path)
@@ -218,9 +229,8 @@ def build_hugging_modelid_map():
                 if mapping:
                     break
     
-    # Also load v2 mapping (for v2_only files)
-    v2_mapping_json = "data/processed/hugging_deduped_mapping_v2.json"
-    step2_parquet = "data/processed/modelcard_step2.parquet"
+    v2_mapping_json = f"data/processed/hugging_deduped_mapping{v2_suffix}{suffix}.json"
+    step2_parquet = f"data/processed/modelcard_step2{v2_suffix}{suffix}.parquet"
     
     if os.path.exists(v2_mapping_json) and os.path.exists(step2_parquet):
         # Load hash -> csv_paths mapping
@@ -242,48 +252,29 @@ def build_hugging_modelid_map():
         
     return mapping
 
-def build_github_source_map():
+def build_github_source_map(suffix, v2_suffix):
+    """
+    Build mapping: csv_basename -> readme_path for GitHub tables.
+    Prefer upstream parquet `raw_csv_to_text_mapping{suffix}.parquet`,
+    and optionally augment with v2 md_to_csv_mapping.json under deduped_github_csvs.
+    """
     mapping = {}
-    map_paths = [
-        "data/processed/csv_to_readme_mapping.parquet",
-        "data/processed/processed_paths.parquet",
-        "data/processed/raw_csv_to_text_mapping.parquet",
-    ]
-    for mp in map_paths:
-        if not os.path.exists(mp):
-            continue
-        df_map = pd.read_parquet(mp)
-        cols = df_map.columns.tolist()
-        if "csv_paths" in cols and "readme_path" in cols:
-            for _, row in df_map.iterrows():
-                rp = row.get("readme_path")
-                if isinstance(rp, (list, tuple)):
-                    rp = next((x for x in rp if isinstance(x, str) and x), None)
-                cps = row.get("csv_paths")
-                if cps is None:
-                    continue
-                if not isinstance(cps, (list, tuple)):
-                    cps = [cps]
-                for pth in cps:
-                    base = os.path.basename(str(pth))
-                    if base and base not in mapping and isinstance(rp, str):
-                        mapping[base] = rp
-        elif "csv_path" in cols and "readme_path" in cols:
-            for _, row in df_map.iterrows():
-                cp = row.get("csv_path")
-                rp = row.get("readme_path")
-                if isinstance(rp, (list, tuple)):
-                    rp = next((x for x in rp if isinstance(x, str) and x), None)
-                if not isinstance(cp, str) or not isinstance(rp, str):
-                    continue
-                base = os.path.basename(cp)
-                if base and base not in mapping:
-                    mapping[base] = rp
-        if len(mapping) > 0:
-            break
-    
-    # Also load v2 mapping (md_to_csv_mapping.json in deduped_github_csvs_v2)
-    v2_mapping_json = "data/processed/deduped_github_csvs_v2/md_to_csv_mapping.json"
+
+    # 1) Primary: raw_csv_to_text_mapping{suffix}.parquet (upstream, maintained)
+    raw_mapping_path = os.path.join("data", "processed", f"raw_csv_to_text_mapping{suffix}.parquet")
+    if os.path.exists(raw_mapping_path):
+        df_map = pd.read_parquet(raw_mapping_path, columns=["csv_path", "readme_path"])
+        for _, row in df_map.iterrows():
+            csv_path = row.get("csv_path")
+            readme_path = row.get("readme_path")
+            if not isinstance(csv_path, str) or not isinstance(readme_path, str):
+                continue
+            base = os.path.basename(csv_path)
+            if base and base not in mapping:
+                mapping[base] = readme_path
+
+    # 2) Optional: md_to_csv_mapping.json in deduped_github_csvs (v2-style folders)
+    v2_mapping_json = f"data/processed/deduped_github_csvs{v2_suffix}{suffix}/md_to_csv_mapping.json"
     if os.path.exists(v2_mapping_json):
         with open(v2_mapping_json, 'r') as f:
             md_to_csv = json.load(f)
@@ -292,69 +283,39 @@ def build_github_source_map():
         for md_file, csv_list in md_to_csv.items():
             if not csv_list or csv_list is None:
                 continue
-            readme_path = f"data/downloaded_github_readmes/{md_file}.md"
             if isinstance(csv_list, list):
                 for csv_basename in csv_list:
                     if csv_basename and csv_basename not in mapping:
-                        mapping[csv_basename] = readme_path
+                        mapping[csv_basename] = f"data/downloaded_github_readmes{suffix}/{md_file}.md"
     
     return mapping
 
-def build_arxiv_source_map():
+def build_arxiv_source_map(suffix, v2_suffix):
+    """
+    Build mapping: csv_basename -> html_path for arXiv tables.
+    Use upstream `html_parsing_results_v2{suffix}.parquet` only
+    (we do not rely on downstream final_integration parquet).
+    Note: the 'v2' here is part of the filename, independent of v2_suffix.
+    """
     mapping = {}
-    html_maps = [
-        "data/processed/html_table.parquet",
-        "data/processed/final_integration_with_paths.parquet",
-    ]
-    for hp in html_maps:
-        if not os.path.exists(hp):
-            continue
-        df_html = pd.read_parquet(hp)
-        cols = df_html.columns.tolist()
-        if "table_list" in cols and "html_path" in cols:
-            for _, row in df_html.iterrows():
-                hpv = row.get("html_path")
-                tl = row.get("table_list")
-                if tl is None:
-                    continue
-                if not isinstance(tl, (list, tuple)):
-                    tl = [tl]
-                for pth in tl:
-                    base = os.path.basename(str(pth))
-                    if base and base not in mapping and isinstance(hpv, str):
-                        mapping[base] = hpv
-        elif "html_table_list" in cols and "html_html_path" in cols:
-            for _, row in df_html.iterrows():
-                hpv = row.get("html_html_path")
-                tl = row.get("html_table_list")
-                if tl is None:
-                    continue
-                if not isinstance(tl, (list, tuple)):
-                    tl = [tl]
-                for pth in tl:
-                    base = os.path.basename(str(pth))
-                    if base and base not in mapping and isinstance(hpv, str):
-                        mapping[base] = hpv
-        if len(mapping) > 0:
-            break
-    
-    # Also load v2 mapping (html_parsing_results_v2.parquet)
-    v2_parquet = "data/processed/html_parsing_results_v2.parquet"
-    if os.path.exists(v2_parquet):
-        df_v2 = pd.read_parquet(v2_parquet)
-        if "csv_paths" in df_v2.columns and "html_path" in df_v2.columns:
-            for _, row in df_v2.iterrows():
-                html_path = row.get("html_path")
-                csv_paths = row.get("csv_paths")
-                if csv_paths is None or not isinstance(html_path, str):
-                    continue
-                if not isinstance(csv_paths, (list, tuple)):
-                    csv_paths = [csv_paths]
-                for csv_path in csv_paths:
-                    base = os.path.basename(str(csv_path))
-                    if base and base not in mapping:  # Don't overwrite v1 mapping
-                        mapping[base] = html_path
-    
+    v2_parquet = os.path.join("data", "processed", f"html_parsing_results_v2{suffix}.parquet")
+    if not os.path.exists(v2_parquet):
+        return mapping
+
+    df_v2 = pd.read_parquet(v2_parquet)
+    if "csv_paths" in df_v2.columns and "html_path" in df_v2.columns:
+        for _, row in df_v2.iterrows():
+            html_path = row.get("html_path")
+            csv_paths = row.get("csv_paths")
+            if csv_paths is None or not isinstance(html_path, str):
+                continue
+            if not isinstance(csv_paths, (list, tuple)):
+                csv_paths = [csv_paths]
+            for csv_path in csv_paths:
+                base = os.path.basename(str(csv_path))
+                if base and base not in mapping:  # Don't overwrite if already mapped
+                    mapping[base] = html_path
+
     return mapping
 
 def print_overlap_summary(v1_file_map, v2_file_map):
@@ -795,6 +756,8 @@ def write_overlay_csv(csv_out, resource, csv_rows, csv_to_modelid, csv_to_source
 def main():
     ap = argparse.ArgumentParser()
     # Run all resources; no single-resource flag
+    ap.add_argument("--tag", type=str, default=None, help="Optional tag suffix (e.g., 251117) for v1/v2 folders and parquet.")
+    ap.add_argument("--v2_mode", action="store_true", help="Use v2 mode.")
     ap.add_argument("--recursive", action="store_true", help="Recurse into subdirectories of the provided directories")
     ap.add_argument("--png-out", default="data/analysis/v1v2_overlay.png", help="Path to save the overlay histogram PNG")
     ap.add_argument("--bins", type=int, default=50, help="Number of bins for histograms")
@@ -804,6 +767,9 @@ def main():
     ap.add_argument("--anomaly-min-rows", type=int, default=200, help="Minimum rows to consider when flagging anomalies")
     ap.add_argument("--anomaly-min-cols", type=int, default=100, help="Minimum columns to consider when flagging anomalies")
     args = ap.parse_args()
+
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
 
     # Run all resources and aggregate
     resources = ["hugging", "github", "arxiv"]
@@ -816,12 +782,12 @@ def main():
         scatter_data = {}
         per_summary = []
         for res in resources:
-            v1_dir, v2_dir = resolve_resource_dirs(res)
+            v1_dir, v2_dir = resolve_resource_dirs(res, suffix=suffix, v2_suffix=v2_suffix)
             v1_files, v2_file_map, v1_file_map, basenames = prepare_file_maps(v1_dir, v2_dir, args.recursive)
             if not basenames:
                 print(f"[WARN] No basenames for resource {res}; skipping")
                 continue
-            csv_to_modelid, csv_to_sourcepath = build_resource_mappings(res)
+            csv_to_modelid, csv_to_sourcepath = build_resource_mappings(res, suffix=suffix, v2_suffix=v2_suffix)
             print(f"=== {res}: qc_anomaly summary ===")
             print_overlap_summary(v1_file_map, v2_file_map)
             results_rows, csv_rows, v1_orig, v1_trans, v2_orig, v2_trans = process_basenames(

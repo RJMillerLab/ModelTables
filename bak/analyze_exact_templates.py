@@ -10,7 +10,7 @@ import json
 from collections import Counter
 
 # -------- paths / config --------
-RAW_DIR = os.path.expanduser("~/Repo/CitationLake/data/raw")
+RAW_DIR = os.path.expanduser("~/Repo/ModelTables/data/raw")
 PARQUET_GLOB = os.path.join(RAW_DIR, "train-*-of-00004.parquet")
 
 # -------- duckdb connection --------

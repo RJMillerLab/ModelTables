@@ -5,7 +5,7 @@ import duckdb
 import pandas as pd
 from collections import Counter
 
-RAW_DIR = os.path.expanduser("~/Repo/CitationLake/data/raw")
+RAW_DIR = os.path.expanduser("~/Repo/ModelTables/data/raw")
 PARQUET_GLOB = os.path.join(RAW_DIR, "train-*-of-00004.parquet")
 
 con = duckdb.connect()

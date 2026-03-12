@@ -3,10 +3,10 @@
 #repo_root="/u501/z6dong/Repo"
 repo_root="/Users/doradong/Repo"
 folders=(
-    "CitationLake/data/processed/deduped_hugging_csvs"
-    "CitationLake/data/processed/deduped_github_csvs"
-    "CitationLake/data/processed/tables_output"
-    "CitationLake/data/processed/llm_tables"
+    "ModelTables/data/processed/deduped_hugging_csvs"
+    "ModelTables/data/processed/deduped_github_csvs"
+    "ModelTables/data/processed/tables_output"
+    "ModelTables/data/processed/llm_tables"
 )
 
 for rel_folder in "${folders[@]}"; do

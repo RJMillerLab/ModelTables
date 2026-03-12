@@ -5,7 +5,7 @@ Last Modified: 2025-04-08
 Description: Generate a markdown report for table retrieval results, automatically from JSON files.
 Usage: 
  python -m src.data_analysis.report_generation
- python -m src.data_analysis.report_generation --tag v2_251117
+ python -m src.data_analysis.report_generation --tag 251117 --v2_mode
  python -m src.data_analysis.report_generation --start_idx 10 --end_idx 20
  python -m src.data_analysis.report_generation --query_table 1810.04805_table4.csv
 """
@@ -21,43 +21,20 @@ from tqdm import tqdm
 
 BASE_PATH = "/Users/doradong/Repo/ModelTables"
 
-DATA_DIR = os.path.join(BASE_PATH, "data/processed")
-# Single source of truth: set_files_for_tag() only. No tag = no suffix in filenames.
-FILES = None
-
-def set_files_for_tag(tag=None):
-    """Set FILES from tag. tag is the full suffix you pass (e.g. v2_251117).
-    No tag -> modelcard_step3_dedup.parquet, all_title_list_valid.parquet.
-    With tag -> modelcard_step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet.
-    """
-    global FILES
-    if tag is None or tag == "":
-        FILES = {
-            "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup.parquet",
-            "valid_title": f"{DATA_DIR}/all_title_list_valid.parquet",
-        }
-    else:
-        FILES = {
-            "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup_{tag}.parquet",
-            "valid_title": f"{DATA_DIR}/all_title_list_valid_{tag}.parquet",
-        }
-
-set_files_for_tag(None)  # init to no-tag paths
-
-def get_file_path(filename):
+def get_file_path(filename, v2_suffix, suffix):
     hugging_pattern = r'^[0-9a-f]{10}_table\d+\.csv$'
     tables_output_pattern = r'^\d{4}\.\d{5}.*\.csv$'
     llm_tables_pattern = r'^\d+_table\d+\.csv$'
     github_pattern = r'^[0-9a-f]{32}_table_\d+\.csv$'
     
     if re.match(hugging_pattern, filename):
-        return os.path.join(BASE_PATH, 'data/processed/deduped_hugging_csvs', filename)
+        return os.path.join(BASE_PATH, f'data/processed/deduped_hugging_csvs{v2_suffix}{suffix}', filename)
     elif re.match(tables_output_pattern, filename):
-        return os.path.join(BASE_PATH, 'data/processed/tables_output', filename)
+        return os.path.join(BASE_PATH, f'data/processed/tables_output{v2_suffix}{suffix}', filename)
     elif re.match(llm_tables_pattern, filename):
         return os.path.join(BASE_PATH, 'data/processed/llm_tables', filename)
     elif re.match(github_pattern, filename):
-        return os.path.join(BASE_PATH, 'data/processed/deduped_github_csvs', filename)
+        return os.path.join(BASE_PATH, f'data/processed/deduped_github_csvs{v2_suffix}{suffix}', filename)
     else:
         raise ValueError(f"Unknown: {filename}")
 
@@ -66,14 +43,14 @@ def df_to_markdown(df, max_rows=5):
         return df.head(max_rows).to_markdown(index=False) + "\n..."
     return df
 
-def build_table_model_title_maps():
+def build_table_model_title_maps(v2_suffix, suffix):
     """Return mapping dictionaries:
        - table_to_models: csv filename → set of modelIds
        - model_to_titles: modelId → list of valid titles
     """
-    df_tables = pd.read_parquet(FILES["step3_dedup"])
+    df_tables = pd.read_parquet(f"data/processed/modelcard_step3_dedup{v2_suffix}{suffix}.parquet")
     print('df_tables keys: ', df_tables.keys())
-    df_titles = pd.read_parquet(FILES["valid_title"], columns=["modelId", "all_title_list", "all_title_list_valid"])
+    df_titles = pd.read_parquet(f"data/processed/all_title_list_valid{v2_suffix}{suffix}.parquet", columns=["modelId", "all_title_list", "all_title_list_valid"])
     df_tables = df_tables.merge(df_titles, on="modelId", how="left")
     table_cols = [c for c in df_tables.columns if c.endswith("_sym") or c.endswith("_dedup")]
     table_to_models = defaultdict(set)
@@ -102,7 +79,7 @@ def build_table_model_title_maps():
                     table_to_models[os.path.basename(tbl)].add(mid)
     return table_to_models, model_to_titles
 
-def generate_md_report(json_path, include_raw, include_valid, output_file=None, query_table=None, start_idx=0, end_idx=10, show_model_titles=True):
+def generate_md_report(json_path, include_raw, include_valid, v2_suffix, suffix, output_file=None, query_table=None, start_idx=0, end_idx=10, show_model_titles=True):
     if not output_file:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         output_file = f"table_report_{timestamp}.md"
@@ -117,14 +94,14 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None, 
     else:
         data = {k: v for i, (k, v) in enumerate(data.items()) if start_idx <= i < end_idx}
     print(f"Filtered to {len(data)} records for report generation.")
-    table_to_models, model_to_titles = build_table_model_title_maps()
+    table_to_models, model_to_titles = build_table_model_title_maps(v2_suffix, suffix)
     print('Build table to model and model to titles mapping')
     
     report = []
     for query_file, retrieved_files in tqdm(data.items()):
         report.append(f"# Query Table: `{query_file}`\n")
         try:
-            query_path = get_file_path(query_file)
+            query_path = get_file_path(query_file, v2_suffix, suffix)
             query_df = pd.read_csv(query_path)
             report.append("## Query Table Content\n")
             report.append(df_to_markdown(query_df))
@@ -153,7 +130,7 @@ def generate_md_report(json_path, include_raw, include_valid, output_file=None, 
                 continue
             report.append(f"### Top {idx}: `{file}`\n")
             try:
-                file_path = get_file_path(file)
+                file_path = get_file_path(file, v2_suffix, suffix)
                 df = pd.read_csv(file_path)
                 report.append(df_to_markdown(df))
             except Exception as e:
@@ -190,8 +167,10 @@ if __name__ == "__main__":
     parser.add_argument("--start_idx", type=int, default=0, help="Start index for query tables (inclusive).")
     parser.add_argument("--end_idx", type=int, default=10, help="End index for query tables (exclusive).")
     parser.add_argument("--show_model_titles", action="store_true", help="Show model titles in the report.")
+    parser.add_argument("--v2_mode", action="store_true", help="Use v2 mode.")
+    v2_suffix = "_v2" if args.v2_mode else ""
+    suffix = f"_{args.tag}" if args.tag else ""
     include_valid = True
     include_raw = False
     args = parser.parse_args()
-    set_files_for_tag(args.tag)
-    generate_md_report(args.json_path, include_raw, include_valid, query_table=args.query_table, start_idx=args.start_idx, end_idx=args.end_idx, show_model_titles=args.show_model_titles)
+    generate_md_report(args.json_path, include_raw, include_valid, v2_suffix, suffix, query_table=args.query_table, start_idx=args.start_idx, end_idx=args.end_idx, show_model_titles=args.show_model_titles)

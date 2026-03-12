@@ -11,7 +11,7 @@
 #   watgpu:  /u501/z6dong/Repo/...
 #
 # Note: Files are transferred maintaining the same relative path structure
-#       e.g., Repo/CitationLake/data/processed/xxx -> Repo/CitationLake/data/processed/xxx
+#       e.g., Repo/ModelTables/data/processed/xxx -> Repo/ModelTables/data/processed/xxx
 
 set -e
 
@@ -48,7 +48,7 @@ case "$MODE" in
         ;;
 esac
 
-LOCAL_BASE="/Users/doradong/Repo/CitationLake"
+LOCAL_BASE="/Users/doradong/Repo/ModelTables"
 
 echo "=========================================="
 echo "Preparing files for transfer"
@@ -125,7 +125,7 @@ scp_file() {
     fi
     
     # Create remote directory if needed
-    # remote_path is already full path like /u1/z6dong/Repo/CitationLake/data/processed/...
+    # remote_path is already full path like /u1/z6dong/Repo/ModelTables/data/processed/...
     remote_dir=$(dirname "$remote_path")
     if [ "$DRY_RUN" != "--dry-run" ]; then
         ssh ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${remote_dir}" 2>/dev/null || true
@@ -151,8 +151,8 @@ done
 echo ""
 echo "=== Transferring parquet files ==="
 for file in "${PARQUET_FILES[@]}"; do
-    # Maintain relative path: Repo/CitationLake/data/processed/xxx
-    remote_file="${REMOTE_BASE}/CitationLake/${file}"
+    # Maintain relative path: Repo/ModelTables/data/processed/xxx
+    remote_file="${REMOTE_BASE}/ModelTables/${file}"
     scp_file "$file" "$remote_file"
 done
 
@@ -162,8 +162,8 @@ echo "=== Transferring text files ==="
 for file in "${TEXT_FILES[@]}"; do
     filename=$(basename "$file")
     
-    # Transfer to CitationLake/data/analysis/ (maintain relative path)
-    remote_file="${REMOTE_BASE}/CitationLake/${file}"
+    # Transfer to ModelTables/data/analysis/ (maintain relative path)
+    remote_file="${REMOTE_BASE}/ModelTables/${file}"
     scp_file "$file" "$remote_file"
     
     # Also transfer to starmie_internal/val_file/ (if starmie_internal exists)
@@ -180,15 +180,15 @@ echo "=== Transferring zip files ==="
 for dir in "${TABLE_DIRS[@]}"; do
     dir_name=$(basename "$dir")
     zip_file="${TMP_DIR}/${dir_name}.zip"
-    # Maintain relative path: Repo/CitationLake/data/processed/xxx.zip
-    remote_zip="${REMOTE_BASE}/CitationLake/data/processed/${dir_name}.zip"
+    # Maintain relative path: Repo/ModelTables/data/processed/xxx.zip
+    remote_zip="${REMOTE_BASE}/ModelTables/data/processed/${dir_name}.zip"
     
     if [ -f "$zip_file" ]; then
         scp_file "$zip_file" "$remote_zip"
         # Extract on remote server
         if [ "$DRY_RUN" != "--dry-run" ]; then
             echo "📥 Extracting ${dir_name}.zip on remote server..."
-            ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE}/CitationLake/data/processed && unzip -q -o ${dir_name}.zip && rm ${dir_name}.zip" 2>/dev/null || true
+            ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE}/ModelTables/data/processed && unzip -q -o ${dir_name}.zip && rm ${dir_name}.zip" 2>/dev/null || true
         fi
     fi
 done
@@ -198,8 +198,8 @@ echo ""
 echo "=== Transferring file lists ==="
 for file in "${FILE_LISTS[@]}"; do
     if [ -f "$file" ]; then
-        # Maintain relative path: Repo/CitationLake/scilake_final_filelist.txt
-        remote_file="${REMOTE_BASE}/CitationLake/${file}"
+        # Maintain relative path: Repo/ModelTables/scilake_final_filelist.txt
+        remote_file="${REMOTE_BASE}/ModelTables/${file}"
         scp_file "$file" "$remote_file"
         # Also transfer to starmie_internal if it exists (same relative path)
         if [ "$DRY_RUN" != "--dry-run" ]; then
@@ -222,12 +222,12 @@ if [ "$DRY_RUN" != "--dry-run" ]; then
         zip -q -r "$GT_ZIP" . 2>/dev/null || echo "⚠️  No GT files found"
     }
     if [ -f "$GT_ZIP" ]; then
-        # Maintain relative path: Repo/CitationLake/data/gt/gt_xxx.zip
-        remote_gt_zip="${REMOTE_BASE}/CitationLake/data/gt/gt_${TAG}.zip"
-        echo "📤 Transferring: gt_${TAG}.zip -> ${REMOTE_BASE}/CitationLake/data/gt/"
+        # Maintain relative path: Repo/ModelTables/data/gt/gt_xxx.zip
+        remote_gt_zip="${REMOTE_BASE}/ModelTables/data/gt/gt_${TAG}.zip"
+        echo "📤 Transferring: gt_${TAG}.zip -> ${REMOTE_BASE}/ModelTables/data/gt/"
         scp "$GT_ZIP" ${REMOTE_USER}@${REMOTE_HOST}:${remote_gt_zip}
         echo "📥 Extracting on remote server..."
-        ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE}/CitationLake/data/gt && unzip -q -o gt_${TAG}.zip && rm gt_${TAG}.zip" 2>/dev/null || true
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE}/ModelTables/data/gt && unzip -q -o gt_${TAG}.zip && rm gt_${TAG}.zip" 2>/dev/null || true
         echo "✅ Done: GT files"
     fi
 else
@@ -261,7 +261,7 @@ echo "   Note: Only base filelists are transferred. Variants (_s, _t, _s_t) are 
 echo ""
 echo "📝 Next steps on ${MODE}:"
 echo "   1. ssh ${REMOTE_USER}@${REMOTE_HOST}"
-echo "   2. cd ${REMOTE_BASE}/CitationLake"
+echo "   2. cd ${REMOTE_BASE}/ModelTables"
 echo "   3. Run symlink scripts: python -m src.data_symlink.ln_scilake --repo_root ${REMOTE_BASE} --mode all --dir-name scilake_final_${TAG}"
 echo "   4. Run Starmie scripts: TAG=${TAG} bash scripts/step2_extractvectors.sh"
 echo ""

@@ -366,7 +366,7 @@ def main():
                         help="SQLite database filename (located in the specified directory)")
     parser.add_argument("--query", help="Query string (required for query mode)")
     parser.add_argument("--titles_file",
-                        default="/u501/z6dong/Repo/CitationLake/data/processed/modelcard_dedup_titles.json",
+                        default="/u501/z6dong/Repo/ModelTables/data/processed/modelcard_dedup_titles.json",
                         help="File (JSON or CSV) containing list of titles for batch querying")
     parser.add_argument("--cache_file", default="data/processed/query_cache.parquet",
                         help="Parquet file to store query results (never removed)")

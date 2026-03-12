@@ -6,10 +6,10 @@ target_dir="$repo_root/starmie_internal/data/scilake_large/datalake"
 
 # List of subfolders relative to the repo root
 folders=(
-    "CitationLake/data/processed/deduped_hugging_csvs"
-    "CitationLake/data/processed/deduped_github_csvs"
-    "CitationLake/data/processed/tables_output"
-    "CitationLake/data/processed/llm_tables"
+    "ModelTables/data/processed/deduped_hugging_csvs"
+    "ModelTables/data/processed/deduped_github_csvs"
+    "ModelTables/data/processed/tables_output"
+    "ModelTables/data/processed/llm_tables"
 )
 
 for rel_folder in "${folders[@]}"; do

@@ -221,16 +221,17 @@ def main():
     parser = argparse.ArgumentParser(description="Process CSV files in different modes")
     parser.add_argument("--mode", type=str, choices=["tr", "str", "str_tr"], default="tr", help="Processing mode")
     parser.add_argument("--repo_root", type=str, default="/u501/z6dong/Repo", help="Repository root directory.")
-    parser.add_argument("--tag", type=str, default=None, help="Full suffix for versioning (e.g. v2, v2_251117). No tag = v1 dirs; with tag = deduped_*_<tag>, tables_output_<tag>; llm_tables never versioned.")
+    parser.add_argument("--tag", type=str, default=None, help="Version tag. With tag.")
+    parser.add_argument("--v2_mode", action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
     
-    # No tag = v1 dirs. With tag = tag as full suffix; llm_tables never versioned
-    tag_suffix = f"_{args.tag}" if args.tag else ""
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     folders = [
-        f"CitationLake/data/processed/deduped_hugging_csvs{tag_suffix}" if args.tag else "CitationLake/data/processed/deduped_hugging_csvs",
-        f"CitationLake/data/processed/deduped_github_csvs{tag_suffix}" if args.tag else "CitationLake/data/processed/deduped_github_csvs",
-        f"CitationLake/data/processed/tables_output{tag_suffix}" if args.tag else "CitationLake/data/processed/tables_output",
-        "CitationLake/data/processed/llm_tables",
+        f"ModelTables/data/processed/deduped_hugging_csvs{v2_suffix}{suffix}",
+        f"ModelTables/data/processed/deduped_github_csvs{v2_suffix}{suffix}",
+        f"ModelTables/data/processed/tables_output{v2_suffix}{suffix}",
+        "ModelTables/data/processed/llm_tables",
     ]
     for folder in folders:
         full_folder = os.path.join(args.repo_root, folder)

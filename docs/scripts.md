@@ -172,7 +172,6 @@ python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --tag 251117 --sa
 Finally, we merge table list from different sources back to modelID level.
 ```bash
 # (merge after s2orc + LLM, depreated) python -m src.data_preprocess.step2_merge_tables --tag 251117 --v2_mode > logs/step2_merge_tables_v2_251117.log 2>&1  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file.
-# Here <tag> is v2_251117 in this example.
 # Input: final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_v2_<tag>.parquet.
 # Output: modelcard_step3_merged_v2_<tag>.parquet
 ```
@@ -192,9 +191,12 @@ Ensure data quality and consistency before generating final ground truth.
 ```bash
 python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/step2_dedup_tables_v2_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet, and others
 python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_v2_<tag>/dup_matrix_v2_<tag>.pkl, deduped_v2_<tag>/stats_v2_<tag>.json. Output: heatmaps heatmap_overlap_v2_<tag>.pdf / heatmap_percentage_v2_<tag>.pdf in data/analysis/
-python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_rerun_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet
+python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_rerun_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt. Here we filter out over large tables (max_cols=100, max_rows=200)
 python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
+
 #(Optional) python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 
+# this one is without tag, as we don't run v1 with 251117 anymore.
+
 #(Optional) python -m src.tools.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 #(Optional) # compare v1 and v2 table diff
 # (Optional) Double-check deduplication and mapping logic.
 # python -m src.data_analysis.qc_dc > logs/qc_dc.log 2>&1
@@ -243,38 +245,28 @@ Prepare data and augmentations for integration with the Starmie benchmark framew
 **Two main steps:**
 
 1. **Create augmented table folders (tr/str)**: Generate transpose and string-augmented versions of tables
-2. **Create symlinks**: Link CitationLake tables to starmie_internal/data/scilake_final_<tag>/datalake
+2. **Create symlinks**: Link ModelTables tables to starmie_internal/data/scilake_final_<tag>/datalake
 
 ```bash
 # Step 1: Create augmented table folders (tr/str/str_tr)
 # This creates folders like: deduped_hugging_csvs_v2_251117_tr, deduped_hugging_csvs_v2_251117_str
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode tr --tag v2_251117 > logs/trick_aug_tr_v2_251117.log 2>&1   # Create transpose augmented folders
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str --tag v2_251117 > logs/trick_aug_str_v2_251117.log 2>&1  # Create string augmented folders
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/trick_aug_tr_v2_251117.log 2>&1   # Create transpose augmented folders
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/trick_aug_str_v2_251117.log 2>&1  # Create string augmented folders
 # Or process all modes:
 #python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_tr --tag v2_251117 > logs/trick_aug_str_tr_v2_251117.log 2>&1  # Create both str and tr augmented folders
 
-# Step 2: Create symlinks from CitationLake to starmie_internal
+# Step 2: Create symlinks from ModelTables to starmie_internal
 # This creates symlinks in starmie_internal/data/scilake_final_<tag>/datalake
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --dir-name scilake_final_251117 > logs/ln_scilake_base_251117.log 2>&1  # Base mode
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --dir-name scilake_final_251117_str > logs/ln_scilake_str_251117.log 2>&1  # Str mode
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --dir-name scilake_final_251117_tr > logs/ln_scilake_tr_251117.log 2>&1  # Tr mode
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  # Base mode
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  # Str mode
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1  # Tr mode
 # Or process all modes at once:
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode all --dir-name scilake_final_251117 > logs/ln_scilake_all_251117.log 2>&1  # All modes (base, str, tr, tr_str)
-
-# Note: For default v2 version (no tag), omit --tag and use scilake_final_v2 as dir-name
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode tr --tag v2 > logs/trick_aug_tr_v2.log 2>&1  # No tag, uses v2 folders
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --dir-name scilake_final_v2 > logs/ln_scilake_base_v2.log 2>&1  # No tag, uses v2
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode all --tag 251117 --v2_mode > logs/ln_scilake_all_251117.log 2>&1  # All modes (base, str, tr, tr_str)
 ```
 
 ### 6\. Run Updated Starmie Scripts
 
 Execute Starmie's pipeline for contrastive learning, embedding extraction, and search
-
-**Versioning with TAG:**
-All Starmie scripts support a `TAG` environment variable for versioning:
-- `TAG=v2` (or omit TAG) for the default v2 version
-- `TAG=<date>` (e.g., `TAG=251117`) for date-based versions
-- `TAG=` (empty) will default to `v2`
 
 ```bash
 # bash prepare_sample.sh > logs/prepare_sample.log 2>&1  # Sample 1000 tables from each resource folder for evaluation
@@ -373,156 +365,27 @@ python -m src.modelsearch.compare_baselines \
 # llm feedback
 ``` -->
 
-<details>
-<summary><strong>9. GPT Evaluation of Table Relatedness and Model Relatedness</strong></summary>
-
-**Script**: `src/gpt_evaluation/step1_table_sampling.py`
-**Purpose**: Sample balanced table pairs for GPT evaluation across three ground truth levels (Paper, ModelCard, Dataset).
-**Key Features**:
-- **Multi-level balanced sampling**: Each GT level maintains 50/50 positive/negative ratio
-- **8-way combination analysis**: Analyzes all 8 possible label combinations (2³)
-- **Efficient batch querying**: Uses sparse matrix indexing for O(log deg) queries
-- **Large pool sampling**: Samples from 100k+ pool, then filters for balance
-**Usage**:
+### 8\. Figure post-analysis
 ```bash
-python src/gpt_evaluation/step1_table_sampling.py \
-    --total-target 200 \
-    --seed 42 > logs/step1_table_sampling.log 2>&1
-```
-**Notes**:
-- `--total-target`: Number of unique pairs to output (default: 500)
-- Pool size is auto-set to `max(6x target, 10000)` for better diversity
-- No need to specify `--n-samples-pool` anymore
+# figure1 + 2: qc_stats_fig + gt_distri's output figures
+# figure3: count v.s. time. Based on step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet, output table_model_counts_over_time_<tag>.pdf/png
+python -m src.data_analysis.table_model_counts_over_time --tag 251117 --v2_mode > logs/table_model_counts_over_time_v2_251117.log 2>&1  # step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet, output table_model_counts_over_time_<tag>.pdf/png
 
-**Output**: 500 unique pairs with 8-way combination statistics
-```bash
-[5/5] Post-selection statistics:
-  8-Way (selected):
-    (0, 0, 0): None                 -   21 (10.61%)
-    (0, 0, 1): Dataset only         -   11 ( 5.56%)
-    (0, 1, 0): ModelCard only       -   21 (10.61%)
-    (0, 1, 1): ModelCard + Dataset  -   12 ( 6.06%)
-    (1, 0, 0): Paper only           -   35 (17.68%)
-    (1, 0, 1): Paper + Dataset      -   24 (12.12%)
-    (1, 1, 0): Paper + ModelCard    -   24 (12.12%)
-    (1, 1, 1): All three            -   50 (25.25%)
-
-  Per-level (selected):
-    Paper     :  133 pos (67.17%) /   65 neg (32.83%)
-    Modelcard :  107 pos (54.04%) /   91 neg (45.96%)
-    Dataset   :   97 pos (48.99%) /  101 neg (51.01%)
-```
-
-**Visualization**: Generate heatmap visualization for paper figures
-```bash
-python src/gpt_evaluation/visualize_sampling_2x4_horizontal.py > logs/visualize_sampling.log 2>&1
-```
-
-#### Step2: Query OpenRouter for table relatedness evaluation.
-```bash
-python -m src.gpt_evaluation.step2_query_openrouter --input output/gpt_evaluation/table_1M_fix_unique_pairs.jsonl --output output/gpt_evaluation/step2_full_198.jsonl 2>&1 | tee logs/step2_query_openrouter.log &
-# retry
-# python -m src.gpt_evaluation.step2_retry_failed \
-#     --input output/gpt_evaluation/step2_openrouter_results_full.jsonl \
-#     --output output/gpt_evaluation/step2_openrouter_results_retried.jsonl > logs/step2_retry_failed.log 2>&1
-# add merge please
-python -m src.gpt_evaluation.step2_merge_results --main output/gpt_evaluation/step2_full_198.jsonl --additional output/gpt_evaluation/step2_gpt4mini_full.jsonl --output output/gpt_evaluation/step2_all_5models.jsonl > logs/step2_merge_results.log 2>&1
-
-# crowdsourcing metrics analysis
-python -m src.gpt_evaluation.visualize_crowdsourcing_metrics > logs/visualize_crowdsourcing_metrics.log 2>&1 # generate figures for subset
-python -m src.gpt_evaluation.visualize_crowdsourcing_metrics_full > logs/visualize_crowdsourcing_metrics_full.log 2>&1 # generate figures for full dataset
-```
-
-</details>
-
----
-
-### (Deprecated)Model Relatedness Sampling
-
-**Script**: `src/gpt_evaluation/step1_model_sampling.py`
-
-**Purpose**: Sample model pairs for model relatedness evaluation.
-
-**Usage**:
-```bash
-python src/gpt_evaluation/step1_model_sampling.py --n-samples 200 --seed 42 > logs/step1_model_sampling.log 2>&1
-```
-
-
-### 10. Table Integration:
-```bash
-
-```
-
-### Analysis on Results
-
-Tools for analyzing the retrieval results and ground truth.
-
-```bash
-# Get top-10 results from step3_search_hnsw.
-python -m src.data_analysis.report_generation --json_path ~/Repo/starmie_internal/tmp/test_hnsw_search_scilake_large_full.json > logs/report_generation.log 2>&1
-# Use a specific version of step3_dedup/all_title_list_valid by passing full suffix tag (e.g. v2_251117).
-python -m src.data_analysis.report_generation --tag v2_251117 --json_path data/baseline/baseline1_dense.json --query_table 1810.04805_table4.csv > logs/report_generation_baseline_v2_251117.log 2>&1
-# --show_model_titles
-
-# Check if a specific CSV pair is related in the ground truth.
-python -m src.data_gt.check_pair_in_gt --gt-dir data/gt --csv1 0ab2d85d37_table1.csv --csv2 096d51652d_table1.csv > logs/check_pair_in_gt.log 2>&1
-
-# Count unique CSVs in retrieval results.
-python count_unique_csvs.py --results /u1/z6dong/Repo/starmie_internal/results/scilake_final/test_hnsw_search_drop_cell_tfidf_entity_full.json --gt /u1/z6dong/Repo/ModelLake/data/gt/csv_pair_adj_overlap_rate_processed.pkl > logs/count_unique_csvs.log 2>&1
-
-# CSV to ModelID Mapping
-# Get modelIDs from CSV files (supports GitHub, HuggingFace, HTML, LLM sources)
-python src/data_analysis/batch_process_tables.py -i tmp/top_tables.txt -o tmp/top_tables_with_keywords.csv > logs/batch_process_tables.log 2>&1
-# Analyze HTML table files and compare column counts between v1 and v2
-# Input: tmp/top_tables_with_keywords.csv (filtered for HTML source)
-# Output: tmp/html_table_analysis.csv with column count comparison
-# Purpose: Compare HTML table v2 vs v1 column counts and analyze reduction
-python src/data_analysis/analyze_html_tables.py > logs/analyze_html_tables.log 2>&1
-python src/data_analysis/analyze_huggingface_tables.py > logs/analyze_huggingface_tables.log 2>&1
-```
-
-### Additional Statistics Analysis
-
-Scripts for generating further insights into the dataset.
-
-```bash
-python -m src.data_preprocess.step1_analysis > logs/step1_analysis.log 2>&1 # get analysis on proportion of different links (sql)
-python -m src.data_preprocess.query_compare_API_local > logs/query_compare_API_local.log 2>&1 # compare the query results among local and API from s2orc
-TODO: add statistics analysis from dataset_processed.ipynb
-```
-
-
-```bash
-# get parquet schema
-python src.data_analysis.list_parquet_schemas > logs/parquet_schema.log 2>&1
-# get attributes duplicate analysis
-#python complete_duplicate_analysis.py > logs/complete_duplicate_analysis_results.txt 2>&1
-python src.data_analysis.column_size_analysis --include-modelid > logs/parquet_storage.log 2>&1
-
-# load all files into duckdb
-python src.data_analysis.load_sv_to_db --engine sqlite --db-path deduped_hugging_csvs_v2.sqlite --input-dir data/processed/deduped_hugging_csvs_v2 > logs/load_sv_to_db.log 2>&1
-# get relational keys from other key automatically (require logs/parquet_schema.log)
-python -m src.data_analysis.get_from --target html_table_list_mapped_dedup --source modelId --value google-bert/bert-base-uncased > logs/get_from.log 2>&1
-python -m src.data_analysis.get_from --target readme_path --source csv_paths --value "64dc62e53f_table2.csv" >> logs/get_from.log 2>&1
-python -m src.data_analysis.get_from --target modelId --source hugging_table_list --value data/processed/deduped_hugging_csvs/021f09961f_table1.csv >> logs/get_from.log 2>&1
-python -m src.data_analysis.get_from --target modelId --source pdf_link --value https://arxiv.org/pdf/0803.1019 >> logs/get_from.log 2>&1
-python get_modelid_from_arxiv_comprehensive.py "0803.1019" --search-all --debug > logs/get_modelid_from_arxiv.log 2>&1
 # step by step filtering img
 python -m src.data_analysis.card_statistics > logs/card_statistics.log 2>&1 # get statistics of model cards
 python -m src.data_analysis.hf_models_analysis > logs/hf_models_analysis.log 2>&1 # get statistics of models in Hugging Face
 # after carefully examining
 python -m src.data_analysis.filtered_gt_visualization > logs/filtered_gt_visualization.log 2>&1
 python -m src.data_analysis.quick_visualization_final > logs/quick_visualization_final.log 2>&1
-# the count v.s. time visualization
-python src/data_analysis/table_model_counts_over_time.py --tag v2_251117 --output-dir data/analysis > logs/table_model_counts_over_time_v2_251117.log 2>&1  # step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet, output table_model_counts_over_time_<tag>.pdf/png
-# TODO: top-10!
+
+# get relational keys from other key automatically (require logs/parquet_schema.log)
+python -m src.data_analysis.get_from --target html_table_list_mapped_dedup --source modelId --value google-bert/bert-base-uncased > logs/get_from.log 2>&1
+python -m src.data_analysis.get_from --target readme_path --source csv_paths --value "64dc62e53f_table2.csv" >> logs/get_from.log 2>&1
+python -m src.data_analysis.get_from --target modelId --source hugging_table_list --value data/processed/deduped_hugging_csvs/021f09961f_table1.csv >> logs/get_from.log 2>&1
+python -m src.data_analysis.get_from --target modelId --source pdf_link --value https://arxiv.org/pdf/0803.1019 >> logs/get_from.log 2>&1
 ```
 
 ```bash
-# periodically upload to hugging face : Files: modelcard_step3_dedup_v2_<tag>.parquet, hugging, github, html, llm.zip
-# huggingface-cli login
-# huggingface-cli repo create your-username/your-dataset --type dataset
-python -m src.data_preprocess.upload_to_hf_dataset --tag 251117 --dataset-name your-username/your-dataset --no-dry-run > logs/upload_to_hf_dataset_251117.log 2>&1
-# TODO: versioning for zip
+python -m src.data_analysis.valid_table_shapes --tag 251117 --v2_mode > logs/valid_table_shapes_v2_251117.log 2>&1  # table shapes from valid table list, Input: all_valid_title_valid_v2_<tag>.txt, Output: valid_table_shapes_v2_<tag>.parquet; We double check the qc_stats filtering
+python -m src.data_analysis.table_usage_stats --tag 251117 --v2_mode > logs/table_usage_stats_v2_251117.log 2>&1  # table usage value counts, Input: valid_table_shapes_v2_<tag>.parquet, Output: table_usage_stats_v2_<tag>.parquet
 ```
