@@ -54,14 +54,15 @@ def plot_metrics_grid(df, include_wdc=True, suffix="", v2_suffix=""):
 
     bar_width = 0.12  # Reduced bar width for tighter spacing
     gap = 0.25  # Reduced gap between clusters for tighter layout
-    clusters = ['Benchmarks', 'All', 'Dedup', 'Title', 'Valid-title']
+    # Order: base (scilake-{resource}) is last in each 4-bar block
+    clusters = ['Benchmarks', 'All', 'Title', 'Valid-title', 'Dedup']
     resources = list(RESOURCES.keys())
 
     cluster_key_map = {
         'All': " (duplicated)",
-        'Dedup': "",
         'Title': "-title-dedup",
-        'Valid-title': "-valid-dedup"
+        'Valid-title': "-valid-dedup",
+        'Dedup': ""
     }
 
     # Define baseline benchmarks locally (all benchmarks except scilake-*)

@@ -222,7 +222,7 @@ def process_csv_file(csv_file, tag=None):
         print(f"Error processing {csv_file}: {e}")
         return None, str(e)
 
-def compute_resource_stats(df, resource, tag=None):
+def compute_resource_stats(df, resource, tag):
     col = RESOURCES[resource][0]
     paths = df[col].explode()
     
@@ -634,13 +634,31 @@ def plot_metric(df, metric, filename):
     plt.close()
 
 
-def main(input_file, input_file_dedup, query_file, suffix, v2_suffix):
-    # Determine suffix for output files (use tag if provided)
-    VALID_TITLE_PARQUET = os.path.join('data', 'processed', f"all_title_list_valid{v2_suffix}{suffix}.parquet")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Get statistics of tables in CSV files from different resources")
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')   
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
+    args = parser.parse_args()
     
-    df = pd.read_parquet(input_file, columns=['modelId', 'all_title_list'])
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
+
+    os.makedirs("data/analysis", exist_ok=True)
+
+    # Determine input/output paths based on tag (tag is full suffix like v2 or v2_251117; no hardcoded _v2).
+    input_file_dedup = os.path.join(base_path, 'processed', f"modelcard_step3_dedup{v2_suffix}{suffix}.parquet")
+    query_file = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
+    modelid2titles_path = os.path.join(base_path, 'processed', f"modelcard_all_title_list{suffix}.parquet")
+    
+    print("📁 Paths in use:")
+    print(f"   Input dedup:    {input_file_dedup}")
+    print(f"   Input query:    {query_file}")
+    print(f"   Input modelid2titles: {modelid2titles_path}")
+
+    df = pd.read_parquet(modelid2titles_path, columns=['modelId', 'all_title_list'])
     df_integration = pd.read_parquet(query_file, columns=['query_title'])
-    # rename query_title to query
     df_integration.rename(columns={'query_title': 'query'}, inplace=True)
     # read data/processed/modelcard_step3_dedup.parquet and get modelId and 4 resources keys
     df_dedup = pd.read_parquet(input_file_dedup, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'])
@@ -654,6 +672,7 @@ def main(input_file, input_file_dedup, query_file, suffix, v2_suffix):
     
     # Only save modelId and the 3 new attributes to reduce file size
     df_optimized = df[['modelId', 'all_title_list', 'all_title_list_valid', 'has_title', 'has_valid_title']].copy()
+    VALID_TITLE_PARQUET = os.path.join('data', 'processed', f"all_title_list_valid{v2_suffix}{suffix}.parquet")
     to_parquet(df_optimized, VALID_TITLE_PARQUET)
     print(f"Saved valid‑title list to {VALID_TITLE_PARQUET}")
     del df_optimized
@@ -661,14 +680,10 @@ def main(input_file, input_file_dedup, query_file, suffix, v2_suffix):
     resource_stats = {}
     for resource in RESOURCES:
         print(f"\nProcessing {resource}...")
-        stats = compute_resource_stats(df, resource, tag=tag)
+        stats = compute_resource_stats(df, resource, tag=args.tag)
         resource_stats.update(stats)
-
     results_df = create_combined_results(benchmark_data, resource_stats)
-    
-    # Use tag as full suffix for benchmark result file (e.g. v2, v2_251117).
     results_path = os.path.join('data', 'analysis', f"benchmark_results{v2_suffix}{suffix}.parquet")
-    
     to_parquet(results_df, results_path)
     print(f"\nSaved results to {results_path}")
     
@@ -685,7 +700,6 @@ def main(input_file, input_file_dedup, query_file, suffix, v2_suffix):
                         line = line.strip()
                         if line:
                             combined_paths.add(line)
-        
         all_valid_title_valid_file = os.path.join('data', 'analysis', f"all_valid_title_valid{v2_suffix}{suffix}.txt")
         with open(all_valid_title_valid_file, 'w') as f:
             for path in sorted(combined_paths):
@@ -694,28 +708,3 @@ def main(input_file, input_file_dedup, query_file, suffix, v2_suffix):
         print(f"  (Tables already filtered by size thresholds: max_cols={MAX_COLS}, max_rows={MAX_ROWS})")
     except Exception as e:
         print(f"Warning: failed to generate all_valid_title_valid{v2_suffix}{suffix}.txt: {e}")
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Get statistics of tables in CSV files from different resources")
-    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')   
-    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
-    args = parser.parse_args()
-    
-    config = load_config('config.yaml')
-    base_path = config.get('base_path', 'data')
-    suffix = f"_{args.tag}" if args.tag else ""
-    v2_suffix = "_v2" if args.v2_mode else ""
-
-    os.makedirs("data/analysis", exist_ok=True)
-
-    # Determine input/output paths based on tag (tag is full suffix like v2 or v2_251117; no hardcoded _v2).
-    input_file = os.path.join(base_path, 'processed', f"modelcard_step3_merged{v2_suffix}{suffix}.parquet")
-    input_file_dedup = os.path.join(base_path, 'processed', f"modelcard_step3_dedup{v2_suffix}{suffix}.parquet")
-    query_file = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
-    
-    print("📁 Paths in use:")
-    print(f"   Input merged:        {input_file}")
-    print(f"   Input dedup:          {input_file_dedup}")
-    print(f"   Input query:    {query_file}")
-    
-    main(input_file, input_file_dedup, query_file, suffix, v2_suffix)

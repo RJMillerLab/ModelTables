@@ -446,7 +446,7 @@ class BiasedLogNorm(LogNorm):
         scaled = super().__call__(value, clip)
         return np.power(scaled, self.bias)
 
-def save_heatmap(dup_matrix, unique_counts, table_parquet_path, output_dir, is_percentage=False, file_suffix=""):
+def save_heatmap(dup_matrix, unique_counts, table_parquet_path, output_dir, is_percentage=False, file_suffix="", v2_suffix=""):
     fontsize = 18
     plt.rcParams.update({
         'font.size': 18,           
@@ -537,8 +537,7 @@ def save_heatmap(dup_matrix, unique_counts, table_parquet_path, output_dir, is_p
     
     # Save with appropriate filename (file_suffix for versioning: e.g. _251117 for tag, empty for v2-only)
     kind = "percentage" if is_percentage else "overlap"
-    basename = f"heatmap_{kind}{file_suffix}.pdf"
-    outpath = os.path.join(output_dir, basename)
+    outpath = os.path.join(output_dir, f"heatmap_{kind}{v2_suffix}{file_suffix}.pdf")
     plt.savefig(outpath)
     print(f"Heatmap saved to {outpath}")
 
@@ -554,7 +553,7 @@ if __name__ == "__main__":
     v2_suffix = "_v2" if args.v2_mode else ""
 
     # Determine input/output paths with optional override from CLI.
-    input_parquet = os.path.join(base_path, 'processed', f"modelcard_step3_merged{v2_suffix}{suffix}.parquet")
+    table_parquet_path = os.path.join(base_path, 'processed', f"modelcard_step3_merged{v2_suffix}{suffix}.parquet")
     output_parquet = os.path.join(base_path, 'processed', f"modelcard_step3_dedup{v2_suffix}{suffix}.parquet")
     output_dir = os.path.join(base_path, f"deduped{v2_suffix}{suffix}")
     fig_dir = os.path.join(base_path, 'analysis')
@@ -563,7 +562,7 @@ if __name__ == "__main__":
     os.makedirs(fig_dir, exist_ok=True)
 
     print("📁 Paths in use:")
-    print(f"   Input parquet:       {input_parquet}")
+    print(f"   Input parquet:       {table_parquet_path}")
     print(f"   Output parquet:      {output_parquet}")
     print(f"   Output directory:    {output_dir}")
     print(f"   Figure directory:    {fig_dir}")
@@ -755,6 +754,6 @@ if __name__ == "__main__":
     print(f"Dup matrix saved to {dup_matrix_file}")
 
     # Save both absolute and percentage heatmaps (with file_suffix for versioning: v2 vs v2_251117)
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, file_suffix=suffix)
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, is_percentage=True, file_suffix=suffix)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, file_suffix=suffix, v2_suffix=v2_suffix)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, is_percentage=True, file_suffix=suffix, v2_suffix=v2_suffix)
     print(f"Time taken: {time.time() - time_start} seconds")

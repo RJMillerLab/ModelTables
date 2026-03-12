@@ -119,7 +119,7 @@ python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_s
 # Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits).
 # Why API over local (build_mini_citation_es): (1) API provides fresher citations/references; (2) API's title fuzzy matching is more accurate (commercialized) than our local ES fuzzy match.
 python -m src.data_preprocess.s2orc_title2ids_API --tag 251117 > logs/s2orc_title2ids_API_251117.log 2>&1 #  Input: modelcard_dedup_titles_<tag>.json  Output: s2orc_titles2ids_<tag>.parquet
-python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_API_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet Output: s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet
+python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_API_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet Output: s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet # issue: reference could be queried, but citation not
 # Or 
 # (local corpus version) python -m src.data_localindexing.s2orc_refcit_local --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1 # Input: batch_results + hit_ids_<tag>.txt, output: full_hits_<tag>.jsonl
 # (local corpus version) python -m src.data_localindexing.s2orc_refcit_local_post --tag 251117 > logs/s2orc_local_query_ref_cit_251117.log 2>&1 # Input: full_hits_<tag>.jsonl (or fallback full_hits.jsonl), Output: s2orc_*_<tag>.parquet
@@ -185,6 +185,25 @@ python -m src.data_preprocess.step2_merge_tables_simplify --tag 251117 --v2_mode
   # Output: modelcard_step3_merged_v2_<tag>.parquet
 ```
 
+### Quality Control \!\!\! | Run some analysis
+
+Ensure data quality and consistency before generating final ground truth.
+
+```bash
+python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/step2_dedup_tables_v2_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet, and others
+python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_v2_<tag>/dup_matrix_v2_<tag>.pkl, deduped_v2_<tag>/stats_v2_<tag>.json. Output: heatmaps heatmap_overlap_v2_<tag>.pdf / heatmap_percentage_v2_<tag>.pdf in data/analysis/
+python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_rerun_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet
+python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
+#(Optional) python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 
+#(Optional) python -m src.tools.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 #(Optional) # compare v1 and v2 table diff
+# (Optional) Double-check deduplication and mapping logic.
+# python -m src.data_analysis.qc_dc > logs/qc_dc.log 2>&1
+# Obtain file counts directly from folders to verify against statistics.
+#(Optional) bash src/data_analysis/count_files.sh > logs/count_files.log 2>&1
+```
+
+We could go for starmie searching and baselines searching. We need groundtruth for evaluation based on searched results and groundtruth results.
+
 ### 4\. Label Ground Truth for Unionable Search Baselines
 
 This section details the process of generating ground truth labels for table unionability.
@@ -192,23 +211,6 @@ This section details the process of generating ground truth labels for table uni
 python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_rerun_<tag>.parquet. Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
 python -m src.data_analysis.paper_relatedness_distribution --tag 251117 > logs/paper_relatedness_distribution_251117.log 2>&1  # (Optional) Plot violin figures of paper relatedness distribution. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: overlap_violin_by_mode_<tag>.pdf
 # (Deprecated) python -m src.data_analysis.paper_relatedness_threshold --tag 251117 > logs/paper_relatedness_threshold_251117.log 2>&1  # (Optional) Determine paper relatedness thresholds. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: score_*.pdf files in data/analysis/
-```
-
-### Quality Control \!\!\! | Run some analysis
-
-Ensure data quality and consistency before generating final ground truth.
-
-```bash
-python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/step2_dedup_tables_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet, and others
-python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_<tag>/dup_matrix_<tag>.pkl, deduped_<tag>/stats_<tag>.json. Output: heatmaps heatmap_overlap_<tag>.pdf / heatmap_percentage_<tag>.pdf in data/analysis/
-python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_<tag>.parquet. modelcard_step3_merged_<tag>.parquet. s2orc_rerun_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet
-python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
-#(Optional) python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 
-#(Optional) python -m src.tools.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 #(Optional) # compare v1 and v2 table diff
-# (Optional) Double-check deduplication and mapping logic.
-# python -m src.data_analysis.qc_dc > logs/qc_dc.log 2>&1
-# Obtain file counts directly from folders to verify against statistics.
-bash src/data_analysis/count_files.sh > logs/count_files.log 2>&1
 ```
 
 ### Final Ground Truth Generation

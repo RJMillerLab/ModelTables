@@ -74,7 +74,10 @@ def main():
         if not mask_missing.any():
             break
         df_missing = df_merged[mask_missing].copy()
-        df_missing2 = pd.merge(df_missing.drop(columns=["arxiv_id"]), df_title2arxiv[[right_key, "arxiv_id"]], left_on=left_key, right_on=right_key, how="left")
+        #df_missing2 = pd.merge(df_missing.drop(columns=["arxiv_id"]), df_title2arxiv[[right_key, "arxiv_id"]], left_on=left_key, right_on=right_key, how="left")
+        # Dedupe by right_key so merge is 1:1 (avoid row explosion when multiple titles map to same norm_title)
+        df_title2arxiv_dedup = df_title2arxiv.drop_duplicates(subset=[right_key], keep="first")[[right_key, "arxiv_id"]]
+        df_missing2 = pd.merge(df_missing.drop(columns=["arxiv_id"]), df_title2arxiv_dedup, left_on=left_key, right_on=right_key, how="left")
         df_merged.loc[mask_missing, "arxiv_id"] = df_missing2["arxiv_id"].values
     df_merged.drop(columns=["norm_title", "preproc_title"], inplace=True)
     print("📝 After merging title mapping, shape:", df_merged.shape)

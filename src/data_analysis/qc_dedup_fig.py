@@ -56,6 +56,6 @@ if __name__ == "__main__":
     with open(stats_file, "r") as f:
         stats = json.load(f)
     
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, file_suffix=suffix)
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, is_percentage=True, file_suffix=suffix)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, file_suffix=suffix, v2_suffix=v2_suffix)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, is_percentage=True, file_suffix=suffix, v2_suffix=v2_suffix)
     print(f"✅ Heatmaps saved to {fig_dir}")
