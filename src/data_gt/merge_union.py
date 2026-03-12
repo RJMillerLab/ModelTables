@@ -17,34 +17,6 @@ from scipy.sparse import load_npz, csr_matrix, save_npz
 
 DATA_DIR = "data/gt"
 
-LEVEL_NPZ = {                                                ########
-    "direct"  : "csv_pair_matrix_direct_label.npz",
-    "direct_influential": "csv_pair_matrix_direct_label_influential.npz",
-    "direct_methodology_or_result": "csv_pair_matrix_direct_label_methodology_or_result.npz",
-    "direct_methodology_or_result_influential": "csv_pair_matrix_direct_label_methodology_or_result_influential.npz",
-    "max_pr": "csv_pair_matrix_max_pr.npz",
-    "max_pr_influential": "csv_pair_matrix_max_pr_influential.npz",
-    "max_pr_methodology_or_result": "csv_pair_matrix_max_pr_methodology_or_result.npz",
-    "max_pr_methodology_or_result_influential": "csv_pair_matrix_max_pr_methodology_or_result_influential.npz",
-    #"union" : "csv_pair_union.npz",
-    "model" : "scilake_gt_modellink_model_adj.npz",
-    "dataset": "scilake_gt_modellink_dataset_adj.npz",
-}
-
-LEVEL_CSVLIST = {                                            ########
-    "direct"  : "csv_list_direct_label.pkl",
-    "direct_influential": "csv_list_direct_label_influential.pkl",
-    "direct_methodology_or_result": "csv_list_direct_label_methodology_or_result.pkl",
-    "direct_methodology_or_result_influential": "csv_list_direct_label_methodology_or_result_influential.pkl",
-    "max_pr": "csv_list_max_pr.pkl",
-    "max_pr_influential": "csv_list_max_pr_influential.pkl",
-    "max_pr_methodology_or_result": "csv_list_max_pr_methodology_or_result.pkl",
-    "max_pr_methodology_or_result_influential": "csv_list_max_pr_methodology_or_result_influential.pkl",
-    #"union" : "csv_pair_union_csv_list.pkl",
-    "model" : "scilake_gt_modellink_model_adj_csv_list.pkl",
-    "dataset": "scilake_gt_modellink_dataset_adj_csv_list.pkl",
-}
-
 def _full(p):
     """Return DATA_DIR/p (only if p is not an absolute path)."""
     return p if os.path.isabs(p) else os.path.join(DATA_DIR, p)
@@ -165,14 +137,45 @@ def process_matrix_by_paper_list(matrix_path, list_path, paper_list):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Compute union of multiple boolean adjacency NPZs with progress")
-    parser.add_argument('--level', required=True, choices=list(LEVEL_NPZ.keys()), help='Which citation‑pair level to use as PRIMARY (e.g. direct, max_pr_influential, union …)')
+    parser.add_argument('--level', required=True, choices=['direct', 'max_pr', 'model', 'dataset', 'direct_influential', 'direct_methodology_or_result', 'direct_methodology_or_result_influential', 'max_pr_influential', 'max_pr_methodology_or_result', 'max_pr_methodology_or_result_influential'], help='Which citation‑pair level to use as PRIMARY (e.g. direct, max_pr_influential, union …)')
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
 
     suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
+
+    LEVEL_NPZ = {
+        "direct"  : f"csv_pair_matrix_direct_label{v2_suffix}{suffix}.npz",
+        "direct_influential": f"csv_pair_matrix_direct_label_influential{v2_suffix}{suffix}.npz",
+        "direct_methodology_or_result": f"csv_pair_matrix_direct_label_methodology_or_result{v2_suffix}{suffix}.npz",
+        "direct_methodology_or_result_influential": f"csv_pair_matrix_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.npz",
+        "max_pr": f"csv_pair_matrix_max_pr{v2_suffix}{suffix}.npz",
+        "max_pr_influential": f"csv_pair_matrix_max_pr_influential{v2_suffix}{suffix}.npz",
+        "max_pr_methodology_or_result": f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.npz",
+        "max_pr_methodology_or_result_influential": f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.npz",
+        #"union" : f"csv_pair_union{v2_suffix}{suffix}.npz",
+        "model" : f"scilake_gt_modellink_model_adj{v2_suffix}{suffix}.npz",
+        "dataset": f"scilake_gt_modellink_dataset_adj{v2_suffix}{suffix}.npz",
+    }
+
+    LEVEL_CSVLIST = {
+        "direct"  : f"csv_list_direct_label{v2_suffix}{suffix}.pkl",
+        "direct_influential": f"csv_list_direct_label_influential{v2_suffix}{suffix}.pkl",
+        "direct_methodology_or_result": f"csv_list_direct_label_methodology_or_result{v2_suffix}{suffix}.pkl",
+        "direct_methodology_or_result_influential": f"csv_list_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.pkl",
+        "max_pr": f"csv_list_max_pr{v2_suffix}{suffix}.pkl",
+        "max_pr_influential": f"csv_list_max_pr_influential{v2_suffix}{suffix}.pkl",
+        "max_pr_methodology_or_result": f"csv_list_max_pr_methodology_or_result{v2_suffix}{suffix}.pkl",
+        "max_pr_methodology_or_result_influential": f"csv_list_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.pkl",
+        #"union" : f"csv_pair_union_csv_list{v2_suffix}{suffix}.pkl",
+        "model" : f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}.pkl",
+        "dataset": f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}.pkl",
+    }
+
     primary_key = args.level
-    primary_npz = _full(LEVEL_NPZ[primary_key].replace('.npz', f'{suffix}.npz'))
-    primary_lst = _full(LEVEL_CSVLIST[primary_key].replace('.pkl', f'{suffix}.pkl'))
+    primary_npz = _full(LEVEL_NPZ[primary_key])
+    primary_lst = _full(LEVEL_CSVLIST[primary_key])
 
     # Load paper list first
     with open(primary_lst, 'rb') as f:
@@ -180,16 +183,16 @@ if __name__ == '__main__':
     print(f"Loaded paper list with {len(paper_list)} entries")
 
     # Process model and dataset matrices
-    model_npz = _full(LEVEL_NPZ['model'].replace('.npz', f'{suffix}.npz'))
-    model_lst = _full(LEVEL_CSVLIST['model'].replace('.pkl', f'{suffix}.pkl'))
-    ds_npz = _full(LEVEL_NPZ['dataset'].replace('.npz', f'{suffix}.npz'))
-    ds_lst = _full(LEVEL_CSVLIST['dataset'].replace('.pkl', f'{suffix}.pkl'))
+    model_npz = _full(LEVEL_NPZ['model'])
+    model_lst = _full(LEVEL_CSVLIST['model'])
+    ds_npz = _full(LEVEL_NPZ['dataset'])
+    ds_lst = _full(LEVEL_CSVLIST['dataset'])
 
     # Process model matrix
     print("Processing model matrix...")
     model_matrix, model_list = process_matrix_by_paper_list(model_npz, model_lst, paper_list)
-    model_processed_npz = _full(LEVEL_NPZ['model'].replace('.npz', f'{suffix}_processed.npz'))
-    model_processed_lst = _full(LEVEL_CSVLIST['model'].replace('.pkl', f'{suffix}_processed.pkl'))
+    model_processed_npz = _full(LEVEL_NPZ['model'].replace('.npz', f'_processed.npz'))
+    model_processed_lst = _full(LEVEL_CSVLIST['model'].replace('.pkl', f'_processed.pkl'))
     save_npz(model_processed_npz, model_matrix, compressed=True)
     with open(model_processed_lst, 'wb') as f:
         pickle.dump(model_list, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -199,8 +202,8 @@ if __name__ == '__main__':
     # Process dataset matrix
     print("Processing dataset matrix...")
     ds_matrix, ds_list = process_matrix_by_paper_list(ds_npz, ds_lst, paper_list)
-    ds_processed_npz = _full(LEVEL_NPZ['dataset'].replace('.npz', f'{suffix}_processed.npz'))
-    ds_processed_lst = _full(LEVEL_CSVLIST['dataset'].replace('.pkl', f'{suffix}_processed.pkl'))
+    ds_processed_npz = _full(LEVEL_NPZ['dataset'].replace('.npz', f'_processed.npz'))
+    ds_processed_lst = _full(LEVEL_CSVLIST['dataset'].replace('.pkl', f'_processed.pkl'))
     save_npz(ds_processed_npz, ds_matrix, compressed=True)
     with open(ds_processed_lst, 'wb') as f:
         pickle.dump(ds_list, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -211,8 +214,8 @@ if __name__ == '__main__':
     matrices = [primary_npz, model_processed_npz, ds_processed_npz]
     csvlists = [primary_lst, model_processed_lst, ds_processed_lst]
 
-    # Output prefix reflects primary level (include tag if provided)
-    output_prefix = _full(f"csv_pair_union_{primary_key}{suffix}_processed")
+    # Output prefix reflects primary level (include v2/tag if provided)
+    output_prefix = _full(f"csv_pair_union_{primary_key}{v2_suffix}{suffix}_processed")
 
     U, union_ids = build_union_matrix(matrices, csvlists)
 

@@ -20,10 +20,6 @@ from scipy.stats import ttest_ind, mannwhitneyu, ks_2samp
 from sklearn.model_selection import KFold
 from sklearn.ensemble import IsolationForest
 
-# === Paths ===
-COMBINED_PATH = "data/processed/modelcard_citation_all_matrices.pkl.gz"  ######## updated ########
-RESULT_DIR = "data/analysis"
-
 def find_balanced_accuracy_threshold(y_true, y_scores):
     """Find threshold that maximizes balanced accuracy."""
     thresholds = np.linspace(0, 1, 100)
@@ -165,26 +161,18 @@ def find_hybrid_threshold(y_true, y_scores):
 # === Main execution ===
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Determine overlap thresholds")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input', dest='input', default=None,
-                        help='Path to modelcard_citation_all_matrices pkl.gz (default: auto-detect from tag)')
-    parser.add_argument('--output-dir', dest='output_dir', default=None,
-                        help='Directory for output files (default: data/analysis)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
+    suffix = f"_{args.tag}" if args.tag else ""
     
     # Determine input/output paths based on tag
-    combined_path = args.input or os.path.join(processed_base_path, f"modelcard_citation_all_matrices{suffix}.pkl.gz")
-    result_dir = args.output_dir or os.path.join(base_path, 'analysis')
+    combined_path = os.path.join(base_path, 'processed', f"modelcard_citation_all_matrices{suffix}.pkl.gz")
+    result_dir = os.path.join(base_path, 'analysis')
     os.makedirs(result_dir, exist_ok=True)
     
-    print("📁 Paths in use:")
     print(f"   Input matrices:      {combined_path}")
     print(f"   Output directory:    {result_dir}")
 

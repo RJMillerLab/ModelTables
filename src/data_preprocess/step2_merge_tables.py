@@ -137,21 +137,23 @@ def map_tables_by_title(model_level_df, query_to_tablist_df):
 def main():
     parser = argparse.ArgumentParser(description="Merge all table lists into a unified model ID file")
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
     suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     
     # Determine input/output paths: tag is full suffix (no _v2 in template)
-    query_to_tablist_path = os.path.join(base_path, 'processed', f"final_integration_with_paths{suffix}.parquet")
+    query_to_tablist_path = os.path.join(base_path, 'processed', f"final_integration_with_paths{v2_suffix}{suffix}.parquet")
     modelid2titles_path = os.path.join(base_path, 'processed', f"modelcard_all_title_list{suffix}.parquet")
-    modelid2readmeinfo_path = os.path.join(base_path, 'processed', f"modelcard_step2{suffix}.parquet")
-    modelid2tablist_path = os.path.join(base_path, 'processed', f"modelcard_step3_merged{suffix}.parquet")
+    modelid2readmeinfo_path = os.path.join(base_path, 'processed', f"modelcard_step2{v2_suffix}{suffix}.parquet")
+    modelid2tablist_path = os.path.join(base_path, 'processed', f"modelcard_step3_merged{v2_suffix}{suffix}.parquet")
     
-    hugging_map_json_path = os.path.join(base_path, 'processed', f"hugging_deduped_mapping{suffix}.json")
-    github_csvs_folder = os.path.join(base_path, 'processed', f"deduped_github_csvs{suffix}")
-    github_mapping_path = os.path.join(github_csvs_folder, f"md_to_csv_mapping{suffix}.json")
+    hugging_map_json_path = os.path.join(base_path, 'processed', f"hugging_deduped_mapping{v2_suffix}{suffix}.json")
+    github_csvs_folder = os.path.join(base_path, 'processed', f"deduped_github_csvs{v2_suffix}{suffix}")
+    github_mapping_path = os.path.join(github_csvs_folder, f"md_to_csv_mapping.json")
     
     print(f"\nMerging all tables list...")
     query_to_tablist_df = pd.read_parquet(query_to_tablist_path, columns=['query', 'html_table_list', 'llm_table_list']) # , 'corpusid'

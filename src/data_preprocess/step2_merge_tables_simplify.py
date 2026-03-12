@@ -17,25 +17,27 @@ from src.data_preprocess.step2_integration_s2orc_llm import (normalize_title, pr
 def main():
     parser = argparse.ArgumentParser(description="Integrate HTML/PDF/annotation tables and prepare LLM inputs")
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
 
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
     suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
 
-    TITLE2ARXIV_PARQUET = os.path.join(base_path, 'processed', f"title2arxiv_cache{suffix}.parquet")
-    HTML_TABLE_PARQUET_V2 = os.path.join(base_path, 'processed', f"html_parsing_results_v2{suffix}.parquet")
     TITLE_PARQUET = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
+    TITLE2ARXIV_PARQUET = os.path.join(base_path, 'processed', f"title2arxiv_cache{suffix}.parquet")
+    HTML_TABLE_PARQUET = os.path.join(base_path, 'processed', f"html_parsing_results{v2_suffix}{suffix}.parquet")
     #FINAL_OUTPUT_PARQUET = os.path.join(base_path, 'processed', f"title2htmltab{suffix}.parquet")
 
     print("📁 Paths in use:")
     print(f"   Query titles:        {TITLE_PARQUET}")
-    print(f"   Title→arxiv cache:  {TITLE2ARXIV_PARQUET} (primary)")
-    print(f"   HTML table list:      {HTML_TABLE_PARQUET_V2}")
+    print(f"   Title→arxiv cache:  {TITLE2ARXIV_PARQUET}")
+    print(f"   HTML table list:      {HTML_TABLE_PARQUET}")
 
     # --- Step 1: Load extracted annotations ---
     df_title = pd.read_parquet(TITLE_PARQUET, columns=['query_title', 'retrieved_title'])
-    df_title["norm_title"] = df_title["retrieved_title"].apply(normalize_title) ########
+    df_title["norm_title"] = df_title["retrieved_title"].apply(normalize_title)
     df_title["preproc_title"] = df_title["retrieved_title"].apply(preprocess_title)
     print("📝 df_title shape:", df_title.shape)
 
@@ -47,8 +49,8 @@ def main():
     print("📝 df_title2arxiv shape:", df_title2arxiv.shape)
 
     # --- Step 3: Merge df_html with df_title2arxiv based on arxiv id pure version ---
-    print(f"📦 Loading HTML tables from v2: {HTML_TABLE_PARQUET_V2}")
-    df_html = pd.read_parquet(HTML_TABLE_PARQUET_V2) # Columns: [paper_id, html_path, page_type, csv_paths]
+    print(f"📦 Loading HTML tables: {HTML_TABLE_PARQUET}")
+    df_html = pd.read_parquet(HTML_TABLE_PARQUET) # Columns: [paper_id, html_path, page_type, csv_paths]
     if 'csv_paths' in df_html.columns and 'table_list' not in df_html.columns:
         df_html['table_list'] = df_html['csv_paths'].apply(convert_to_list)
     print("📝 df_html shape:", df_html.shape)
@@ -83,12 +85,12 @@ def main():
     
     # Determine input/output paths: tag is full suffix (no _v2 in template)
     modelid2titles_path = os.path.join(base_path, 'processed', f"modelcard_all_title_list{suffix}.parquet")
-    modelid2readmeinfo_path = os.path.join(base_path, 'processed', f"modelcard_step2{suffix}.parquet")
-    modelid2tablist_path = os.path.join(base_path, 'processed', f"modelcard_step3_merged{suffix}.parquet")
+    modelid2readmeinfo_path = os.path.join(base_path, 'processed', f"modelcard_step2{v2_suffix}{suffix}.parquet")
+    modelid2tablist_path = os.path.join(base_path, 'processed', f"modelcard_step3_merged{v2_suffix}{suffix}.parquet")
 
-    hugging_map_json_path = os.path.join(base_path, 'processed', f"hugging_deduped_mapping{suffix}.json")
-    github_csvs_folder = os.path.join(base_path, 'processed', f"deduped_github_csvs{suffix}")
-    github_mapping_path = os.path.join(github_csvs_folder, f"md_to_csv_mapping{suffix}.json")
+    hugging_map_json_path = os.path.join(base_path, 'processed', f"hugging_deduped_mapping{v2_suffix}{suffix}.json")
+    github_csvs_folder = os.path.join(base_path, 'processed', f"deduped_github_csvs{v2_suffix}{suffix}")
+    github_mapping_path = os.path.join(github_csvs_folder, f"md_to_csv_mapping.json")
     
     print(f"\nMerging all tables list...")
     # Build query_to_tablist_df directly from df_merged

@@ -339,6 +339,18 @@ if __name__ == "__main__":
         )
     )
     final_merged_df = pd.concat([final_merged_df, cit_new_cols, ref_new_cols], axis=1)
+    # Normalize corpusId to integer-like values without trailing '.0', robust to non-numeric entries
+    if "corpusId" in final_merged_df.columns:
+        corpus_str = (
+            final_merged_df["corpusId"]
+            .astype(str)
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)
+            .replace({"nan": None, "NaN": None, "None": None, "": None})
+        )
+        corpus_numeric = pd.to_numeric(corpus_str, errors="coerce", downcast="integer")
+        # Use pandas nullable integer type to allow missing values
+        final_merged_df["corpusId"] = corpus_numeric.astype("Int64")
     to_parquet(final_merged_df, output_file)
     print('Save merged dataframe to', output_file)
     

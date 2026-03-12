@@ -15,22 +15,7 @@ import argparse
 import pickle
 from pathlib import Path
 
-DATA_DIR = "data/gt"
-
 # Mapping of level to CSV list file
-LEVEL_CSVLIST = {
-    "direct": "csv_list_direct_label.pkl",
-    "direct_influential": "csv_list_direct_label_influential.pkl",
-    "direct_methodology_or_result": "csv_list_direct_label_methodology_or_result.pkl",
-    "direct_methodology_or_result_influential": "csv_list_direct_label_methodology_or_result_influential.pkl",
-    "max_pr": "csv_list_max_pr.pkl",
-    "max_pr_influential": "csv_list_max_pr_influential.pkl",
-    "max_pr_methodology_or_result": "csv_list_max_pr_methodology_or_result.pkl",
-    "max_pr_methodology_or_result_influential": "csv_list_max_pr_methodology_or_result_influential.pkl",
-    "model": "scilake_gt_modellink_model_adj_csv_list_processed.pkl",
-    "dataset": "scilake_gt_modellink_dataset_adj_csv_list_processed.pkl",
-    "union": "csv_pair_union_direct_processed_csv_list.pkl",
-}
 
 SUFFIXES = {
     #"":      "",
@@ -72,30 +57,28 @@ def process_csvlist(csvlist_path):
 def main():
     parser = argparse.ArgumentParser(description="Create variants of CSV filenames in a CSV list")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--level', choices=list(LEVEL_CSVLIST.keys()),
-                      help='Which level to process (e.g., direct, max_pr)')
-    group.add_argument('--csvlist', help='Path to the CSV list file to process')
+    group.add_argument('--level', choices=['direct', 'max_pr', 'model', 'dataset', 'direct_influential', 'direct_methodology_or_result', 'direct_methodology_or_result_influential', 'max_pr_influential', 'max_pr_methodology_or_result', 'max_pr_methodology_or_result_influential', 'union'], required=True, help='Which level to process (e.g., direct, max_pr)')
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
 
     suffix = f"_{args.tag}" if args.tag else ""
-    if args.level:
-        # For processed files, add suffix before _processed if it exists, otherwise before .pkl
-        base_name = LEVEL_CSVLIST[args.level]
-        if '_processed' in base_name:
-            csvlist_path = os.path.join(DATA_DIR, base_name.replace('_processed', f'{suffix}_processed'))
-        else:
-            csvlist_path = os.path.join(DATA_DIR, base_name.replace('.pkl', f'{suffix}.pkl'))
-    else:
-        csvlist_path = args.csvlist
-        # If csvlist is provided and tag is set, add suffix
-        if args.tag and csvlist_path.endswith('.pkl'):
-            if '_processed' in csvlist_path:
-                csvlist_path = csvlist_path.replace('_processed', f'{suffix}_processed')
-            else:
-                csvlist_path = csvlist_path.replace('.pkl', f'{suffix}.pkl')
+    v2_suffix = "_v2" if args.v2_mode else ""
 
-    process_csvlist(csvlist_path)
+    LEVEL_CSVLIST = {
+        "direct": f"csv_list_direct_label{v2_suffix}{suffix}.pkl",
+        "direct_influential": f"csv_list_direct_label_influential{v2_suffix}{suffix}.pkl",
+        "direct_methodology_or_result": f"csv_list_direct_label_methodology_or_result{v2_suffix}{suffix}.pkl",
+        "direct_methodology_or_result_influential": f"csv_list_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.pkl",
+        "max_pr": f"csv_list_max_pr{v2_suffix}{suffix}.pkl",
+        "max_pr_influential": f"csv_list_max_pr_influential{v2_suffix}{suffix}.pkl",
+        "max_pr_methodology_or_result": f"csv_list_max_pr_methodology_or_result{v2_suffix}{suffix}.pkl",
+        "max_pr_methodology_or_result_influential": f"csv_list_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.pkl",
+        "model": f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}_processed.pkl",
+        "dataset": f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}_processed.pkl",
+        "union": f"csv_pair_union_direct{v2_suffix}{suffix}_processed_csv_list.pkl",
+    }
+    process_csvlist(os.path.join("data", "gt", LEVEL_CSVLIST[args.level]))
 
 if __name__ == "__main__":
     main() 

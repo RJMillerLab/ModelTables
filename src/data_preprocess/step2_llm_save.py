@@ -111,26 +111,20 @@ def process_markdown_and_save_paths(df: pd.DataFrame, output_dir: str, key_colum
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Save LLM-processed markdown tables to CSV files")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input', dest='input', default=None,
-                        help='Path to llm_markdown_table_results parquet (default: auto-detect from tag)')
-    parser.add_argument('--output-dir', dest='output_dir', default=None,
-                        help='Directory to save CSV files (default: auto-detect from tag)')
-    parser.add_argument('--output-parquet', dest='output_parquet', default=None,
-                        help='Path to final_integration_with_paths parquet (default: auto-detect from tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
     tag = args.tag
     suffix = f"_{tag}" if tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     
     # Determine input/output paths based on tag
-    input_csv = args.input or os.path.join(processed_base_path, f"llm_markdown_table_results{suffix}.parquet")
-    output_dir = args.output_dir or os.path.join(processed_base_path, f"llm_tables{suffix}")
-    updated_parquet_path = args.output_parquet or os.path.join(processed_base_path, f"final_integration_with_paths_v2{suffix}.parquet")
+    input_csv = os.path.join(base_path, 'processed', f"llm_markdown_table_results{v2_suffix}{suffix}.parquet")
+    output_dir = os.path.join(base_path, 'processed', f"llm_tables{v2_suffix}{suffix}")
+    updated_parquet_path = os.path.join(base_path, 'processed', f"final_integration_with_paths{v2_suffix}{suffix}.parquet")
     
     print("📁 Paths in use:")
     print(f"   Input parquet:      {input_csv}")

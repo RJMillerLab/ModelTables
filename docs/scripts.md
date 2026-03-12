@@ -103,7 +103,6 @@ python -m src.data_preprocess.step2_hugging_github_extract --tag 251117 > logs/s
 # Output: modelcard_all_title_list_<tag>.parquet, all_title_list_intra_row_dedup_groups_<tag>.json
 # (Output but not used anymore) github_readme_cache_update_<tag>.parquet, github_extraction_cache_<tag>.json, all_links_with_category_<tag>.csv
 python -m src.data_preprocess.step2_arxiv_github_title --tag 251117 > logs/step2_arxiv_github_title_251117.log 2>&1 # This one is slow..
-ln -s data/processed/modelcard_all_title_list_251117.parquet data/processed/modelcard_all_title_list_v2_251117.parquet
 # (One-time fix without run all: PYTHONPATH=. python bak/dedup_all_title_list_intra_row_251117.py)
 
 # Save deduplicated titles for querying Semantic Scholar (S2ORC). Cross-row dedup: same normalize. Output: modelcard_dedup_titles_<tag>.json, s2orc_cross_row_dedup_groups_<tag>.json
@@ -122,15 +121,15 @@ python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_s
 python -m src.data_preprocess.s2orc_title2ids_API --tag 251117 > logs/s2orc_title2ids_API_251117.log 2>&1 #  Input: modelcard_dedup_titles_<tag>.json  Output: s2orc_titles2ids_<tag>.parquet
 python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_API_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet Output: s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet
 # Or 
-python -m src.data_localindexing.s2orc_refcit_local --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1 # Input: batch_results + hit_ids_<tag>.txt, output: full_hits_<tag>.jsonl
-python -m src.data_localindexing.s2orc_refcit_local_post --tag 251117 > logs/s2orc_local_query_ref_cit_251117.log 2>&1 # Input: full_hits_<tag>.jsonl (or fallback full_hits.jsonl), Output: s2orc_*_<tag>.parquet
+# (local corpus version) python -m src.data_localindexing.s2orc_refcit_local --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1 # Input: batch_results + hit_ids_<tag>.txt, output: full_hits_<tag>.jsonl
+# (local corpus version) python -m src.data_localindexing.s2orc_refcit_local_post --tag 251117 > logs/s2orc_local_query_ref_cit_251117.log 2>&1 # Input: full_hits_<tag>.jsonl (or fallback full_hits.jsonl), Output: s2orc_*_<tag>.parquet
 # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query | I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
 python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_cit/ref_cache_251117.parquet, O: s2orc_rerun_251117.parquet
  #- bash src/data_localindexing/build_mini_citation_es.sh > logs/build_mini_citation_es.log 2>&1 # I: xx | O: batch_results
-bash src/data_preprocess/s2orc_fulltext_local.sh # extract fulltext -> ref/cit info
+# (local corpus version) bash src/data_preprocess/s2orc_fulltext_local.sh # extract fulltext -> ref/cit info
 # I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_merged_df.parquet, tmp_extracted_lines.parquet
 ### Option2: batch querying papers_index
-python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json # getting full tables
+# (local corpus version) python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json # getting full tables
 </details>
 
 # Download arXiv HTML, extract tables from arXiv HTML files.
@@ -156,47 +155,43 @@ python -m src.data_preprocess.arxiv_fulltext_api --tag 251117 > logs/arxiv_fullt
 python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --tag 251117 --save_mode csv > logs/step2_arxiv_parse_v2_251117.log 2>&1  # --overwrite for full run; save_mode: csv|duckdb 
 
 # Integrate all processed table data (arXiv HTML + S2ORC extracted annotations) and process with LLM.
-# ln -s data/processed/extracted_annotations.parquet data/processed/extracted_annotations_251117.parquet
 # Input: title2arxiv_cache_<tag>.parquet, html_parsing_results_v2_<tag>.parquet, extracted_annotations_<tag>.parquet, pdf_download_cache_<tag>.json
-# Output: llm_markdown_table_results_<tag>.parquet (optional: batch_input/output if running LLM)
+# Output: llm_markdown_table_results_v2_<tag>.parquet (optional: batch_input_v2_<tag>.jsonl/output_v2_<tag>.jsonl if running LLM)
 # Use --skip-llm to skip LLM entirely (merge only, empty llm_response_raw) when not updating LLM
-python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 --skip-llm > logs/step2_integration_s2orc_llm_251117.log 2>&1
+# (s2orc+LLM table source, deprecated) python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 --skip-llm --v2_mode > logs/step2_integration_s2orc_llm_251117.log 2>&1
 # (Optional) Check OpenAI batch job status (if using LLM for table processing)
 # bash src/data_preprocess/openai_batchjob_status.sh > logs/openai_batchjob_status.log 2>&1
 
 # (Optional) If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
-#cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results.parquet
-# Extract LLM-processed tables. Input: llm_markdown_table_results_<tag>.parquet; Output: llm_tables_<tag>/*.csv, final_integration_with_paths_v2_<tag>.parquet
-python -m src.data_preprocess.step2_llm_save --tag 251117 > logs/step2_llm_save_251117.log 2>&1
+#cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results_v2_<tag>.parquet
+# Extract LLM-processed tables. Input: llm_markdown_table_results_v2_<tag>.parquet; Output: llm_tables_<tag>/*.csv, final_integration_with_paths_v2_<tag>.parquet
+# (s2orc+LLM table source, deprecated) python -m src.data_preprocess.step2_llm_save --tag 251117 --v2_mode > logs/step2_llm_save_251117.log 2>&1
 ```
 
 Finally, we merge table list from different sources back to modelID level.
 ```bash
-python -m src.data_preprocess.step2_merge_tables --tag v2_251117 > logs/step2_merge_tables_v2_251117.log 2>&1  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file.
+# (merge after s2orc + LLM, depreated) python -m src.data_preprocess.step2_merge_tables --tag 251117 --v2_mode > logs/step2_merge_tables_v2_251117.log 2>&1  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file.
 # Here <tag> is v2_251117 in this example.
-# Input: final_integration_with_paths_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_<tag>.parquet.
-# Output: modelcard_step3_merged_<tag>.parquet
+# Input: final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_v2_<tag>.parquet.
+# Output: modelcard_step3_merged_v2_<tag>.parquet
 ```
 
 To substitute step2_integration_s2orc_llm, step2_llm_save (we skip llm tables as it is unstable), step2_merge_tables, we can use step2_merge_tables_simplify to directly generate the final merged table list at modelID level (without running the LLM table extraction pipeline).
 ```bash
-python -m src.data_preprocess.step2_merge_tables_simplify --tag v2_251117 > logs/step2_merge_tables_simplify_251117.log 2>&1 \
-  # Input: s2orc_rerun_<tag>.parquet, title2arxiv_cache_<tag>.parquet, html_parsing_results_v2_<tag>.parquet,
-  #        modelcard_all_title_list_<tag>.parquet, modelcard_step2_<tag>.parquet,
-  #        hugging_deduped_mapping_<tag>.json, deduped_github_csvs_<tag>/md_to_csv_mapping_<tag>.json.
-  # Output: modelcard_step3_merged_<tag>.parquet
+python -m src.data_preprocess.step2_merge_tables_simplify --tag 251117 --v2_mode > logs/step2_merge_tables_simplify_251117.log 2>&1 
+  # Input: s2orc_rerun_<tag>.parquet, title2arxiv_cache_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, 
+  #        hugging_deduped_mapping_v2_<tag>.json, deduped_github_csvs_v2_<tag>/md_to_csv_mapping.json. html_parsing_results_v2_<tag>.parquet, modelcard_step2_v2_<tag>.parquet,
+  # Output: modelcard_step3_merged_v2_<tag>.parquet
 ```
 
 ### 4\. Label Ground Truth for Unionable Search Baselines
 
 This section details the process of generating ground truth labels for table unionability.
 ```bash
-# for this script, we don't need v2 version, because paper citation won't be affected by the v2
-python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: extracted_annotations_<tag>.parquet. Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
-ln -sf modelcard_citation_all_matrices_251117.pkl.gz data/processed/modelcard_citation_all_matrices_v2_251117.pkl.gz
+python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_rerun_<tag>.parquet. Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
 python -m src.data_analysis.paper_relatedness_distribution --tag 251117 > logs/paper_relatedness_distribution_251117.log 2>&1  # (Optional) Plot violin figures of paper relatedness distribution. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: overlap_violin_by_mode_<tag>.pdf
-python -m src.data_analysis.paper_relatedness_threshold --tag 251117 > logs/paper_relatedness_threshold_251117.log 2>&1  # (Optional) Determine paper relatedness thresholds. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: score_*.pdf files in data/analysis/
+# (Deprecated) python -m src.data_analysis.paper_relatedness_threshold --tag 251117 > logs/paper_relatedness_threshold_251117.log 2>&1  # (Optional) Determine paper relatedness thresholds. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: score_*.pdf files in data/analysis/
 ```
 
 ### Quality Control \!\!\! | Run some analysis
@@ -204,12 +199,12 @@ python -m src.data_analysis.paper_relatedness_threshold --tag 251117 > logs/pape
 Ensure data quality and consistency before generating final ground truth.
 
 ```bash
-python -m src.data_preprocess.step2_dedup_tables --tag v2_251117 > logs/step2_dedup_tables_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet
-python -m src.data_analysis.qc_dedup_fig --tag v2_251117 > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_<tag>/dup_matrix_<tag>.pkl, deduped_<tag>/stats_<tag>.json. Output: heatmaps heatmap_overlap_<tag>.pdf / heatmap_percentage_<tag>.pdf in data/analysis/
-python -m src.data_analysis.qc_stats --tag v2_251117 > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_<tag>.parquet. Output: benchmark_results_<tag>.parquet where <tag>=v2_251117.
-python -m src.data_analysis.qc_stats_fig --tag v2_251117 > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_<tag>.parquet. Output: benchmark_metrics_vertical_<tag>.pdf/png
-python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 #(Optional)
-python -m src.tools.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 #(Optional) # compare v1 and v2 table diff
+python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/step2_dedup_tables_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet, and others
+python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_<tag>/dup_matrix_<tag>.pkl, deduped_<tag>/stats_<tag>.json. Output: heatmaps heatmap_overlap_<tag>.pdf / heatmap_percentage_<tag>.pdf in data/analysis/
+python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_<tag>.parquet. modelcard_step3_merged_<tag>.parquet. s2orc_rerun_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet
+python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
+#(Optional) python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 
+#(Optional) python -m src.tools.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 #(Optional) # compare v1 and v2 table diff
 # (Optional) Double-check deduplication and mapping logic.
 # python -m src.data_analysis.qc_dc > logs/qc_dc.log 2>&1
 # Obtain file counts directly from folders to verify against statistics.
@@ -221,19 +216,19 @@ Generate the definitive ground truth files for evaluation.
 
 ```bash
 # (Depre) python -m src.data_gt.step3_create_symlinks --tag 251117 > logs/step3_create_symlinks_251117.log 2>&1  # Create symbolic links for organizing processed tables. Input: modelcard_step3_dedup_v2_<tag>.parquet. Output: modelcard_step4_v2_<tag>.parquet, sym_*_csvs_* (symbolic links)
-bash src/data_gt/step3_gt.sh v2_251117 > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
-python -m src.tools.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 # (Optional)
-python -m src.data_gt.debug_npz --gt-dir data/gt/ > logs/debug_npz.log 2>&1 # (Optional) Debug NPZ ground truth files to ensure valid conditions.
+bash src/data_gt/step3_gt.sh 251117 > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_rerun_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
+# (Optional) python -m src.tools.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 # (Optional)
+# (Optional) python -m src.data_gt.debug_npz --gt-dir data/gt/ > logs/debug_npz.log 2>&1 # Debug NPZ ground truth files to ensure valid conditions.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).
 python -m src.data_localindexing.turn_tus_into_pickle > logs/turn_tus_into_pickle.log 2>&1
 # (deprecate) python -m src.data_gt.gt_combine > logs/gt_combine.log 2>&1
-python -m src.data_gt.modelcard_matrix --tag v2_251117 > logs/modelcard_matrix_v2_251117.log 2>&1  # Add other two levels of citation graphs (modelcard and dataset). Input: modelcard_step1_<tag>.parquet, modelcard_step3_dedup_v2_<tag>.parquet, modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_gt_related_model_<tag>.parquet, data/gt/scilake_gt_modellink_*_<tag>.npz
-python -m src.data_gt.merge_union --level direct --tag 251117 > logs/merge_union_251117.log 2>&1  # Merge union ground truth. Input: data/gt/*_<tag>.npz, *_<tag>.pkl. Output: data/gt/csv_pair_union_*_<tag>_processed.npz
-python -m src.data_analysis.gt_distri --tag 251117 > logs/gt_distri_251117.log 2>&1  # Plot GT length distribution (boxplot/violin). Input: data/gt/*_<tag>.npz and *_<tag>_processed.npz (requires merge_union first). Use same --tag as merge_union.
-python -m src.data_gt.nonzeroedge --gt_dir data/gt --tag 251117 > logs/nonzeroedge_251117.log 2>&1  # Compute non-zero edge statistics for citation graphs. Input: data/gt/*_<tag>.npz
+python -m src.data_gt.modelcard_matrix --tag 251117 --v2_mode > logs/modelcard_matrix_v2_251117.log 2>&1  # Add other two levels of citation graphs (modelcard and dataset). Input: modelcard_step1_<tag>.parquet, modelcard_step3_dedup_v2_<tag>.parquet, modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_gt_related_model_v2_<tag>.parquet, data/gt/scilake_gt_modellink_*_v2_<tag>.npz
+python -m src.data_gt.merge_union --level direct --tag 251117 --v2_mode > logs/merge_union_v2_251117.log 2>&1  # Merge union ground truth. Input: data/gt/*_v2_<tag>.npz, *_v2_<tag>.pkl. Output: data/gt/csv_pair_union_*_v2_<tag>_processed.npz
+python -m src.data_analysis.gt_distri --tag 251117 --v2_mode > logs/gt_distri_251117.log 2>&1  # Plot GT length distribution (boxplot/violin). Input: data/gt/*_v2_<tag>.npz and *_v2_<tag>_processed.npz (requires merge_union first). Use same --tag as merge_union.
+python -m src.data_gt.nonzeroedge --gt_dir data/gt --tag 251117 --v2_mode > logs/nonzeroedge_v2_251117.log 2>&1  # Compute non-zero edge statistics for citation graphs. Input: data/gt/*_v2_<tag>.npz
 # (test)python -m src.data_gt.test_modelcard_update --mode dataset > logs/test_modelcard_update.log 2>&1 # check whether matrix multiplication and for loop obtain the same results
 #(test)python -m src.data_gt.convert_adj_to_npz --input data/gt/scilake_gt_modellink_dataset_adj_processed.pkl --output-prefix data/gt/scilake_gt_modellink_dataset > logs/convert_adj_to_npz.log 2>&1 # pkl2npz
-python -m src.data_gt.create_csvlist_variants --level direct --tag 251117 > logs/create_csvlist_variants_251117.log 2>&1  # Update CSV lists for various ground truth variants. Input: data/gt/*_<tag>.pkl
+python -m src.data_gt.create_csvlist_variants --level direct --tag 251117 --v2_mode > logs/create_csvlist_variants_251117.log 2>&1  # Update CSV lists for various ground truth variants. Input: data/gt/*_v2_<tag>.pkl
 # (depreate) python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t for pkl files
 # (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 # (deprecate) python -m src.data_analysis.gt_fig # plot stats

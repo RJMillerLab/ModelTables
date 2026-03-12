@@ -132,11 +132,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Print number of non-zero elements and density for each matrix (generic excluded).')
     parser.add_argument('--gt_dir', type=str, default='data/gt', help='Directory of GT files')
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
+
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     
     # Update main function to accept tag
-    def main_with_tag(gt_dir, tag=None):
-        suffix = f"_{tag}" if tag else ""
+    def main_with_tag(gt_dir, suffix, v2_suffix):
+        
         LEVELS = [
             "direct_label",
             "direct_label_influential",
@@ -153,14 +157,14 @@ if __name__ == '__main__':
         print('-' * 92)
 
         # First: Model and Dataset (so you can stop early after they print)
-        model_path = os.path.join(gt_dir, f"scilake_gt_modellink_model_adj{suffix}_processed.npz")
+        model_path = os.path.join(gt_dir, f"scilake_gt_modellink_model_adj{v2_suffix}{suffix}_processed.npz")
         if os.path.exists(model_path):
             nnz, density, nz_rows, n_total = compute_nnz_density(model_path)
             nnz_sci = format_sci(nnz)
             density_pct = density * 100.0
             print(f"{'Model':<40}{nnz:>14,}{nnz_sci:>16}{density:>12.6f}{density_pct:>9.2f}%")
 
-        dataset_path = os.path.join(gt_dir, f"scilake_gt_modellink_dataset_adj{suffix}_processed.npz")
+        dataset_path = os.path.join(gt_dir, f"scilake_gt_modellink_dataset_adj{v2_suffix}{suffix}_processed.npz")
         if os.path.exists(dataset_path):
             nnz, density, nz_rows, n_total = compute_nnz_density(dataset_path)
             nnz_sci = format_sci(nnz)
@@ -169,10 +173,10 @@ if __name__ == '__main__':
 
         # Then: CSV-level with generic filtering
         for lvl in LEVELS:
-            npz_path = os.path.join(gt_dir, f"csv_pair_matrix_{lvl}{suffix}.npz")
+            npz_path = os.path.join(gt_dir, f"csv_pair_matrix_{lvl}{v2_suffix}{suffix}.npz")
             # optional index for filtering
-            idx_pkl = os.path.join(gt_dir, f"csv_list_{lvl}{suffix}.pkl")
-            idx_txt = os.path.join(gt_dir, f"csv_list_{lvl}{suffix}.txt")
+            idx_pkl = os.path.join(gt_dir, f"csv_list_{lvl}{v2_suffix}{suffix}.pkl")
+            idx_txt = os.path.join(gt_dir, f"csv_list_{lvl}{v2_suffix}{suffix}.txt")
             keep_mask = None
             idx_names = load_index_names(idx_pkl) or load_index_names(idx_txt)
             if idx_names:
@@ -187,13 +191,13 @@ if __name__ == '__main__':
             print(f"{lvl:<40}{nnz:>14,}{nnz_sci:>16}{density:>12.6f}{density_pct:>9.2f}%")
 
         # extra union (no index available; print as-is)
-        npz_path = os.path.join(gt_dir, f"csv_pair_union_direct{suffix}_processed.npz")
+        npz_path = os.path.join(gt_dir, f"csv_pair_union_direct{v2_suffix}{suffix}_processed.npz")
         nnz, density, nz_rows, n_total = compute_nnz_density(npz_path)
         nnz_sci = format_sci(nnz)
         density_pct = density * 100.0
         print(f"{'Union':<40}{nnz:>14,}{nnz_sci:>16}{density:>12.6f}{density_pct:>9.2f}%")
     
-    main_with_tag(args.gt_dir, args.tag)
+    main_with_tag(args.gt_dir, suffix, v2_suffix)
 
 """
 Level                                              NNZ         NNZ_sci     Density   Percent

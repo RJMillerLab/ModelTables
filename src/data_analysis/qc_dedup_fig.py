@@ -17,7 +17,7 @@ import seaborn as sns
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 
-from src.data_preprocess.step2_dedup_tables import save_heatmap, save_heatmap_percentage
+from src.data_preprocess.step2_dedup_tables import save_heatmap
 from src.utils import load_config
 
 OUTPUT_DIR = "data/deduped"
@@ -25,22 +25,18 @@ FIG_DIR = "data/analysis"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate heatmaps from step2_dedup_tables results")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input-dir', dest='input_dir', default=None,
-                        help='Directory containing dup_matrix.pkl and stats.json (default: auto-detect from tag)')
-    parser.add_argument('--fig-dir', dest='fig_dir', default=None,
-                        help='Directory for output figures (default: data/analysis)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
-    
-    # Determine input/output paths based on tag
-    output_dir = args.input_dir or os.path.join(base_path, f"deduped{suffix}" if tag else "deduped")
-    fig_dir = args.fig_dir or os.path.join(base_path, 'analysis')
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
+
+    output_dir = os.path.join(base_path, f"deduped{v2_suffix}{suffix}")
+    fig_dir = os.path.join(base_path, 'analysis')
+    table_parquet_path = os.path.join(base_path, 'processed', f"modelcard_step3_merged{v2_suffix}{suffix}.parquet")
     
     dup_matrix_file = os.path.join(output_dir, f"dup_matrix{suffix}.pkl")
     stats_file = os.path.join(output_dir, f"stats{suffix}.json")
@@ -59,8 +55,7 @@ if __name__ == "__main__":
     dup_matrix = pd.read_pickle(dup_matrix_file)
     with open(stats_file, "r") as f:
         stats = json.load(f)
-
-    # Generate both absolute and percentage heatmaps (file_suffix from tag so v2 vs v2_251117 don't overwrite)
-    save_heatmap(dup_matrix, stats["cross_unique_counts"], fig_dir, file_suffix=suffix)
-    save_heatmap_percentage(dup_matrix, stats["cross_unique_counts"], fig_dir, file_suffix=suffix)
+    
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, file_suffix=suffix)
+    save_heatmap(dup_matrix, stats["cross_unique_counts"], table_parquet_path, fig_dir, is_percentage=True, file_suffix=suffix)
     print(f"✅ Heatmaps saved to {fig_dir}")

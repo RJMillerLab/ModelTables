@@ -46,7 +46,7 @@ def load_Id_lists(df, mode, influential=False, intent=None):   ########
 
     Id_to_ids = {}
     for _, row in df.iterrows():
-        pid = str(row["corpusid"])
+        pid = str(row["corpusId"])
         #ids = row[col]
         if intent == "methodology_or_result":                                               ########
             ids1 = row[col1]                                                       ########
@@ -95,21 +95,6 @@ def compute_overlap_matrices(Id_to_ref, paper_list):
         "dice": dice
     }
 
-"""def original_compute_direct_matrix(Id_to_all, paper_list):
-    # load references & citations with optional isInfluential filter
-    n = len(paper_list)
-    mat = lil_matrix((n, n), dtype=np.bool_)
-    for i in tqdm(range(n), desc="Computing direct matrix"):
-        pid_i  = paper_list[i]
-        refs_i = Id_to_all[pid_i]
-        for j in range(i, n):
-            pid_j  = paper_list[j]
-            refs_j = Id_to_all[pid_j]
-            if pid_j in refs_i or pid_i in refs_j:
-                mat[i, j] = True
-                mat[j, i] = True
-    return mat.tocsr()"""
-
 def compute_direct_matrix(Id_to_all, paper_list):
     idx_map = {pid: i for i, pid in enumerate(paper_list)}
     rows, cols = [], []
@@ -124,9 +109,9 @@ def compute_direct_matrix(Id_to_all, paper_list):
     mat = coo_matrix((np.ones(len(rows), dtype=bool), (rows, cols)), shape=(n, n)).tocsr()
     return mat
 
-def main(input_parquet=None, combined_path=None):
+def main(input_parquet, combined_path):
     df = pd.read_parquet(input_parquet)
-    df['corpusid'] = df['corpusid'].astype(str)
+    df['corpusId'] = df['corpusId'].astype(str)
     print(f"Loaded {len(df)} rows")
     print('keys:', list(df.keys()))
 
@@ -137,13 +122,13 @@ def main(input_parquet=None, combined_path=None):
             name = f"{mode}_{intent or 'overall'}_{'infl' if infl else 'norm'}"
         print(f"[DEBUG-LOAD] {name}: {len(d)} papers, total links = {total_links}")
 
-    Id_to_ref        = load_Id_lists(df, "reference", influential=False)  ########
-    Id_to_ref_infl   = load_Id_lists(df, "reference", influential=True)   ########
-    Id_to_cite       = load_Id_lists(df, "citation",  influential=False)  ########
-    Id_to_cite_infl  = load_Id_lists(df, "citation",  influential=True)   ########
+    Id_to_ref        = load_Id_lists(df, "reference", influential=False)
+    Id_to_ref_infl   = load_Id_lists(df, "reference", influential=True)
+    Id_to_cite       = load_Id_lists(df, "citation",  influential=False)
+    Id_to_cite_infl  = load_Id_lists(df, "citation",  influential=True)
     Id_to_all        = {pid: Id_to_ref.get(pid, []) + Id_to_cite.get(pid, [])            for pid in set(Id_to_ref)|set(Id_to_cite)}
     Id_to_all_infl   = {pid: Id_to_ref_infl.get(pid, []) + Id_to_cite_infl.get(pid, [])  for pid in set(Id_to_ref_infl)|set(Id_to_cite_infl)}
-    Id_list = sorted(set(df["corpusid"]))
+    Id_list = sorted(set(df["corpusId"]))
 
     time_start = time.time()
     overlap_all       = compute_overlap_matrices(Id_to_ref,       Id_list)
@@ -202,24 +187,18 @@ def main(input_parquet=None, combined_path=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compute paper-pair overlap scores for citation analysis")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input', dest='input', default=None,
-                        help='Path to extracted_annotations parquet (default: auto-detect from tag)')
-    parser.add_argument('--output', dest='output', default=None,
-                        help='Path to modelcard_citation_all_matrices pkl.gz (default: auto-detect from tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
     tag = args.tag
     suffix = f"_{tag}" if tag else ""
     
     # Determine input/output paths based on tag
     #INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet" # original query id from online
-    input_parquet = args.input or os.path.join(processed_base_path, f"extracted_annotations{suffix}.parquet")
-    combined_path = args.output or os.path.join(processed_base_path, f"modelcard_citation_all_matrices{suffix}.pkl.gz")
+    input_parquet = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
+    combined_path = os.path.join(base_path, 'processed', f"modelcard_citation_all_matrices{suffix}.pkl.gz")
     
     print("📁 Paths in use:")
     print(f"   Input annotations:   {input_parquet}")

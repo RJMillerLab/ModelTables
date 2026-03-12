@@ -239,20 +239,22 @@ def convert_to_list(x):
 def main():
     parser = argparse.ArgumentParser(description="Integrate HTML/PDF/annotation tables and prepare LLM inputs")
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
 
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
     suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
 
     TITLE2ARXIV_PARQUET = os.path.join(base_path, 'processed', f"title2arxiv_cache{suffix}.parquet")
-    HTML_TABLE_PARQUET_V2 = os.path.join(base_path, 'processed', f"html_parsing_results_v2{suffix}.parquet")
+    HTML_TABLE_PARQUET_V2 = os.path.join(base_path, 'processed', f"html_parsing_results{v2_suffix}{suffix}.parquet")
     ANNOTATIONS_PARQUET = os.path.join(base_path, 'processed', f"extracted_annotations{suffix}.parquet")
     PDF_CACHE_PATH = os.path.join(base_path, 'processed', f"pdf_download_cache{suffix}.json")
-    FINAL_OUTPUT_CSV = os.path.join(base_path, 'processed', f"llm_markdown_table_results{suffix}.parquet")
+    FINAL_OUTPUT_CSV = os.path.join(base_path, 'processed', f"llm_markdown_table_results{v2_suffix}{suffix}.parquet")
 
-    BATCH_INPUT_PATH = os.path.join(base_path, 'processed', f"batch_input{suffix}.jsonl")
-    BATCH_OUTPUT_PATH = os.path.join(base_path, 'processed', f"batch_output{suffix}.jsonl")
+    BATCH_INPUT_PATH = os.path.join(base_path, 'processed', f"batch_input{v2_suffix}{suffix}.jsonl")
+    BATCH_OUTPUT_PATH = os.path.join(base_path, 'processed', f"batch_output{v2_suffix}{suffix}.jsonl")
 
     print("📁 Paths in use:")
     print(f"   Annotations:        {ANNOTATIONS_PARQUET}")

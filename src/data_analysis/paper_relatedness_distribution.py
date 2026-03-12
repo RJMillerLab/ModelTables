@@ -114,23 +114,17 @@ def plot_violin_by_mode(distributions, metrics, modes, colors, save_path):
 # === Main execution ===
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Plot violin figures of overlap rates")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
-    parser.add_argument('--input', dest='input', default=None,
-                        help='Path to modelcard_citation_all_matrices pkl.gz (default: auto-detect from tag)')
-    parser.add_argument('--output', dest='output', default=None,
-                        help='Path to output PDF (default: overlap_violin_by_mode_<tag>.pdf)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
     tag = args.tag
     suffix = f"_{tag}" if tag else ""
     
     # Determine input/output paths based on tag
-    uploaded_path = args.input or os.path.join(processed_base_path, f"modelcard_citation_all_matrices{suffix}.pkl.gz")
-    output_path = args.output or (f"data/analysis/overlap_violin_by_mode{suffix}.pdf" if tag else "data/analysis/overlap_violin_by_mode.pdf")
+    uploaded_path = os.path.join(base_path, 'processed', f"modelcard_citation_all_matrices{suffix}.pkl.gz")
+    output_path = f"data/analysis/overlap_violin_by_mode{suffix}.pdf"
     os.makedirs("data/analysis", exist_ok=True)
     
     print("📁 Paths in use:")

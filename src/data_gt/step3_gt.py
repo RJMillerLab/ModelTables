@@ -27,33 +27,6 @@ from itertools import combinations
 from scipy.sparse import csr_matrix, coo_matrix, save_npz
 from src.utils import is_list_like, to_list_safe
 
-
-# === Configuration ===
-DATA_DIR = "data/processed"
-GT_DIR = "data/gt"
-
-# ---- default files (can be overridden by CLI/kwargs) ----
-# No tag = v1 paths (no _v2). With tag = full suffix, e.g. modelcard_step3_dedup_<tag>.parquet
-FILES = {
-    "combined": f"{DATA_DIR}/modelcard_citation_all_matrices.pkl.gz",
-    "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup.parquet",
-    "integration": f"{DATA_DIR}/final_integration_with_paths.parquet",
-    "title_list": f"{DATA_DIR}/modelcard_all_title_list.parquet",
-    "valid_title": f"{DATA_DIR}/all_title_list_valid.parquet"
-}
-
-def update_files_with_tag(tag=None):
-    """Update FILES dictionary with tag suffix if provided. Tag is full suffix (e.g. v2, v2_251117)."""
-    global FILES
-    suffix = f"_{tag}" if tag else ""
-    FILES = {
-        "combined": f"{DATA_DIR}/modelcard_citation_all_matrices{suffix}.pkl.gz",
-        "step3_dedup": f"{DATA_DIR}/modelcard_step3_dedup{suffix}.parquet",
-        "integration": f"{DATA_DIR}/final_integration_with_paths{suffix}.parquet",
-        "title_list": f"{DATA_DIR}/modelcard_all_title_list{suffix}.parquet",
-        "valid_title": f"{DATA_DIR}/all_title_list_valid{suffix}.parquet" if suffix else f"{DATA_DIR}/all_title_list_valid.parquet"
-    }
-
 # ===== FACTORIES =========================================================== #
 def load_relationships(rel_key: str):
     """Factory loader for paperId‑level relationship graphs."""
@@ -75,16 +48,9 @@ def load_table_source():
     """Factory loader for table‑list metadata."""
     print(f"Loading table source from: step3_dedup")
     # load valid_title, and merge by modelId
-    # Try tag version first, fallback to default if not found
     valid_title_path = FILES["valid_title"]
     if not os.path.exists(valid_title_path):
-        # Fallback to default path (without tag)
-        default_path = f"{DATA_DIR}/all_title_list_valid.parquet"
-        if os.path.exists(default_path):
-            print(f"⚠️  Tag version not found, using default: {default_path}")
-            valid_title_path = default_path
-        else:
-            raise FileNotFoundError(f"Neither tag version ({FILES['valid_title']}) nor default version ({default_path}) found. Please run qc_stats.py first.")
+        raise FileNotFoundError(f"Neither tag version ({FILES['valid_title']}) nor default version ({default_path}) found. Please run qc_stats.py first.")
     df_valid_title = pd.read_parquet(valid_title_path, columns=["modelId", "all_title_list_valid"])
     print(f"[DEBUG] Loaded df_valid_title with shape: {df_valid_title.shape}")
     df = pd.read_parquet(FILES["step3_dedup"], columns=["modelId", "hugging_table_list_dedup", "github_table_list_dedup", "html_table_list_mapped_dedup", "llm_table_list_mapped_dedup"])
@@ -149,12 +115,12 @@ def build_title_model_matrix(df_titles_exploded):
     return csr_matrix((data, (rows, cols)), shape=(len(titles), len(modelIds))), titles.tolist(), modelIds.tolist()
 
 def build_paper_title_matrix(df_metadata, titles):
-    paperIds = df_metadata['corpusid'].dropna().unique()
+    paperIds = df_metadata['corpusId'].dropna().unique()
     title_pos = {title: i for i, title in enumerate(titles)}
     paper_pos = {pid: i for i, pid in enumerate(paperIds)}
     rows, cols = [], []
     for _, row in df_metadata.iterrows():
-        pid, title = row['corpusid'], row['query']
+        pid, title = row['corpusId'], row['query_title']
         if pd.notna(pid) and pd.notna(title) and title in title_pos:
             rows.append(paper_pos[pid])
             cols.append(title_pos[title])
@@ -165,7 +131,8 @@ def compute_subset_pt_tm(FILES):
     """
     Subset titles to only used ones, compute comb_sub full p x m.
     """
-    df_metadata = pd.read_parquet(FILES["integration"], columns=["corpusid", "query"])
+    df_metadata = pd.read_parquet(FILES["integration"], columns=["corpusId", "query_title"]).assign(corpusId=lambda x: x["corpusId"].astype(str).str.replace(".0", "", regex=False))
+
     df_titles = pd.read_parquet(FILES["title_list"], columns=["modelId", "all_title_list"])
     df_titles_exploded = df_titles.explode("all_title_list")
     tm_mat, titles_list, model_list = build_title_model_matrix(df_titles_exploded)
@@ -202,10 +169,11 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True, t
     print(f"  - First 3 paper_index IDs: {list(paper_index)[:3]}")
     print(f"  - First 3 paper_index ID types: {[type(x) for x in list(paper_index)[:3]]}")
 
-    title_df = pd.read_parquet(FILES["integration"], columns=["corpusid", "query"])
+    title_df = pd.read_parquet(FILES["integration"], columns=["corpusId", "query_title"]).assign(corpusId=lambda x: x["corpusId"].astype(str).str.replace(".0", "", regex=False))
+
     print(f"[DEBUG] Loaded title_df with shape: {title_df.shape}")
     cid2titles = defaultdict(list)
-    for cid, title in zip(title_df["corpusid"].astype(str), title_df["query"]):
+    for cid, title in zip(title_df["corpusId"], title_df["query_title"]):
         cid2titles[cid].append(title)
     print(f"[DEBUG] Built cid2titles with {len(cid2titles)} unique corpusids")
     print(f"[DEBUG] Sample of cid2titles (first 3 items): {dict(list(cid2titles.items())[:3])}")
@@ -377,10 +345,10 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True, t
         time1 = time.time()
         print('saving matrix and csv list')
         suffix = f"_{tag}" if tag else ""
-        matrix_path = f"{GT_DIR}/csv_pair_matrix_{rel_key}{suffix}.npz"
+        matrix_path = f"data/gt/csv_pair_matrix_{rel_key}{suffix}.npz"
         save_npz(matrix_path, M, compressed=True)
         print(f"✅ Sparse matrix saved to {matrix_path}")
-        csv_list_path = f"{GT_DIR}/csv_list_{rel_key}{suffix}.pkl"
+        csv_list_path = f"data/gt/csv_list_{rel_key}{suffix}.pkl"
         # all_csvs (set) get basename
         all_csvs = [os.path.basename(csv) for csv in all_csvs]
         with open(csv_list_path, "wb") as f:
@@ -395,16 +363,25 @@ if __name__ == "__main__":
     parser.add_argument("--rel_key", type=str, default='direct_label', help="Exact key inside combined pickle (e.g., 'max_pr', 'direct_label_influential').")
     parser.add_argument("--overlap_rate_threshold", type=float, default=0.0, help=("Numeric threshold for similarity/overlap matrices; ignored for 'direct_label*' keys."))
     parser.add_argument("--tag", dest="tag", default=None, help="Tag suffix for versioning (e.g., 251117). Enables versioning mode for input files.")
+    parser.add_argument("--v2_mode", dest="v2_mode", action="store_true", help="Use v2 mode.")
     args = parser.parse_args()
 
-    # Update file paths based on tag (no tag = v1 paths)
-    if args.tag:
-        update_files_with_tag(args.tag)
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
+
+    FILES = {
+        "combined": f"data/processed/modelcard_citation_all_matrices{suffix}.pkl.gz",
+        "integration": f"data/processed/s2orc_rerun{suffix}.parquet",
+        "title_list": f"data/processed/modelcard_all_title_list{suffix}.parquet",
+        "step3_dedup": f"data/processed/modelcard_step3_dedup{v2_suffix}{suffix}.parquet",
+        "valid_title": f"data/processed/all_title_list_valid{v2_suffix}{suffix}.parquet"
+    }
+
     # Always print paths in use so you can verify in the log
     print("📁 Paths in use:")
     print(f"   tag: {args.tag!r}")
     for key, path in FILES.items():
         print(f"   {key}: {path}")
-    print(f"   GT output directory: {GT_DIR}/")
+    print(f"   GT output directory: data/gt/")
 
     build_ground_truth(rel_key=args.rel_key, overlap_rate_threshold=args.overlap_rate_threshold, tag=args.tag)

@@ -13,8 +13,6 @@ import os
 from src.data_analysis.qc_stats import annotate_bars
 from src.utils import load_config
 
-OUTPUT_DIR = "data/analysis"
-
 RESOURCES = {
     'hugging': ['hugging_table_list_dedup'],
     'github': ['github_table_list_dedup'],
@@ -35,7 +33,7 @@ BASELINE_BENCHMARKS = [
     "GitTable", "WikiTables", "UGEN-V1", "UGEN-V2"
 ]
 
-def plot_metrics_grid(df, include_wdc=True, output_dir=None, suffix=""): 
+def plot_metrics_grid(df, include_wdc=True, suffix="", v2_suffix=""): 
     from matplotlib.patches import Patch
     import matplotlib.pyplot as plt
 
@@ -207,14 +205,8 @@ def plot_metrics_grid(df, include_wdc=True, output_dir=None, suffix=""):
             additional_colors.append(hex_color)
         legend_palette = legend_palette + additional_colors
     
-    handles_baseline = [
-        Patch(facecolor=legend_palette[i], label=name)
-        for i, name in enumerate(baseline_df['Benchmark'])
-    ]
-    handles_resource = [
-        Patch(facecolor=palette_resource[i], label=RESOURCE_LABELS[res])
-        for i, res in enumerate(resources)
-    ]
+    handles_baseline = [Patch(facecolor=legend_palette[i], label=name) for i, name in enumerate(baseline_df['Benchmark'])]
+    handles_resource = [Patch(facecolor=palette_resource[i], label=RESOURCE_LABELS[res]) for i, res in enumerate(resources)]
 
     # Create two separate legends in two rows to avoid overlap
     # Calculate number of columns for baseline legend (split into 2 rows)
@@ -244,61 +236,29 @@ def plot_metrics_grid(df, include_wdc=True, output_dir=None, suffix=""):
         frameon=True,
     )
 
-    # Use output_dir parameter or fallback to global OUTPUT_DIR
-    if output_dir is None:
-        output_dir = OUTPUT_DIR
-    
-    # Use tag as full suffix for output files (e.g. v2, v2_251117), matching qc_stats.py.
-    pdf_path = os.path.join(output_dir, f"benchmark_metrics_vertical{suffix}.pdf" if suffix else "benchmark_metrics_vertical.pdf")
-    png_path = os.path.join(output_dir, f"benchmark_metrics_vertical{suffix}.png" if suffix else "benchmark_metrics_vertical.png")
+    pdf_path = os.path.join('data', 'analysis', f"benchmark_metrics_vertical{v2_suffix}{suffix}.pdf")
+    png_path = os.path.join('data', 'analysis', f"benchmark_metrics_vertical{v2_suffix}{suffix}.png")
     
     # Use bbox_inches='tight' carefully - it may crop legends, so we set explicit bottom space
     plt.savefig(pdf_path, dpi=300, bbox_inches='tight', pad_inches=0.1)
     plt.savefig(png_path, dpi=300, bbox_inches='tight', pad_inches=0.1)
     plt.close()
     
-    print(f"Saved plot to {pdf_path}")
-    print(f"Saved plot to {png_path}")
+    print(f"Saved plot to {pdf_path} and {png_path}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot benchmark results for number of tables, columns, and average rows per table")
-    parser.add_argument(
-        '--tag',
-        dest='tag',
-        default=None,
-        help='Full suffix for versioning (e.g., v2 or v2_251117). Controls benchmark_results_<tag>.parquet and output filenames.',
-    )
-    parser.add_argument(
-        '--input',
-        dest='input',
-        default=None,
-        help='Path to benchmark_results parquet (default: benchmark_results[_<tag>].parquet in data/analysis).',
-    )
-    parser.add_argument(
-        '--output-dir',
-        dest='output_dir',
-        default=None,
-        help='Directory for output figures (default: data/analysis)',
-    )
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
-    base_path = config.get('base_path', 'data')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
-    
-    # Determine input/output paths based on tag
-    output_dir = args.output_dir or os.path.join(base_path, 'analysis')
-    os.makedirs(output_dir, exist_ok=True)
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     
     # Use tag as full suffix for benchmark_results (e.g. v2, v2_251117), matching qc_stats.py.
-    results_path = args.input or os.path.join(output_dir, f"benchmark_results{suffix}.parquet" if tag else "benchmark_results.parquet")
-    
-    print("📁 Paths in use:")
-    print(f"   Input results:        {results_path}")
-    print(f"   Output directory:     {output_dir}")
-    
+    results_path = os.path.join('data', 'analysis', f"benchmark_results{v2_suffix}{suffix}.parquet")
     results_df = pd.read_parquet(results_path)
     
     # Calculate average columns
@@ -341,4 +301,4 @@ if __name__ == "__main__":
     else:
         print("📊 Generating plot WITHOUT WDC data (WDC will be excluded)")
     
-    plot_metrics_grid(results_df, include_wdc=include_wdc_in_plot, output_dir=output_dir, suffix=suffix)
+    plot_metrics_grid(results_df, include_wdc=include_wdc_in_plot, suffix=suffix, v2_suffix=v2_suffix)

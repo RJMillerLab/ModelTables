@@ -20,11 +20,6 @@ import csv
 MAX_COLS = 100  # Maximum number of columns
 MAX_ROWS = 200  # Maximum number of rows
 
-# Default paths (CLI sets input parquets from --tag).
-PROCESSED_BASE_PATH = "data/processed"  # default base for resolving CSV paths to tag dirs; no need to pass around
-OUTPUT_DIR = "data/analysis"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-VALID_TITLE_PARQUET = "data/processed/all_title_list_valid.parquet"
 # ====== Skip generic CSV sets ======
 GENERIC_TABLE_PATTERNS = [
     "1910.09700_table",
@@ -73,7 +68,6 @@ def _infer_resource_from_path(path):
 def resolve_to_tagged_csv_path(path, tag):
     """
     Resolve a parquet path to the CSV under the tag-specific directory.
-    Uses PROCESSED_BASE_PATH (default data/processed) so we don't pass it around.
     - hugging/github/html: dirs deduped_hugging_csvs_<tag>, deduped_github_csvs_<tag>, tables_output_<tag>.
     - llm_tables is not versioned: path unchanged.
     """
@@ -87,7 +81,7 @@ def resolve_to_tagged_csv_path(path, tag):
         dir_name = "llm_tables"
     else:
         dir_name = {"hugging": "deduped_hugging_csvs", "github": "deduped_github_csvs", "html": "tables_output"}[res] + "_" + tag
-    target_dir = os.path.join(PROCESSED_BASE_PATH, dir_name)
+    target_dir = os.path.join('data', 'processed', dir_name)
     current_dir = os.path.dirname(path)
     if os.path.normpath(current_dir) == os.path.normpath(target_dir):
         return path
@@ -357,7 +351,7 @@ def compute_resource_stats(df, resource, tag=None):
     ]
     filtered_count = original_valid_count - len(valid_title_valid_files)
     if filtered_count > 0:
-        print(f"  Filtered {filtered_count} tables (too long/wide) from {resource}_valid_title_valid{suffix}.txt")
+        print(f"  Filtered {filtered_count} tables (too long/wide) from {resource}_valid_title_valid{v2_suffix}{suffix}.txt")
     
     title_valid_metrics = calculate_metrics(title_valid_files)
     valid_title_valid_metrics = calculate_metrics(valid_title_valid_files)
@@ -371,8 +365,8 @@ def compute_resource_stats(df, resource, tag=None):
     print(f"Found {len(valid_title_valid_paths_set)} valid titles in {resource} files")
     
     # save to txt files (with tag suffix if provided)
-    title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_title_valid{suffix}.txt")
-    valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid{suffix}.txt")
+    title_valid_file = os.path.join('data', 'analysis', f"{resource}_title_valid{v2_suffix}{suffix}.txt")
+    valid_title_valid_file = os.path.join('data', 'analysis', f"{resource}_valid_title_valid{v2_suffix}{suffix}.txt")
     with open(title_valid_file, 'w') as f:
         for path in title_valid_paths_set:
             f.write(f"{path}\n")
@@ -636,30 +630,25 @@ def plot_metric(df, metric, filename):
 
     # avoid using tight_layout()
     # avoid bbox_inches='tight'
-    plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300)
+    plt.savefig(os.path.join('data', 'analysis', filename), dpi=300)
     plt.close()
 
 
-def main(input_file, input_file_dedup, integration_file, tag):
-    # Update global OUTPUT_DIR and VALID_TITLE_PARQUET for use in other functions
-    global OUTPUT_DIR, VALID_TITLE_PARQUET
-    
+def main(input_file, input_file_dedup, query_file, suffix, v2_suffix):
     # Determine suffix for output files (use tag if provided)
-    suffix = f"_{tag}" if tag else ""
-    processed_base_path = os.path.dirname(VALID_TITLE_PARQUET) # "data/processed"
-    VALID_TITLE_PARQUET = os.path.join(processed_base_path, f"all_title_list_valid{suffix}.parquet")
+    VALID_TITLE_PARQUET = os.path.join('data', 'processed', f"all_title_list_valid{v2_suffix}{suffix}.parquet")
     
     df = pd.read_parquet(input_file, columns=['modelId', 'all_title_list'])
-    df_integration = pd.read_parquet(integration_file, columns=['query'])
+    df_integration = pd.read_parquet(query_file, columns=['query_title'])
+    # rename query_title to query
+    df_integration.rename(columns={'query_title': 'query'}, inplace=True)
     # read data/processed/modelcard_step3_dedup.parquet and get modelId and 4 resources keys
     df_dedup = pd.read_parquet(input_file_dedup, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'])
     # merge df and df_dedup by modelId
     df = df.merge(df_dedup, on='modelId', how='left')
 
     valid_titles = set(df_integration['query'].dropna().str.strip())
-    df['all_title_list_valid'] = df['all_title_list'].apply(
-        lambda x: [t for t in to_list_safe(x) if t in valid_titles] if is_list_like(x) else []
-    )
+    df['all_title_list_valid'] = df['all_title_list'].apply(lambda x: [t for t in to_list_safe(x) if t in valid_titles] if is_list_like(x) else [])
     df['has_title'] = df['all_title_list'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0)
     df['has_valid_title'] = df['all_title_list_valid'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0)
     
@@ -678,7 +667,7 @@ def main(input_file, input_file_dedup, integration_file, tag):
     results_df = create_combined_results(benchmark_data, resource_stats)
     
     # Use tag as full suffix for benchmark result file (e.g. v2, v2_251117).
-    results_path = os.path.join(OUTPUT_DIR, f"benchmark_results{suffix}.parquet" if suffix else "benchmark_results.parquet")
+    results_path = os.path.join('data', 'analysis', f"benchmark_results{v2_suffix}{suffix}.parquet")
     
     to_parquet(results_df, results_path)
     print(f"\nSaved results to {results_path}")
@@ -689,7 +678,7 @@ def main(input_file, input_file_dedup, integration_file, tag):
         combined_paths = set()
         for resource in RESOURCES:
             # Read from tag-specific file if tag is provided
-            valid_title_valid_file = os.path.join(OUTPUT_DIR, f"{resource}_valid_title_valid{suffix}.txt")
+            valid_title_valid_file = os.path.join('data', 'analysis', f"{resource}_valid_title_valid{v2_suffix}{suffix}.txt")
             if os.path.exists(valid_title_valid_file):
                 with open(valid_title_valid_file, 'r') as f:
                     for line in f:
@@ -697,58 +686,36 @@ def main(input_file, input_file_dedup, integration_file, tag):
                         if line:
                             combined_paths.add(line)
         
-        all_valid_title_valid_file = os.path.join(OUTPUT_DIR, f"all_valid_title_valid{suffix}.txt")
+        all_valid_title_valid_file = os.path.join('data', 'analysis', f"all_valid_title_valid{v2_suffix}{suffix}.txt")
         with open(all_valid_title_valid_file, 'w') as f:
             for path in sorted(combined_paths):
                 f.write(path + "\n")
         print(f"Saved concatenated valid-title list to {all_valid_title_valid_file} ({len(combined_paths)})")
         print(f"  (Tables already filtered by size thresholds: max_cols={MAX_COLS}, max_rows={MAX_ROWS})")
     except Exception as e:
-        print(f"Warning: failed to generate all_valid_title_valid{suffix}.txt: {e}")
+        print(f"Warning: failed to generate all_valid_title_valid{v2_suffix}{suffix}.txt: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Get statistics of tables in CSV files from different resources")
-    parser.add_argument(
-        '--tag',
-        dest='tag',
-        default=None,
-        help='Full suffix for versioning (e.g., v2 or v2_251117). Controls *_<tag>.parquet for inputs/outputs.',
-    )
-    parser.add_argument(
-        '--input',
-        dest='input',
-        default=None,
-        help='Path to modelcard_step3_merged parquet (default: modelcard_step3_merged[_<tag>].parquet)',
-    )
-    parser.add_argument(
-        '--input-dedup',
-        dest='input_dedup',
-        default=None,
-        help='Path to modelcard_step3_dedup parquet (default: modelcard_step3_dedup[_<tag>].parquet)',
-    )
-    parser.add_argument(
-        '--input-integration',
-        dest='input_integration',
-        default=None,
-        help='Path to final_integration_with_paths parquet (default: final_integration_with_paths[_<tag>].parquet)',
-    )
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')   
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
-    
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
+
+    os.makedirs("data/analysis", exist_ok=True)
+
     # Determine input/output paths based on tag (tag is full suffix like v2 or v2_251117; no hardcoded _v2).
-    input_file = args.input or os.path.join(processed_base_path, f"modelcard_step3_merged{suffix}.parquet")
-    input_file_dedup = args.input_dedup or os.path.join(processed_base_path, f"modelcard_step3_dedup{suffix}.parquet")
-    integration_file = args.input_integration or os.path.join(processed_base_path, f"final_integration_with_paths{suffix}.parquet")
+    input_file = os.path.join(base_path, 'processed', f"modelcard_step3_merged{v2_suffix}{suffix}.parquet")
+    input_file_dedup = os.path.join(base_path, 'processed', f"modelcard_step3_dedup{v2_suffix}{suffix}.parquet")
+    query_file = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
     
     print("📁 Paths in use:")
     print(f"   Input merged:        {input_file}")
     print(f"   Input dedup:          {input_file_dedup}")
-    print(f"   Input integration:    {integration_file}")
-    print(f"   Output directory:     {OUTPUT_DIR}")
+    print(f"   Input query:    {query_file}")
     
-    main(input_file=input_file, input_file_dedup=input_file_dedup, integration_file=integration_file, tag=tag)
+    main(input_file, input_file_dedup, query_file, suffix, v2_suffix)

@@ -16,9 +16,6 @@ from tqdm_joblib import tqdm_joblib
 from src.utils import to_parquet, sanitize_table_separators, load_config
 
 SOUP_PARSER = 'lxml'
-VERBOSE = False
-PROFILE = False
-
 
 def classify_page_from_soup(soup):
     meta_tags = soup.find_all('meta', attrs={'name': lambda x: x and x.lower().startswith('citation_')})
@@ -272,7 +269,6 @@ def main():
     print(f"📁 Output dir: {output_dir}")
     print(f"📁 DB path: {db_path}")
     print(f"📁 Results parquet: {results_parquet}")
-    global VERBOSE, PROFILE
     if not os.path.isdir(input_dir):
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
 
@@ -311,6 +307,23 @@ def main():
         df_final = df_final.drop_duplicates(subset=['paper_id'], keep='last')
     else:
         df_final = df_new
+
+    # Reverse coverage check: ensure parquet rows all correspond to existing HTML files
+    html_ids = {paper_id for _, paper_id in html_files}
+    if len(df_final) > 0:
+        df_final['paper_id'] = df_final['paper_id'].astype(str)
+        parquet_ids = set(df_final['paper_id'])
+        missing_in_parquet = sorted(html_ids - parquet_ids)
+        extra_in_parquet = sorted(parquet_ids - html_ids)
+
+        print(f"🔍 Reverse coverage check: {len(html_ids)} HTML ids, {len(parquet_ids)} parquet ids.")
+        print(f"HTML ids not in parquet (should be 0 after a full successful run): {len(missing_in_parquet)}")
+        print(f"Parquet paper_ids without existing HTML file: {len(extra_in_parquet)}")
+        if extra_in_parquet:
+            # Correct parquet by dropping entries whose HTML file no longer exists
+            df_final = df_final[df_final['paper_id'].isin(html_ids)].reset_index(drop=True)
+            print(f"🛠 Corrected parquet rows by removing {len(extra_in_parquet)} stale entries. New row count: {len(df_final)}")
+
     to_parquet(df_final, results_parquet)
     print(f"✅ Done. Saved {len(df_final)} results to {results_parquet}.")
 

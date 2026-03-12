@@ -284,11 +284,13 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Plot GT length distribution")
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
     
     GT_DIR = "data/gt"
     ROOT_DIR = "/Users/doradong/Repo"
     suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     PATHS = {
         "SANTOS Small": os.path.join(ROOT_DIR, "santos/groundtruth/santosUnionBenchmark.pickle"),
         "TUS Small":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_small_query_candidate.pkl"),
@@ -296,10 +298,10 @@ if __name__ == "__main__":
         "SANTOS Large": os.path.join(ROOT_DIR, "santos/groundtruth/real_tablesUnionBenchmark.pickle"),
         "UGEN-V1":      os.path.join(ROOT_DIR, "gen/evaluation/groundtruth/ugen_v1UnionBenchmark.pickle"),
         "UGEN-V2":      os.path.join(ROOT_DIR, "gen/evaluation/groundtruth/ugen_v2UnionBenchmark.pickle"),
-        "Paper Links":     os.path.join(GT_DIR, f"csv_pair_matrix_direct_label{suffix}.npz"),
-        "Model Links":     os.path.join(GT_DIR, f"scilake_gt_modellink_model_adj{suffix}_processed.npz"),
-        "Dataset Links":   os.path.join(GT_DIR, f"scilake_gt_modellink_dataset_adj{suffix}_processed.npz"),
-        "All Links":     os.path.join(GT_DIR, f"csv_pair_union_direct{suffix}_processed.npz"),
+        "Paper Links":     os.path.join(GT_DIR, f"csv_pair_matrix_direct_label{v2_suffix}{suffix}.npz"),
+        "Model Links":     os.path.join(GT_DIR, f"scilake_gt_modellink_model_adj{v2_suffix}{suffix}_processed.npz"),
+        "Dataset Links":   os.path.join(GT_DIR, f"scilake_gt_modellink_dataset_adj{v2_suffix}{suffix}_processed.npz"),
+        "All Links":     os.path.join(GT_DIR, f"csv_pair_union_direct{v2_suffix}{suffix}_processed.npz"),
         # "TUS Others":    os.path.join(ROOT_DIR, "santos/groundtruth/tusUnionBenchmark.pickle"),
         # "TUS Santos":    os.path.join(ROOT_DIR, "table-union-search-benchmark/tus_query_candidate.pkl"),
     }
@@ -316,7 +318,7 @@ if __name__ == "__main__":
     # plot_histogram(lengths, "GT Length (All Sources)", f"gt_all{suffix}")
     #plot_kde(lengths, "GT Length Distribution (All Sources)", f"gt_all{suffix}")
     #plot_log_boxplot(lengths, PALETTE, "Log-scale GT link count distribution across benchmarks", f"gt_boxplot{suffix}")
-    plot_violin(lengths, PALETTE, "Log-scale links count distribution across benchmarks", f"gt_violin{suffix}")
+    plot_violin(lengths, PALETTE, "Log-scale links count distribution across benchmarks", f"gt_violin{v2_suffix}{suffix}")
 
 """
 SANTOS Small: count=50, min=11, max=31

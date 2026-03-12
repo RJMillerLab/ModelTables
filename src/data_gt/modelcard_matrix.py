@@ -25,17 +25,10 @@ from collections import defaultdict
 from itertools import product
 from scipy.sparse import save_npz, coo_matrix
 
-DATA_PATH           = "data/processed/modelcard_step1.parquet"
-DATA_2_PATH         = "data/processed/modelcard_step3_dedup.parquet"
-DATA_3_PATH         = "data/processed/modelcard_step3_merged.parquet"
-CARD_TAGS_KEY       = "card_tags"
-CARD_README_KEY     = 'card_readme'
-
 os.makedirs('data/tmp', exist_ok=True)
 # ---------- fast regex helpers (no PyYAML) ---------- 
 _DS_INLINE_RE = re.compile(r'^datasets?\s*:\s*\[?([^\[\]\n]+)', re.I)
 _TAG_INLINE_RE = re.compile(r'^tags?\s*:\s*\[?([^\[\]\n]+)', re.I)
-
 
 def _split_csv(txt: str):                                       
     return [t.strip().lower() for t in re.split(r'[,\s]+', txt) if t]
@@ -80,30 +73,6 @@ def normalize_extracted(link: str):
     except requests.RequestException:
         pass                                                           
     return link.lower()
-
-def load_model_with_valid_table(data_path=None, data_2_path=None, data_3_path=None):
-    if data_path is None:
-        data_path = DATA_PATH
-    if data_2_path is None:
-        data_2_path = DATA_2_PATH
-    if data_3_path is None:
-        data_3_path = DATA_3_PATH
-    
-    df_full = pd.read_parquet(data_path, columns=['modelId', CARD_TAGS_KEY, CARD_README_KEY, 'downloads'])
-    df_full_2 = pd.read_parquet(data_2_path, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup']) #, 'all_title_list'
-    # this data 2 path don't have all title list, please load all title list from DATA_3_PATH, and get modelId and all_title_list, then merge this to df_full_2 please!
-    df_full_3 = pd.read_parquet(data_3_path, columns=['modelId', 'all_title_list'])
-    df_full_2 = pd.merge(df_full_2, df_full_3, on='modelId', how='left')
-    df_full_2['all_table_list_dedup'] = (
-        df_full_2['hugging_table_list_dedup'].apply(to_list_safe)
-        + df_full_2['github_table_list_dedup'].apply(to_list_safe)
-        + df_full_2['html_table_list_mapped_dedup'].apply(to_list_safe)
-        + df_full_2['llm_table_list_mapped_dedup'].apply(to_list_safe)
-    )
-    df = pd.merge(df_full, df_full_2[['modelId', 'all_table_list_dedup', 'all_title_list']], on='modelId', how='left')
-    mask = (df['all_table_list_dedup'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0) & df['all_title_list'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0))
-    df = df.loc[mask, ['modelId', 'all_table_list_dedup', 'all_title_list', CARD_TAGS_KEY, CARD_README_KEY, 'downloads']]
-    return df
 
 HF_ID_RE    = re.compile(r"([A-Za-z0-9\-_]+)/([A-Za-z0-9\-_\.]+)")
 #HF_Q_MODEL  = re.compile(r"[?&]model=([\w\-.\/]+)", re.I)
@@ -169,8 +138,8 @@ def extract_datasets_from_tags(tags_text: str, valid_datasets: set):
     return [d for d in ds if d in valid_datasets]
 
 def extract_basemodels_from_tags(df: pd.DataFrame):
-    #df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(r'base_model:\s*([^\s]+)', flags=re.IGNORECASE, expand=False)
-    df['extracted_base_model'] = df[CARD_TAGS_KEY].str.extract(r'base_model:\s*([^\s,>\]]+)', flags=re.IGNORECASE, expand=False)
+    #df['extracted_base_model'] = df['card_tags'].str.extract(r'base_model:\s*([^\s]+)', flags=re.IGNORECASE, expand=False)
+    df['extracted_base_model'] = df['card_tags'].str.extract(r'base_model:\s*([^\s,>\]]+)', flags=re.IGNORECASE, expand=False)
     #cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\(\)\{\}]'
     #cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\{\}]'
     cleanup_pattern = r'https?://huggingface\.co/|["\'`\[\]\{\}\)\>]+'
@@ -234,29 +203,20 @@ def extract_basemodels_from_tags(df: pd.DataFrame):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build full-model relation adjacency matrix from model card data")
-    parser.add_argument('--tag', dest='tag', default=None,
-                        help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for input files.')
-    parser.add_argument('--input-step1', dest='input_step1', default=None,
-                        help='Path to modelcard_step1 parquet (default: auto-detect from tag)')
-    parser.add_argument('--input-dedup', dest='input_dedup', default=None,
-                        help='Path to modelcard_step3_dedup parquet (default: auto-detect from tag)')
-    parser.add_argument('--input-merged', dest='input_merged', default=None,
-                        help='Path to modelcard_step3_merged parquet (default: auto-detect from tag)')
-    parser.add_argument('--output-related', dest='output_related', default=None,
-                        help='Path to modelcard_gt_related_model parquet (default: auto-detect from tag, or default path if no tag)')
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode for input files.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     base_path = config.get('base_path', 'data')
-    processed_base_path = os.path.join(base_path, 'processed')
-    tag = args.tag
-    suffix = f"_{tag}" if tag else ""
-    
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
+
     # Determine input paths based on tag
-    data_path = args.input_step1 or os.path.join(processed_base_path, f"modelcard_step1{suffix}.parquet")
-    data_2_path = args.input_dedup or os.path.join(processed_base_path, f"modelcard_step3_dedup{suffix}.parquet")
-    data_3_path = args.input_merged or os.path.join(processed_base_path, f"modelcard_step3_merged{suffix}.parquet")
-    output_related_path = args.output_related or (os.path.join(processed_base_path, f"modelcard_gt_related_model{suffix}.parquet") if tag else os.path.join(processed_base_path, "modelcard_gt_related_model.parquet"))
+    data_path = os.path.join(base_path, 'processed', f"modelcard_step1{suffix}.parquet")
+    data_2_path = os.path.join(base_path, 'processed', f"modelcard_step3_dedup{v2_suffix}{suffix}.parquet")
+    data_3_path = os.path.join(base_path, 'processed', f"modelcard_step3_merged{v2_suffix}{suffix}.parquet")
+    output_related_path = os.path.join(base_path, 'processed', f"modelcard_gt_related_model{v2_suffix}{suffix}.parquet")
     
     print("📁 Paths in use:")
     print(f"   Input step1:          {data_path}")
@@ -271,32 +231,31 @@ if __name__ == "__main__":
     # get all valid dataset IDs - use tag if provided
     # IMPORTANT: modelcard reads from modelcard, datasetcard reads from datasetcard - they are separate!
     # When date is provided, load_combined_data automatically loads from data/raw_<date> directory
-    if tag:
-        # Use tag to load from raw_<tag> directory
-        # load_combined_data will automatically construct the path from date parameter
-        try:
-            config = load_config('config.yaml')
-            base_path = config.get('base_path', 'data')
-        except:
-            base_path = 'data'
-        raw_base_path = os.path.dirname(base_path) if base_path.endswith('processed') else base_path
-        datasetcard_path = os.path.join(raw_base_path, 'raw')  # Base path, date will be used to construct full path
-        print(f"📁 Loading datasetcard with tag {tag} from: {os.path.join(raw_base_path, f'raw_{tag}')}")
-        valid_ds_df = load_combined_data(data_type="datasetcard", file_path=datasetcard_path, columns=["datasetId"], date=tag)
-    else:
-        # Fallback to default path (no date tag)
-        valid_ds_df = load_combined_data(
-            data_type="datasetcard",
-            file_path=os.path.expanduser("~/Repo/ModelTables/data/raw/"),
-            columns=["datasetId"],
-        )
+    config = load_config('config.yaml')
+    base_path = config.get('base_path', 'data')
+    valid_ds_df = load_combined_data(data_type="datasetcard", file_path=os.path.expanduser("~/Repo/ModelTables/data/raw/"), columns=["datasetId"], date=args.tag)
+
     valid_dataset_ids = set(valid_ds_df["datasetId"].str.lower())
     del valid_ds_df
     print(f"Loaded {len(valid_dataset_ids)} valid dataset IDs")
 
     # get df which contains modelId, card_tags, downloads and all_table_list_dedup
-    df = load_model_with_valid_table(data_path=data_path, data_2_path=data_2_path, data_3_path=data_3_path)
+    df_full = pd.read_parquet(data_path, columns=['modelId', 'card_tags', 'card_readme', 'downloads'])
+    df_full_2 = pd.read_parquet(data_2_path, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup']) #, 'all_title_list'
+    # this data 2 path don't have all title list, please load all title list from DATA_3_PATH, and get modelId and all_title_list, then merge this to df_full_2 please!
+    df_full_3 = pd.read_parquet(data_3_path, columns=['modelId', 'all_title_list'])
+    df_full_2 = pd.merge(df_full_2, df_full_3, on='modelId', how='left')
+    df_full_2['all_table_list_dedup'] = (
+        df_full_2['hugging_table_list_dedup'].apply(to_list_safe)
+        + df_full_2['github_table_list_dedup'].apply(to_list_safe)
+        + df_full_2['html_table_list_mapped_dedup'].apply(to_list_safe)
+        + df_full_2['llm_table_list_mapped_dedup'].apply(to_list_safe)
+    )
+    df = pd.merge(df_full, df_full_2[['modelId', 'all_table_list_dedup', 'all_title_list']], on='modelId', how='left')
+    mask = (df['all_table_list_dedup'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0) & df['all_title_list'].apply(lambda x: is_list_like(x) and len(to_list_safe(x)) > 0))
+    df = df.loc[mask, ['modelId', 'all_table_list_dedup', 'all_title_list', 'card_tags', 'card_readme', 'downloads']]
     print(f"Loaded {len(df)} rows with valid table list")
+
     # get all valid model IDs
     valid_model_ids= set(df['modelId'])
     # build repo->modelId map, sorted by downloads
@@ -310,16 +269,16 @@ if __name__ == "__main__":
     ########################################################################
     # 1 )  EXTRACT HF LINKS, BASE-MODEL, DATASET
     ########################################################################
-    #df["readme_modelid_list"]   = df[CARD_README_KEY].apply(lambda txt: extract_modelids_from_readme(txt, valid_model_ids))
-    df["readme_modelid_list"] = df[CARD_README_KEY].apply(
+    #df["readme_modelid_list"]   = df['card_readme'].apply(lambda txt: extract_modelids_from_readme(txt, valid_model_ids))
+    df["readme_modelid_list"] = df['card_readme'].apply(
         lambda txt: extract_modelids_from_readme(txt, valid_model_ids, repo_map)
     )
-    df["readme_datasetid_list"] = df[CARD_README_KEY].apply(lambda txt: extract_datasetids_from_readme(txt, valid_dataset_ids))
+    df["readme_datasetid_list"] = df['card_readme'].apply(lambda txt: extract_datasetids_from_readme(txt, valid_dataset_ids))
     print(f"Updated readme_modelid_list and readme_datasetid_list")
     df = extract_basemodels_from_tags(df)
     #df["tag_base_model_list"]
     print(f"Updated tag_base_model_list")
-    df["tag_dataset_list"]      = df[CARD_TAGS_KEY].apply(lambda txt: extract_datasets_from_tags(txt, valid_dataset_ids))
+    df["tag_dataset_list"]      = df['card_tags'].apply(lambda txt: extract_datasets_from_tags(txt, valid_dataset_ids))
     print(f"Updated tag_dataset_list")
     def to_list(x):
         if is_list_like(x):
@@ -441,10 +400,9 @@ if __name__ == "__main__":
     # (c) Print size after trimming
     print(f"[INFO] MODEL csv adjacency after trim: {M_model.shape[0]} items")
     # (d) Save trimmed matrix and updated CSV list
-    suffix = f"_{tag}" if tag else ""
-    save_npz(f'data/gt/scilake_gt_modellink_model_adj{suffix}.npz', M_model, compressed=True)
+    save_npz(f'data/gt/scilake_gt_modellink_model_adj{v2_suffix}{suffix}.npz', M_model, compressed=True)
     all_csvs_model = [os.path.basename(c) for c in all_csvs_model]
-    with open(f'data/gt/scilake_gt_modellink_model_adj_csv_list{suffix}.pkl','wb') as f:
+    with open(f'data/gt/scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}.pkl','wb') as f:
         pickle.dump(all_csvs_model, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"✔️ Saved MODEL-BASED CSV adjacency matrix ({M_model.nnz} edges) after trimming")
     '''
@@ -566,9 +524,8 @@ if __name__ == "__main__":
     # (c) Print size after trimming
     print(f"[INFO] DATASET csv adjacency after trim: {M_ds.shape[0]} items")
     # (d) Save trimmed matrix and updated CSV list
-    suffix = f"_{tag}" if tag else ""
-    save_npz(f'data/gt/scilake_gt_modellink_dataset_adj{suffix}.npz', M_ds, compressed=True)
+    save_npz(f'data/gt/scilake_gt_modellink_dataset_adj{v2_suffix}{suffix}.npz', M_ds, compressed=True)
     all_csvs_dataset = [os.path.basename(c) for c in all_csvs_dataset]
-    with open(f'data/gt/scilake_gt_modellink_dataset_adj_csv_list{suffix}.pkl','wb') as f:
+    with open(f'data/gt/scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}.pkl','wb') as f:
         pickle.dump(all_csvs_dataset, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"✔️ Saved DATASET-BASED CSV adjacency matrix ({M_ds.nnz} edges) after trimming")

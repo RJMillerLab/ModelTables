@@ -29,11 +29,13 @@ for key in "${REL_KEYS[@]}"; do
       --overlap_rate_threshold 0.0 \
       --rel_key "$key" \
       --tag "$TAG" \
+      --v2_mode \
       >> "$LOG" 2>&1
   else
     python -m src.data_gt.step3_gt \
       --overlap_rate_threshold 0.0 \
       --rel_key "$key" \
+      --v2_mode \
       >> "$LOG" 2>&1
   fi
   echo "" >> "$LOG"
