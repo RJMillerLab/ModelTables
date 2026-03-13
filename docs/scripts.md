@@ -35,9 +35,7 @@ This step extracts key metadata from model cards and associated links.
 python -m src.data_preprocess.step1_parse --raw-date 251117 > logs/step1_parse_251117.log 2>&1 # output: modelcard_step1_251117.parquet
 python -m src.data_preprocess.step1_down_giturl --tag 251117 --versioning --baseline-cache data/processed/github_readme_cache.parquet > logs/step1_down_giturl_251117.log 2>&1 # Download GitHub READMEs; Input: modelcard_step1_251117.parquet. Download: only new files to data/downloaded_github_readmes_251117/. Output: (1) dir data/downloaded_github_readmes_251117/, (2) github_readmes_info_251117.parquet, (3) github_readme_cache_251117.parquet. All saved paths in (2)(3) are unified as data/downloaded_github_readmes_251117/ (reused from baseline are not re-downloaded; run ln_giturl to symlink baseline into this dir).
 python -m src.data_preprocess.ln_giturl --source-dir data/downloaded_github_readmes --target-dir data/downloaded_github_readmes_251117 > logs/ln_giturl_251117.log 2>&1 # Symlink all .md from source into target; skip if name already in target. In case that we try to analyze github readmes folder in the future
-# (Optional) python -m src.data_preprocess.step1_down_giturl_fake > logs/step1_down_giturl_fake.log 2>&1 # if program has leakage but finished downloading, then re-run this code to save final parquet and cache files.
 # (Optional) find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' > logs/find_large_readmes.log 2>&1 # some readme files are too large, they are actually model files
-# (Optional) python -m src.data_analysis.query_giturl "data/downloaded_github_readmes/0a0c3d247213c087eb2472c3fe387292.md" --cache data/processed/github_readme_cache_251117.parquet > logs/query_giturl.log 2>&1 # Look up GitHub URL by local path
 ```
 
 ### 2\. Download and Build Database for Faster Querying
@@ -108,7 +106,7 @@ python -m src.data_preprocess.step2_arxiv_github_title --tag 251117 > logs/step2
 # Save deduplicated titles for querying Semantic Scholar (S2ORC). Cross-row dedup: same normalize. Output: modelcard_dedup_titles_<tag>.json, s2orc_cross_row_dedup_groups_<tag>.json
 python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_save_251117.log 2>&1
 
-# Optional / non-main pipeline scripts are documented in `docs/depre_scripts.md`.
+# non-main pipeline scripts are documented in `docs/depre_scripts.md`.
 <details>
 #### Option1:
 # save some searched results, only search the missing titles
@@ -137,7 +135,7 @@ python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117
 
 # Resolve title→arxiv_id. Init: s2orc + arxiv_titles_cache concat; then bibtex + OAI rescue; sync html_path from folder.
 # Input: s2orc_titles2ids_<tag>.parquet (query_title, retrieved_title), arxiv_titles_cache_<tag>.json (url→title, init only)
-#       bibtex_title_arxiv_<tag>.parquet (optional), title2arxiv_oai_index_<tag>.parquet (optional)
+#       bibtex_title_arxiv_<tag>.parquet, title2arxiv_oai_index_<tag>.parquet
 # Output: title2arxiv_cache_<tag>.parquet, final_missing_titles_from_cache_<tag>.txt
 python -m src.data_preprocess.arxiv_title2ids_oai --tag 251117 > logs/arxiv_title2ids_oai_251117_5.log 2>&1
 bash scripts/ln_arxiv_html.sh 251117  # ln data/arxiv_fulltext_html/*.html → data/arxiv_fulltext_html_<tag>/, save downloading
@@ -159,10 +157,10 @@ python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --tag 251117 --sa
 # Output: llm_markdown_table_results_v2_<tag>.parquet (optional: batch_input_v2_<tag>.jsonl/output_v2_<tag>.jsonl if running LLM)
 # Use --skip-llm to skip LLM entirely (merge only, empty llm_response_raw) when not updating LLM
 # (s2orc+LLM table source, deprecated) python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 --skip-llm --v2_mode > logs/step2_integration_s2orc_llm_251117.log 2>&1
-# (Optional) Check OpenAI batch job status (if using LLM for table processing)
+# Check OpenAI batch job status (if using LLM for table processing)
 # bash src/data_preprocess/openai_batchjob_status.sh > logs/openai_batchjob_status.log 2>&1
 
-# (Optional) If the sequence is wrong, reproduce from the log...
+# If the sequence is wrong, reproduce from the log...
 #python -m src.data_preprocess.quick_repro
 #cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results_v2_<tag>.parquet
 # Extract LLM-processed tables. Input: llm_markdown_table_results_v2_<tag>.parquet; Output: llm_tables_<tag>/*.csv, final_integration_with_paths_v2_<tag>.parquet
@@ -195,14 +193,9 @@ python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_
 python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_rerun_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt. Here we filter out over large tables (max_cols=100, max_rows=200)
 python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode --exclude_resources llm > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
 
-#(Optional) python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 
-# this one is without tag, as we don't run v1 with 251117 anymore.
-
-#(Optional) python -m src.tools.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 #(Optional) # compare v1 and v2 table diff
-# (Optional) Double-check deduplication and mapping logic.
-# python -m src.data_analysis.qc_dc > logs/qc_dc.log 2>&1
-# Obtain file counts directly from folders to verify against statistics.
-#(Optional) bash src/data_analysis/count_files.sh > logs/count_files.log 2>&1
+# python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 # this one is without tag, as we don't run v1 with 251117 anymore.
+# python -m src.data_analysis.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 # compare v1 and v2 table diff
+# python -m src.data_analysis.qc_dc > logs/qc_dc.log 2>&1 # Double-check deduplication and mapping logic.
 ```
 
 We could go for starmie searching and baselines searching. We need groundtruth for evaluation based on searched results and groundtruth results.
@@ -220,9 +213,8 @@ python -m src.data_analysis.paper_relatedness_distribution --tag 251117 > logs/p
 Generate the definitive ground truth files for evaluation.
 
 ```bash
-# (Depre) python -m src.data_gt.step3_create_symlinks --tag 251117 > logs/step3_create_symlinks_251117.log 2>&1  # Create symbolic links for organizing processed tables. Input: modelcard_step3_dedup_v2_<tag>.parquet. Output: modelcard_step4_v2_<tag>.parquet, sym_*_csvs_* (symbolic links)
 bash src/data_gt/step3_gt.sh 251117 > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_rerun_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
-# (Optional) python -m src.tools.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 # (Optional)
+# (Optional) python -m src.data_gt.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 
 # (Optional) python -m src.data_gt.debug_npz --gt-dir data/gt/ > logs/debug_npz.log 2>&1 # Debug NPZ ground truth files to ensure valid conditions.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).
 python -m src.data_localindexing.turn_tus_into_pickle > logs/turn_tus_into_pickle.log 2>&1
@@ -231,11 +223,7 @@ python -m src.data_gt.modelcard_matrix --tag 251117 --v2_mode > logs/modelcard_m
 python -m src.data_gt.merge_union --level direct --tag 251117 --v2_mode > logs/merge_union_v2_251117.log 2>&1  # Merge union ground truth. Input: data/gt/*_v2_<tag>.npz, *_v2_<tag>.pkl. Output: data/gt/csv_pair_union_*_v2_<tag>_processed.npz
 python -m src.data_analysis.gt_distri --tag 251117 --v2_mode > logs/gt_distri_251117.log 2>&1  # Plot GT length distribution (boxplot/violin). Input: data/gt/*_v2_<tag>.npz and *_v2_<tag>_processed.npz (requires merge_union first). Use same --tag as merge_union.
 python -m src.data_gt.nonzeroedge --gt_dir data/gt --tag 251117 --v2_mode > logs/nonzeroedge_v2_251117.log 2>&1  # Compute non-zero edge statistics for citation graphs. Input: data/gt/*_v2_<tag>.npz
-# (test)python -m src.data_gt.test_modelcard_update --mode dataset > logs/test_modelcard_update.log 2>&1 # check whether matrix multiplication and for loop obtain the same results
-#(test)python -m src.data_gt.convert_adj_to_npz --input data/gt/scilake_gt_modellink_dataset_adj_processed.pkl --output-prefix data/gt/scilake_gt_modellink_dataset > logs/convert_adj_to_npz.log 2>&1 # pkl2npz
 python -m src.data_gt.create_csvlist_variants --level direct --tag 251117 --v2_mode > logs/create_csvlist_variants_251117.log 2>&1  # Update CSV lists for various ground truth variants. Input: data/gt/*_v2_<tag>.pkl
-# (depreate) python -m src.data_gt.create_gt_variants data/gt/csv_pair_adj_overlap_rate_processed.pkl # produce _s, _t, _s_t for pkl files
-# (deprecate) python -m src.data_gt.print_relations_stats data/tmp/relations_all.pkl # print stats for matrix
 # (deprecate) python -m src.data_analysis.gt_fig # plot stats
 ```
 
@@ -245,24 +233,21 @@ Prepare data and augmentations for integration with the Starmie benchmark framew
 
 **Two main steps:**
 
+0. zip and transfer the data to the server
 1. **Create augmented table folders (tr/str)**: Generate transpose and string-augmented versions of tables
 2. **Create symlinks**: Link ModelTables tables to starmie_internal/data/scilake_final_<tag>/datalake
 
 ```bash
-# Step 1: Create augmented table folders (tr/str/str_tr)
-# This creates folders like: deduped_hugging_csvs_v2_251117_tr, deduped_hugging_csvs_v2_251117_str
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/trick_aug_tr_v2_251117.log 2>&1   # Create transpose augmented folders
-python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/trick_aug_str_v2_251117.log 2>&1  # Create string augmented folders
-# Or process all modes:
-#python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo --mode str_tr --tag v2_251117 > logs/trick_aug_str_tr_v2_251117.log 2>&1  # Create both str and tr augmented folders
+bash src/postprocess/zip_with_mask.sh 251117 # Step 0: zip with mask
+# Step 1: Create augmented table folders (tr/str) deduped_hugging_csvs_v2_251117_tr, deduped_hugging_csvs_v2_251117_str
+python -m src.data_symlink.trick_aug --repo_root /u501/z6dong/Repo/ModelTables/data/processed --mode tr --tag 251117 --v2_mode > logs/trick_aug_tr_v2_251117.log 2>&1   
+python -m src.data_symlink.trick_aug --repo_root /u501/z6dong/Repo/ModelTables/data/processed --mode str --tag 251117 --v2_mode > logs/trick_aug_str_v2_251117.log 2>&1  
 
-# Step 2: Create symlinks from ModelTables to starmie_internal
-# This creates symlinks in starmie_internal/data/scilake_final_<tag>/datalake
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  # Base mode
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  # Str mode
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1  # Tr mode
-# Or process all modes at once:
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode all --tag 251117 --v2_mode > logs/ln_scilake_all_251117.log 2>&1  # All modes (base, str, tr, tr_str)
+# Step 2: Create symlinks from ModelTables to starmie_internal/data/scilake_final_<tag>/datalake
+python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  
+python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  
+python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1 
+# Or process all modes at once: --mode all
 ```
 
 ### 6\. Run Updated Starmie Scripts
@@ -270,15 +255,9 @@ python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode all --t
 Execute Starmie's pipeline for contrastive learning, embedding extraction, and search
 
 ```bash
-# bash prepare_sample.sh > logs/prepare_sample.log 2>&1  # Sample 1000 tables from each resource folder for evaluation
-# python -m src.data_symlink.prepare_sample_server --root_dir /u501/z6dong/Repo --output scilake_final --output_file scilake_final_filelist.txt --limit 2000 --seed 42 > logs/prepare_sample_server.log 2>&1  # Alternative for server
-python -m src.data_symlink.prepare_sample --root_dir /u1/z6dong/Repo --output_file scilake_final_filelist.txt --limit 1000 --seed 42 > logs/prepare_sample.log 2>&1  # Another substitution
-# (deprecated) python -m src.data_symlink.prepare_sample_tricks --input_file scilake_final_filelist.txt > logs/prepare_sample_tricks.log 2>&1  # Create file lists for trick-augmented files (Input: scilake_final_filelist.txt, Output: scilake_final_filelist_{tricks}_filelist.txt)
-# (deprecated) python -m src.data_symlink.ln_scilake_final_link --filelist scilake_final_filelist.txt scilake_final_filelist_val.txt > logs/ln_scilake_final_link.log 2>&1  # Create validation file lists
-# bash check_empty.sh > logs/check_empty.log 2>&1  # (deprecate) (already processed in QC step) filter out empty files (or low quality files later)
+python -m src.data_symlink.prepare_sample --tag 251117 --v2_mode --root_dir /u501/z6dong/Repo --output_file data/analysis/scilake_final_filelist_v2_251117.txt --limit 1000 --seed 42 > logs/prepare_sample_v2_251117.log 2>&1
+# hands to starmie
 bash scripts/step1_pretrain.sh > logs/step1_pretrain.log 2>&1  # Fine-tune contrastive learning model
-
-# Using default v2 version (backward compatible)
 bash scripts/step2_extractvectors.sh > logs/step2_extractvectors_v2.log 2>&1  # Encode embeddings for query and datalake items
 bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search_v2.log 2>&1  # Perform data lake search (retrieval)
 bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_v2.log 2>&1  # Extract metrics based on ground truth and retrieval results; plot figures
@@ -291,17 +270,11 @@ TAG=251117 bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_2511
 TAG=251117 bash scripts/step3_processmetrics_all.sh <EXPERIMENT_INDEX> > logs/step3_processmetrics_all_251117.log 2>&1
 TAG=251117 bash eval_per_resource.sh > logs/eval_per_resource_251117.log 2>&1
 # bash eval_per_resource.sh  # (Alternatively, run before getting results)
-# bash scripts/step4_discovery.sh  # (Optional)
 ```
 
 ### 7\. Baseline: Dense Search, Sparse Search, Hybrid Search
 
 Run baseline table embedding and retrieval methods for comparison, for faiss cpu/gpu installation, see [FAISS GitHub repository](https://github.com/facebookresearch/faiss).
-
-**Tag Support**: All baseline scripts support `TAG` environment variable for versioning:
-- Use `TAG=251117` (or any date/tag) to use tagged versions of input/output files
-- All file paths automatically include the tag suffix when TAG is set
-- Example: `all_valid_title_valid.txt` → `all_valid_title_valid_251117.txt` when `TAG=251117`
 
 ```bash
 ### 1. Baseline1: Dense Search
@@ -389,6 +362,8 @@ python -m src.data_analysis.get_from --target html_table_list_mapped_dedup --sou
 python -m src.data_analysis.get_from --target readme_path --source csv_paths --value "64dc62e53f_table2.csv" >> logs/get_from.log 2>&1
 python -m src.data_analysis.get_from --target modelId --source hugging_table_list --value data/processed/deduped_hugging_csvs/021f09961f_table1.csv >> logs/get_from.log 2>&1
 python -m src.data_analysis.get_from --target modelId --source pdf_link --value https://arxiv.org/pdf/0803.1019 >> logs/get_from.log 2>&1
+# or 
+python -m src.postprocess.relational_parquet_strategies --tag 251117 --v2_mode > logs/relational_parquet_strategies_251117.log 2>&1  # 
 ```
 
 ```bash

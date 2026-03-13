@@ -394,18 +394,20 @@ class ParquetQueryHelper:
         import duckdb
         return duckdb.execute(sql_query).df()
 
-def main():
+def main(tag, v2_mode):
     """Example usage of relational parquet strategies"""
+
+    suffix = f"_{tag}" if tag else ""
+    v2_suffix = "_v2" if v2_mode else ""
     
     # Define table configurations based on your data
     table_configs = {
         'modelcard_core': {
             'description': 'Core model card information',
             'source_files': [
-                'data/processed/modelcard_step1.parquet',
-                'data/processed/modelcard_step2.parquet',
-                'data/processed/modelcard_step3_merged.parquet',
-                'data/processed/modelcard_step4.parquet'
+                f'data/processed/modelcard_step1{suffix}.parquet',
+                f'data/processed/modelcard_step2{suffix}.parquet',
+                f'data/processed/modelcard_step3_merged{v2_suffix}{suffix}.parquet'
             ]
         },
         'citations': {
@@ -414,26 +416,28 @@ def main():
                 'data/processed/modelcard_citation_enriched.parquet',
                 'data/processed/modelcard_citation_API.parquet',
                 'data/processed/extracted_annotations.parquet',
-                'data/processed/s2orc_citations_cache.parquet',
-                'data/processed/s2orc_references_cache.parquet'
+                f'data/processed/s2orc_citations_cache{suffix}.parquet',
+                f'data/processed/s2orc_references_cache{suffix}.parquet'
             ]
         },
         'tables': {
             'description': 'Table and CSV data',
             'source_files': [
-                'data/processed/llm_markdown_table_results.parquet',
-                'data/processed/html_table.parquet',
-                'data/processed/step_pdf_table.parquet',
-                'data/processed/step_tex_table.parquet'
+                f'data/processed/llm_markdown_table_results{suffix}.parquet',
+                #'data/processed/html_table.parquet',
+                #'data/processed/step_pdf_table.parquet',
+                #'data/processed/step_tex_table.parquet'
             ]
         },
         'metadata': {
             'description': 'Model metadata and titles',
             'source_files': [
-                'data/processed/modelcard_all_title_list.parquet',
-                'data/processed/all_title_list_valid.parquet',
+                f'data/processed/modelcard_all_title_list{suffix}.parquet',
+                f'data/processed/all_title_list_valid{v2_suffix}{suffix}.parquet',
                 #'data/processed/giturl_info.parquet',
-                'data/processed/github_readmes_info.parquet'
+                f'data/processed/github_readmes_info{suffix}.parquet',
+                f"data/processed/github_readme_cache{suffix}.parquet",
+                f"data/processed/github_readme_cache_update{suffix}.parquet",
             ]
         }
     }
@@ -480,4 +484,9 @@ def main():
     """)
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="Create relational parquet datasets")
+    parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
+    parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
+    args = parser.parse_args()
+    main(args.tag, args.v2_mode)

@@ -30,31 +30,29 @@ def main():
     parser.add_argument('--output_file', type=str, default='file_list.txt', help='Output file path')
     parser.add_argument('--limit', type=int, default=1000, help='Max files per subdir')
     parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
+    parser.add_argument('--tag', type=str, default=None, help='Tag suffix for versioning (e.g., 251117). If provided, uses tagged folders like deduped_hugging_csvs_v2_<tag>')
+    parser.add_argument('--v2_mode', action='store_true', help='Use v2 mode.')
 
     args = parser.parse_args()
 
+    v2_suffix = "_v2" if args.v2_mode else ""
+    suffix = f"_{args.tag}" if args.tag else ""
+
     # Subdirectories to scan
     subdirs = [
-        "ModelTables/data/processed/llm_tables",
-        "ModelTables/data/processed/deduped_github_csvs",
-        "ModelTables/data/processed/deduped_hugging_csvs",
-        "ModelTables/data/processed/tables_output"
+        #"llm_tables",
+        f"deduped_github_csvs{v2_suffix}{suffix}",
+        f"deduped_hugging_csvs{v2_suffix}{suffix}",
+        f"tables_output{v2_suffix}{suffix}"
     ]
 
-    #with open(args.output_file, 'w') as out_f:
-    # Derive validation output filename 
     val_output_file = args.output_file.replace('.txt', '_val.txt') 
     with open(args.output_file, 'w') as train_f, open(val_output_file, 'w') as val_f: 
         for subdir in subdirs:
-            abs_path = os.path.join(args.root_dir, subdir)
+            abs_path = os.path.join(args.root_dir, "ModelTables", "data", "processed", subdir)
             if not os.path.exists(abs_path):
                 print(f"Warning: {abs_path} does not exist. Skipping.")
                 continue
-            #sampled_files = collect_files_from_dir(abs_path, args.limit, args.seed)
-            #for fname in sampled_files:
-                #out_f.write(os.path.join(subdir, fname) + '\n')
-                #out_f.write(os.path.join(args.root_dir, subdir, fname) + '\n')  
-            #    out_f.write(fname + '\n')
             # Sample twice the limit and split into train/val 
             sampled_files = collect_files_from_dir(abs_path, args.limit * 2, args.seed)
             train_samples = sampled_files[:args.limit]

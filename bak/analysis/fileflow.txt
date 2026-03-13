@@ -1,241 +1,246 @@
-[P] sqlite/duckdb
+----------------------------------------
+0. Raw snapshot (optional first step)
+----------------------------------------
+[C] src.data_preprocess.download_hf_dataset --date <tag> --type modelcard/datasetcard
   ↓
-[C] src.data_preprocess.load_raw_to_db
+[P] data/raw_<tag>/ (train-*.parquet, datasetcard-train-*.parquet)
+
+----------------------------------------
+1. Parse and GitHub README
+----------------------------------------
+[P] Hugging Face snapshot parquet (or data/raw_<tag>)
   ↓
-[P] modelcard_step1.parquet
+[C] src.data_preprocess.step1_parse --raw-date <tag>
   ↓
-[C] src.data_preprocess.step1
-  ↓
-[P] giturl_info.parquet
+[P] data/processed/modelcard_step1_<tag>.parquet
   ↓
 [C] src.data_preprocess.step1_down_giturl
   ↓
-[P] downloaded_github_readmes/*
+[P] data/downloaded_github_readmes_<tag>/,
+    data/processed/github_readmes_info_<tag>.parquet,
+    data/processed/github_readme_cache_<tag>.parquet
   ↓
-[C] src.data_analysis.query_giturl
+[C] src.data_preprocess.ln_giturl
   ↓
-[P] github_readmes_info.parquet
-  ↓
-[C] src.data_preprocess.step2_hugging_github_extract
-  ↓
-[P] modelcard_step2.parquet
+[P] data/downloaded_github_readmes_<tag>/ (symlink baseline → new tag)
   ↓
 [C] src.data_preprocess.step2_git_md2text
   ↓
-[P] github_readmes_processed/
+[P] data/downloaded_github_readmes_<tag>_processed/,
+    data/processed/md_parsing_results_v2_<tag>.parquet
+  ↓
+[C] src.data_preprocess.step2_hugging_github_extract
+  ↓
+[P] data/processed/modelcard_step2_v2_<tag>.parquet,
+    data/processed/deduped_hugging_csvs_v2_<tag>/,
+    data/processed/deduped_github_csvs_v2_<tag>/,
+    data/processed/hugging_deduped_mapping_v2_<tag>.json,
+    data/processed/md_to_csv_mapping.json
   ↓
 [C] src.data_preprocess.step2_arxiv_github_title
   ↓
-[P] modelcard_all_title_list.parquet
+[P] data/processed/modelcard_all_title_list_<tag>.parquet,
+    data/processed/all_title_list_intra_row_dedup_groups_<tag>.json
   ↓
 [C] src.data_preprocess.step2_s2orc_save
   ↓
-[P] modelcard_dedup_titles.json
+[P] data/processed/modelcard_dedup_titles_<tag>.json,
+    data/processed/s2orc_cross_row_dedup_groups_<tag>.json
   ↓
-[C] src.data_preprocess.s2orc_API_query
+[C] src.data_preprocess.s2orc_title2ids_API
   ↓
-[P] s2orc_query_results.parquet
+[P] data/processed/s2orc_titles2ids_<tag>.parquet
   ↓
-[C] src.data_preprocess.s2orc_log_429
+[C] src.data_preprocess.s2orc_refcit_API
   ↓
-[C] src.data_preprocess.s2orc_retry_missing
+[P] data/processed/s2orc_citations_cache_<tag>.parquet,
+    data/processed/s2orc_references_cache_<tag>.parquet
   ↓
 [C] src.data_preprocess.s2orc_merge
   ↓
-[P] s2orc_rerun.parquet
+[P] data/processed/s2orc_rerun_<tag>.parquet
+
+----------------------------------------
+ArXiv branch (HTML tables)
+----------------------------------------
+[C] src.data_preprocess.arxiv_title2ids_oai
   ↓
-[C] src.data_localindexing.extract_full_records
+[P] data/processed/title2arxiv_cache_<tag>.parquet,
+    data/processed/final_missing_titles_from_cache_<tag>.txt
   ↓
-[P] full_hits.jsonl
+[C] scripts/ln_arxiv_html.sh
   ↓
-[C] src.data_localindexing.extract_full_records_to_merge
+[P] data/arxiv_fulltext_html_<tag> (symlink from data/arxiv_fulltext_html)
   ↓
-[P] s2orc_citations_cache.parquet
-[P] s2orc_references_cache.parquet
+[C] src.data_preprocess.arxiv_fulltext_api
   ↓
-[C] src.data_preprocess.s2orc_fulltext_local.sh
+[P] data/arxiv_fulltext_html_<tag>/*.html
   ↓
-[P] extracted_annotations.parquet
+[C] src.data_preprocess.step2_arxiv_parse_v2
   ↓
-[C] src.data_preprocess.step2_arxiv_get_html
+[P] data/processed/html_parsing_results_v2_<tag>.parquet,
+    data/processed/tables_output_v2_<tag>/*.csv
+
+----------------------------------------
+Merge tables at model level
+----------------------------------------
+[C] src.data_preprocess.step2_merge_tables_simplify
   ↓
-[P] arxiv_html_cache.json
-  ↓
-[C] src.data_preprocess.step2_arxiv_parse
-  ↓
-[P] html_table.parquet
-  ↓
-[C] src.data_preprocess.step2_integration_s2orc_llm
-  ↓
-[P] before_llm_output.parquet
-  ↓
-[C] src.data_preprocess.step2_llm_save
-  ↓
-[P] final_integration_with_paths.parquet
-  ↓
-[C] src.data_preprocess.step2_merge_tables
-  ↓
-[P] modelcard_step3_merged.parquet
-  ↓
-[C] src.data_gt.paper_citation_overlap
-  ↓
-[P] modelcard_rate/label.pickle
-  ↓
-[C] src.data_analysis.paper_relatedness_distribution
-  ↓
-[C] src.data_analysis.paper_relatedness_threshold
+[P] data/processed/modelcard_step3_merged_v2_<tag>.parquet
   ↓
 [C] src.data_preprocess.step2_dedup_tables
   ↓
-[P] modelcard_step3_dedup.parquet
-  ↓
+[P] data/processed/modelcard_step3_dedup_v2_<tag>.parquet,
+    data/processed/deduped_v2_<tag>/...
+
+----------------------------------------
+QC / statistics
+----------------------------------------
 [C] src.data_analysis.qc_dedup_fig
+  ↓
+[P] data/analysis/heatmap_overlap_v2_<tag>.pdf,
+    data/analysis/heatmap_percentage_v2_<tag>.pdf
   ↓
 [C] src.data_analysis.qc_stats
   ↓
-[P] benchmark_results
-  ↓
-[C] src.data_analysis.merge_wdc_data
+[P] data/processed/benchmark_results_v2_<tag>.parquet,
+    data/processed/all_title_list_valid_v2_<tag>.parquet,
+    data/analysis/all_valid_title_valid_v2_<tag>.txt
   ↓
 [C] src.data_analysis.qc_stats_fig
   ↓
-[C] src.data_analysis.count_files.sh
+[P] data/analysis/benchmark_metrics_vertical_v2_<tag>.pdf/.png
+
+----------------------------------------
+Citation-based ground truth
+----------------------------------------
+[C] src.data_gt.paper_citation_overlap
   ↓
-[C] src.data_gt.step3_create_symlinks
-  ↓
-[P] modelcard_step4 + sym_*_csvs_*
+[P] data/processed/modelcard_citation_all_matrices_<tag>.pkl.gz
   ↓
 [C] src.data_gt.step3_gt.sh
   ↓
-[P] data/gt/*
-  ↓
-[C] src.data_gt.debug_npz
+[P] data/gt/* (paper / model / dataset level GT npz/pkl)
   ↓
 [C] src.data_localindexing.turn_tus_into_pickle
   ↓
+[P] data/gt/sqlite-style GT pickles (if any)
+  ↓
 [C] src.data_gt.modelcard_matrix
   ↓
-[C] src.data_analysis.gt_distri
-  ↓
-[C] src.data_gt.nonzeroedge
-  ↓
-[C] src.data_gt.test_modelcard_update
-  ↓
-[C] src.data_gt.convert_adj_to_npz
+[P] data/processed/modelcard_gt_related_model_v2_<tag>.parquet,
+    data/gt/scilake_gt_modellink_*_v2_<tag>.npz
   ↓
 [C] src.data_gt.merge_union
   ↓
+[P] data/gt/csv_pair_union_*_v2_<tag>_processed.npz
+  ↓
+[C] src.data_analysis.gt_distri
+  ↓
+[P] data/analysis/gt_length_distribution_*.pdf
+  ↓
+[C] src.data_gt.nonzeroedge
+  ↓
+[P] non-zero edge stats for citation graphs
+  ↓
 [C] src.data_gt.create_csvlist_variants
   ↓
-[C] src.data_symlink.trick_aug (str / transpose / str_transpose)
+[P] data/gt/*_csvlist_*_v2_<tag>.pkl
+
+----------------------------------------
+Starmie integration (datalake + training)
+----------------------------------------
+[C] src/postprocess/zip_with_mask.sh <tag>
   ↓
-[C] src.data_symlink.ln_scilake (str / tr / tr_str / base)
+[P] zipped table dirs (for transfer to server)
   ↓
-[C] src.data_symlink.prepare_sample
+[C] src.data_symlink.trick_aug  (modes: tr / str / str_tr; --repo_root Repo or .../data/processed)
   ↓
-[P] scilake_final_filelist.txt
+[P] data/processed/deduped_hugging_csvs_v2_<tag>_{tr,str}/,
+    data/processed/deduped_github_csvs_v2_<tag>_{tr,str}/,
+    data/processed/tables_output_v2_<tag>_{tr,str}/
   ↓
-[C] src.data_symlink.prepare_sample_tricks
+[C] src.data_symlink.ln_scilake  (modes: base / str / tr / all; uses all_valid_title_valid_v2_<tag>.txt as mask)
   ↓
-[P] scilake_final_filelist_{tricks}_filelist.txt
+[P] starmie_internal/data/scilake_final_<tag>[_str/_tr]/datalake/*
   ↓
-[C] src.data_symlink.ln_scilake_final_link
+[C] src.data_symlink.prepare_sample (--root_dir, --output_file, --limit, --seed, --tag, --v2_mode)
   ↓
-[P] scilake_final_filelist_val.txt
+[P] scilake_final_filelist.txt, scilake_final_filelist_val.txt
+    (or data/analysis/scilake_final_filelist_v2_<tag>.txt + _val)
   ↓
 [C] scripts/step1_pretrain.sh
   ↓
+[P] contrastive model checkpoints
+  ↓
 [C] scripts/step2_extractvectors.sh
   ↓
-[C] scripts/step3_search_hnsw.sh
+[P] starmie_internal embeddings for query / datalake
   ↓
-[P] tmp/test_hnsw_search_scilake_large_full.json
+[C] scripts/step3_hnsw_search.sh
   ↓
-[C] scripts/step3_processmetrics.sh
+[P] tmp/test_hnsw_search_scilake_large_full.json (and variants)
   ↓
-[C] eval_per_resource.sh
+[C] scripts/step3_processmetrics.sh,
+    scripts/step3_processmetrics_all.sh,
+    eval_per_resource.sh
   ↓
-[C] src/baseline1/table_retrieval_pipeline.sh
-  ↓
-[C] src/baseline1/table_retrieval_pipeline_str.sh
-  ↓
-[C] src/baseline1/table_retrieval_pipeline_tr.sh
-  ↓
-[C] src/baseline1/combine_embedding.sh
-  ↓
-[C] src/baseline1/build_aug_faiss.sh
-  ↓
-[C] src/baseline1/augment_search.sh
-  ↓
-[C] src/baseline1/postprocess_general.sh
-  ↓
-[C] src/baseline1/standardize_filenames.sh
-  ↓
-[C] scripts/step3_processmetrics_all.sh
-  ↓
-[C] src/baseline2/get_metadata.sh
-  ↓
-[C] src/baseline2/sparse_search.sh
-  ↓
-[C] src/baseline2/hybrid_search.sh
-  ↓
-[C] src.data_analysis.report_generation
-  ↓
-[C] src.data_gt.check_pair_in_gt
-  ↓
-[C] count_unique_csvs.py
-  ↓
-[C] batch_process_tables.py
-  ↓
-[C] src.data_analysis.get_csvs_by_model
-  ↓
-[C] src.data_preprocess.step1_analysis
-  ↓
-[C] src.data_preprocess.query_compare_API_local
-  ↓
-[C] card_statistics.py
-  ↓
-[C] hf_models_analysis.py
-  ↓
-[C] src/modelsearch/pipeline_mc/build_corpus.py
-  ↓
-[P] output/baseline_mc/corpus.jsonl
-  ↓
-[C] src/modelsearch/pipeline_mc/encode_dense
-  ↓
-[P] output/baseline_mc/embeddings.npy
-  ↓
-[C] src/modelsearch/pipeline_mc/build_faiss.py
-  ↓
-[P] output/baseline_mc/faiss.index
-  ↓
-[C] src/modelsearch/pipeline_mc/sparse_search.py
-  ↓
-[P] output/baseline_mc/run.bm25.txt
-  ↓
-[C] src/modelsearch/pipeline_mc/dense_search.py
-  ↓
-[P] output/baseline_mc/run.dense.txt
-  ↓
-[C] src/modelsearch/pipeline_mc/hybrid_search.py
-  ↓
-[P] output/baseline_mc/run.hybrid.txt
-  ↓
-[C] src/modelsearch/pipeline_table2mc/build_table_corpus.py
-  ↓
-[C] src/modelsearch/pipeline_table2mc/encode_dense.py
-  ↓
-[C] src/modelsearch/pipeline_table2mc/build_faiss.py
-  ↓
-[C] src/modelsearch/pipeline_table2mc/sparse_search.py
-  ↓
-[C] src/modelsearch/pipeline_table2mc/dense_search.py
-  ↓
-[C] src/modelsearch/pipeline_table2mc/hybrid_search.py
-  ↓
-[C] tmp_list_parquet_schemas.py
-  ↓
-[C] complete_duplicate_analysis.py
-  ↓
-[C] duplicate_columns_analysis.py
+[P] evaluation metrics, per-resource metrics, figures
 
+----------------------------------------
+Baselines (dense / sparse / hybrid)
+----------------------------------------
+[C] src/baseline1/table_retrieval_pipeline_unified.sh  (base / str / tr)
+  ↓
+[P] baseline1 dense search runs, FAISS indices, jsonl results
+  ↓
+[C] src/baseline1/combine_embedding.sh,
+    src/baseline1/build_aug_faiss.sh,
+    src/baseline1/augment_search.sh,
+    src/baseline1/postprocess_general.sh,
+    src/baseline1/standardize_filenames.sh
+  ↓
+[P] augmented dense-search baselines (ori / tr / str / ori+tr / ori+str / ori+tr+str)
+  ↓
+[C] src/baseline2/get_metadata.sh,
+    src/baseline2/sparse_search.sh
+  ↓
+[P] sparse-search results (pyserini)
+  ↓
+[C] src/baseline2/search_with_pyserini_hybrid.py
+  ↓
+[P] hybrid search results (sparse + dense)
+
+----------------------------------------
+Post-analysis / figures
+----------------------------------------
+[C] src.data_analysis.table_model_counts_over_time
+  ↓
+[P] data/analysis/table_model_counts_over_time_<tag>.pdf/.png
+  ↓
+[C] src.data_analysis.card_statistics,
+    src.data_analysis.hf_models_analysis,
+    src.data_analysis.model_snapshot_overlap
+  ↓
+[P] card statistics & model snapshot comparison figures (e.g. hf_models_analysis.png, model_snapshot_overlap.png)
+  ↓
+[C] src.data_analysis.align_tables_output_versions,
+    src.data_analysis.compare_tables_by_content
+  ↓
+[P] alignment/comparison outputs (e.g. for tables_output v1 vs v2)
+  ↓
+[C] src.data_analysis.get_from (--target / --source / --value; uses logs/parquet_schema.log),
+    src.postprocess.relational_parquet_strategies (--tag, --v2_mode)
+  ↓
+[P] ad-hoc lookups across parquets; relational strategy outputs
+  ↓
+[C] src.data_analysis.valid_table_shapes,
+    src.data_analysis.table_usage_stats
+  ↓
+[P] valid_table_shapes_v2_<tag>.parquet,
+    table_usage_stats_v2_<tag>.parquet
+  ↓
+[C] src.data_analysis.filtered_gt_visualization,
+    src.data_analysis.quick_visualization_final
+  ↓
+[P] final visualization figures for paper

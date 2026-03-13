@@ -7,7 +7,7 @@ Description: This script processes CSV files in a specified folder using differe
 - "tr": Transposes the CSV data.
 - "str": Converts each cell to the string format "colname-value".
 - "str_tr": Converts each cell to "colname-value" and then transposes the data.
-Usage: python -m src.data_symlink.trick_aug --mode str --repo_root /u501/z6dong/Repo
+Usage: python -m src.data_symlink.trick_aug --mode str --repo_root /u501/z6dong/Repo/ModelTables/data/processed
 """
 
 import os
@@ -220,7 +220,7 @@ def main():
     # Parse command-line arguments to choose the processing mode
     parser = argparse.ArgumentParser(description="Process CSV files in different modes")
     parser.add_argument("--mode", type=str, choices=["tr", "str", "str_tr"], default="tr", help="Processing mode")
-    parser.add_argument("--repo_root", type=str, default="/u501/z6dong/Repo", help="Repository root directory.")
+    parser.add_argument("--repo_root", type=str, default="/u501/z6dong/Repo/ModelTables/data/processed", help="Repository root directory.")
     parser.add_argument("--tag", type=str, default=None, help="Version tag. With tag.")
     parser.add_argument("--v2_mode", action='store_true', help='Use v2 mode.')
     args = parser.parse_args()
@@ -228,10 +228,10 @@ def main():
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
     folders = [
-        f"ModelTables/data/processed/deduped_hugging_csvs{v2_suffix}{suffix}",
-        f"ModelTables/data/processed/deduped_github_csvs{v2_suffix}{suffix}",
-        f"ModelTables/data/processed/tables_output{v2_suffix}{suffix}",
-        "ModelTables/data/processed/llm_tables",
+        f"deduped_hugging_csvs{v2_suffix}{suffix}",
+        f"deduped_github_csvs{v2_suffix}{suffix}",
+        f"tables_output{v2_suffix}{suffix}",
+        #"llm_tables",
     ]
     for folder in folders:
         full_folder = os.path.join(args.repo_root, folder)
