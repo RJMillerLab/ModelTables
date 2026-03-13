@@ -32,18 +32,22 @@ def main() -> None:
     parser.add_argument("--v2_mode", action="store_true", help="Use v2 mode filenames (adds _v2).")
     parser.add_argument("--top_k", type=int, default=100, help="Top-K tables to print.")
     parser.add_argument("--top_models", type=int, default=3, help="Max number of example modelIds to attach per table (for inspection).")
+    parser.add_argument("--no_mask_generic", action="store_true", help="Do NOT filter out generic tables (default: filter them).")
     args = parser.parse_args()
 
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
     step3_path = os.path.join("data", "processed", f"modelcard_step3_dedup{v2_suffix}{suffix}.parquet")
 
+    mask_generic = not args.no_mask_generic
+
     con = duckdb.connect()
 
     where_generic = ""
     # filter out general tables
-    filters = " AND ".join([f"table_path NOT LIKE '%{p}%'" for p in GENERIC_TABLE_PATTERNS])
-    where_generic = f"AND {filters}"
+    if mask_generic:
+        filters = " AND ".join([f"table_path NOT LIKE '%{p}%'" for p in GENERIC_TABLE_PATTERNS])
+        where_generic = f"AND {filters}"
 
     # Unnest each list and union them. Count occurrences and distinct models per basename.
     query = f"""
@@ -106,25 +110,26 @@ def main() -> None:
     df["n_models"] = df["n_models"].astype("int64")
 
     # Optional mask: keep only table_basenames listed in all_valid_title_valid*.txt
-    mask_file = f"data/analysis/all_valid_title_valid{v2_suffix}{suffix}.txt"
-    if os.path.exists(mask_file):
-        print(f"Applying mask from: {mask_file}")
-        mask_basenames = set()
-        with open(mask_file, "r") as f:
-            for line in f:
-                p = line.strip()
-                if not p:
-                    continue
-                mask_basenames.add(os.path.basename(p))
-        before = len(df)
-        df = df[df["table_basename"].isin(mask_basenames)].reset_index(drop=True)
-        after = len(df)
-        filtered_out = before - after
-        missing_in_usage = len(mask_basenames - set(df["table_basename"]))
-        print(f"Masked tables: kept {after:,} / {before:,} basenames present in usage table (filtered out {filtered_out:,}).")
-        print(f"Mask coverage: {after:,} / {len(mask_basenames):,} basenames from mask appear in step3_dedup (missing {missing_in_usage:,}).")
-    else:
-        print(f"No mask file found at {mask_file}; using all tables in step3_dedup.")
+    if mask_generic:
+        mask_file = f"data/analysis/all_valid_title_valid{v2_suffix}{suffix}.txt"
+        if os.path.exists(mask_file):
+            print(f"Applying mask from: {mask_file}")
+            mask_basenames = set()
+            with open(mask_file, "r") as f:
+                for line in f:
+                    p = line.strip()
+                    if not p:
+                        continue
+                    mask_basenames.add(os.path.basename(p))
+            before = len(df)
+            df = df[df["table_basename"].isin(mask_basenames)].reset_index(drop=True)
+            after = len(df)
+            filtered_out = before - after
+            missing_in_usage = len(mask_basenames - set(df["table_basename"]))
+            print(f"Masked tables: kept {after:,} / {before:,} basenames present in usage table (filtered out {filtered_out:,}).")
+            print(f"Mask coverage: {after:,} / {len(mask_basenames):,} basenames from mask appear in step3_dedup (missing {missing_in_usage:,}).")
+        else:
+            print(f"No mask file found at {mask_file}; using all tables in step3_dedup.")
 
     # Enrich with example modelIds using shared mapping helper
     print("\nBuilding model/title maps for enrichment ...")
@@ -165,7 +170,10 @@ def main() -> None:
 
     # Also print Top-K by n_models (helpful when duplicates inflate occurrences).
     print("\nTop tables by distinct modelId count:")
-    print(df.sort_values(["n_models", "occurrences", "table_basename"], ascending=[False, False, True]).head(top_k).to_string(index=False))
+    # print all
+    #print(df.sort_values(["n_models", "occurrences", "table_basename"], ascending=[False, False, True]).head(top_k).to_string(index=False))
+    # print only table_basename and occurrences
+    print(df[["table_basename", "occurrences"]].sort_values(["occurrences"], ascending=[False]).to_string(index=False))
 
     out_parquet = os.path.join("data", "analysis", f"table_usage_stats{v2_suffix}{suffix}.parquet")
     to_parquet(df, out_parquet)

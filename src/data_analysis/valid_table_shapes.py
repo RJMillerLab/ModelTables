@@ -16,7 +16,7 @@ Outputs:
 
 import argparse
 import os
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import pandas as pd
 
@@ -64,10 +64,32 @@ def resolve_path(path: str) -> str:
     return os.path.abspath(path)
 
 
-def scan_table_shapes(list_file: str, output_parquet: str) -> None:
-    table_paths = load_table_list(list_file)
-    print(f"Total unique table paths in list: {len(table_paths):,}")
+def discover_tables_in_directories(directories: List[str]) -> List[str]:
+    """Recursively discover CSV tables under the given directories."""
+    all_paths: List[str] = []
+    for d in directories:
+        if not os.path.exists(d):
+            print(f"Warning: directory does not exist, skipping: {d}")
+            continue
+        for root, _, files in os.walk(d):
+            for fname in files:
+                if fname.lower().endswith(".csv"):
+                    all_paths.append(os.path.join(root, fname))
 
+    # Deduplicate while preserving order
+    seen = set()
+    uniq = []
+    for p in all_paths:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    print(f"Total unique table paths discovered from directories: {len(uniq):,}")
+    return uniq
+
+
+def scan_table_shapes(table_paths: List[str], output_parquet: str) -> None:
+    """Core scanner given an in-memory list of table paths."""
+    print(f"Total unique table paths to scan: {len(table_paths):,}")
     records: List[Tuple[str, str, str, int, int]] = []
     missing_paths: List[str] = []
     existing_count = 0
@@ -139,15 +161,35 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Scan table shapes (rows/cols) for tables listed in all_valid_title_valid*.txt")
     ap.add_argument('--tag', type=str, default=None, help="Tag suffix (e.g., 251117). Used for default list filename.")
     ap.add_argument('--v2_mode', action="store_true", help="Use v2 suffix in default list filename (i.e., all_valid_title_valid_v2{tag}.txt).")
+    ap.add_argument('--from-hugging', action="store_true", help="Instead of using all_valid_title_valid*.txt, scan directly from deduped_hugging_csvs[_v2]_<tag>.")
     args = ap.parse_args()
 
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
 
-    list_file = os.path.join("data", "analysis", f"all_valid_title_valid{v2_suffix}{suffix}.txt")
     output_parquet = os.path.join("data", "analysis", f"valid_table_shapes{v2_suffix}{suffix}.parquet")
-    print(f"Using list file: {list_file}")
-    scan_table_shapes(list_file, output_parquet)
+
+    if args.from_hugging:
+        base_dir = os.path.join("data", "processed", f"deduped_hugging_csvs{v2_suffix}{suffix}")
+        table_paths: List[str] = []
+        for root, _, files in os.walk(base_dir):
+            for fname in files:
+                if fname.lower().endswith(".csv"):
+                    table_paths.append(os.path.join(root, fname))
+        # Deduplicate while preserving order
+        seen = set()
+        uniq = []
+        for p in table_paths:
+            if p not in seen:
+                seen.add(p)
+                uniq.append(p)
+        print(f"Scanning from HuggingFace dir: {base_dir}")
+        scan_table_shapes(uniq, output_parquet)
+    else:
+        list_file = os.path.join("data", "analysis", f"all_valid_title_valid{v2_suffix}{suffix}.txt")
+        print(f"Using list file: {list_file}")
+        table_paths = load_table_list(list_file)
+        scan_table_shapes(table_paths, output_parquet)
 
 if __name__ == "__main__":
     main()

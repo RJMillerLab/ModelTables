@@ -364,28 +364,21 @@ def compute_resource_stats(df, resource, tag):
     print(f"Found {len(title_valid_paths_set)} valid titles in {resource} files")
     print(f"Found {len(valid_title_valid_paths_set)} valid titles in {resource} files")
     
-    # save to txt files (with tag suffix if provided)
-    title_valid_file = os.path.join('data', 'analysis', f"{resource}_title_valid{v2_suffix}{suffix}.txt")
-    valid_title_valid_file = os.path.join('data', 'analysis', f"{resource}_valid_title_valid{v2_suffix}{suffix}.txt")
-    with open(title_valid_file, 'w') as f:
-        for path in title_valid_paths_set:
-            f.write(f"{path}\n")
-    with open(valid_title_valid_file, 'w') as f:
-        for path in valid_title_valid_paths_set:
-            f.write(f"{path}\n")
-    print(f"Saved valid title list to {title_valid_file}")
-    print(f"Saved valid title list to {valid_title_valid_file}")
-
-    return {
-        f"{resource}-dup": dup_metrics,
-        f"{resource}-dedup": dedup_metrics,
-        f"{resource}-title_metrics": title_valid_metrics,
-        f"{resource}-valid_metrics": valid_title_valid_metrics,
-        #f"{resource}-title": title_count,
-        f"{resource}-title-dedup": title_count_dedup,
-        #f"{resource}-valid": valid_title_count,
-        f"{resource}-valid-dedup": valid_title_count_dedup
-    }
+    # Instead of writing per‑resource txt files, return the valid_title_valid path set
+    # so the caller can aggregate everything into a single all_valid_title_valid*.txt.
+    return (
+        {
+            f"{resource}-dup": dup_metrics,
+            f"{resource}-dedup": dedup_metrics,
+            f"{resource}-title_metrics": title_valid_metrics,
+            f"{resource}-valid_metrics": valid_title_valid_metrics,
+            #f"{resource}-title": title_count,
+            f"{resource}-title-dedup": title_count_dedup,
+            #f"{resource}-valid": valid_title_count,
+            f"{resource}-valid-dedup": valid_title_count_dedup
+        },
+        valid_title_valid_paths_set,
+    )
 
 def create_combined_results(benchmark_data, resource_stats):
     columns = ["Benchmark", "# Tables", "# Cols", "Avg # Rows", "Size (GB)"]
@@ -678,33 +671,21 @@ if __name__ == "__main__":
     del df_optimized
 
     resource_stats = {}
+    combined_paths = set()
     for resource in RESOURCES:
         print(f"\nProcessing {resource}...")
-        stats = compute_resource_stats(df, resource, tag=args.tag)
+        stats, valid_paths_set = compute_resource_stats(df, resource, tag=args.tag)
         resource_stats.update(stats)
+        combined_paths.update(valid_paths_set)
     results_df = create_combined_results(benchmark_data, resource_stats)
     results_path = os.path.join('data', 'analysis', f"benchmark_results{v2_suffix}{suffix}.parquet")
     to_parquet(results_df, results_path)
     print(f"\nSaved results to {results_path}")
     
-    # Concatenate per-resource valid-title lists into a global list
-    # Note: Tables are already filtered in compute_resource_stats, so no need to filter again here
-    try:
-        combined_paths = set()
-        for resource in RESOURCES:
-            # Read from tag-specific file if tag is provided
-            valid_title_valid_file = os.path.join('data', 'analysis', f"{resource}_valid_title_valid{v2_suffix}{suffix}.txt")
-            if os.path.exists(valid_title_valid_file):
-                with open(valid_title_valid_file, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            combined_paths.add(line)
-        all_valid_title_valid_file = os.path.join('data', 'analysis', f"all_valid_title_valid{v2_suffix}{suffix}.txt")
-        with open(all_valid_title_valid_file, 'w') as f:
-            for path in sorted(combined_paths):
-                f.write(path + "\n")
-        print(f"Saved concatenated valid-title list to {all_valid_title_valid_file} ({len(combined_paths)})")
-        print(f"  (Tables already filtered by size thresholds: max_cols={MAX_COLS}, max_rows={MAX_ROWS})")
-    except Exception as e:
-        print(f"Warning: failed to generate all_valid_title_valid{v2_suffix}{suffix}.txt: {e}")
+    # Write a single global valid‑title list (tables already filtered in compute_resource_stats)
+    all_valid_title_valid_file = os.path.join('data', 'analysis', f"all_valid_title_valid{v2_suffix}{suffix}.txt")
+    with open(all_valid_title_valid_file, 'w') as f:
+        for path in sorted(combined_paths):
+            f.write(path + "\n")
+    print(f"Saved concatenated valid-title list to {all_valid_title_valid_file} ({len(combined_paths)})")
+    print(f"  (Tables already filtered by size thresholds: max_cols={MAX_COLS}, max_rows={MAX_ROWS})")
