@@ -12,3 +12,4 @@ suitesparse-graphblass
 datasets
 pyarrow
 huggingface_hub
+matplotlib-venn

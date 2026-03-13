@@ -20,20 +20,13 @@ RESOURCES = {
     'llm': ['llm_table_list_mapped_dedup']
 }
 
-RESOURCE_LABELS = {
-    'hugging': 'ModelCard',
-    'github': 'GitHub',
-    'html': 'arXiv',
-    'llm': 'Semantic Scholar'
-}
-
 # Define benchmark names that should be treated as baseline (not scilake)
 BASELINE_BENCHMARKS = [
     "SANTOS Small", "TUS Small", "TUS Large", "SANTOS Large", "WDC",
     "GitTable", "WikiTables", "UGEN-V1", "UGEN-V2"
 ]
 
-def plot_metrics_grid(df, include_wdc=True, suffix="", v2_suffix=""): 
+def plot_metrics_grid(df, include_wdc=True, suffix="", v2_suffix="", exclude_resources=None): 
     from matplotlib.patches import Patch
     import matplotlib.pyplot as plt
 
@@ -51,12 +44,23 @@ def plot_metrics_grid(df, include_wdc=True, suffix="", v2_suffix=""):
         "#FFBE5F"   # Pale orange-yellow
     ]
     palette_resource = ["#486f90", "#4e8094", "#50a89d", "#a5d2bc"]
+    RESOURCE_LABELS = {
+        'hugging': 'ModelCard',
+        'github': 'GitHub',
+        'html': 'arXiv',
+        'llm': 'Semantic Scholar'
+    }
 
     bar_width = 0.12  # Reduced bar width for tighter spacing
     gap = 0.25  # Reduced gap between clusters for tighter layout
     # Order: base (scilake-{resource}) is last in each 4-bar block
-    clusters = ['Benchmarks', 'All', 'Title', 'Valid-title', 'Dedup']
-    resources = list(RESOURCES.keys())
+    clusters = ['Benchmarks', 'All', 'Dedup', 'Title', 'Valid-title']
+    exclude_resources = set(exclude_resources or [])
+    resources = [r for r in RESOURCES.keys() if r not in exclude_resources]
+    RESOURCE_LABELS = {r: RESOURCE_LABELS[r] for r in resources}
+    if not resources:
+        raise ValueError("No resources left to plot. Remove some values from --exclude_resources.")
+    palette_resource = palette_resource[: len(resources)]
 
     cluster_key_map = {
         'All': " (duplicated)",
@@ -252,11 +256,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot benchmark results for number of tables, columns, and average rows per table")
     parser.add_argument('--tag', dest='tag', default=None, help='Tag suffix for versioning (e.g., 251117). Enables versioning mode.')
     parser.add_argument('--v2_mode', dest='v2_mode', action='store_true', help='Use v2 mode.')
+    parser.add_argument(
+        '--exclude_resources',
+        nargs='*',
+        default=[],
+        choices=list(RESOURCES.keys()),
+        help="Resources to hide from the plot. Example: --exclude_resources llm (hides Semantic Scholar).",
+    )
     args = parser.parse_args()
     
     config = load_config('config.yaml')
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
+    exclude_resources = list(args.exclude_resources or [])
     
     # Use tag as full suffix for benchmark_results (e.g. v2, v2_251117), matching qc_stats.py.
     results_path = os.path.join('data', 'analysis', f"benchmark_results{v2_suffix}{suffix}.parquet")
@@ -302,4 +314,10 @@ if __name__ == "__main__":
     else:
         print("📊 Generating plot WITHOUT WDC data (WDC will be excluded)")
     
-    plot_metrics_grid(results_df, include_wdc=include_wdc_in_plot, suffix=suffix, v2_suffix=v2_suffix)
+    plot_metrics_grid(
+        results_df,
+        include_wdc=include_wdc_in_plot,
+        suffix=suffix,
+        v2_suffix=v2_suffix,
+        exclude_resources=exclude_resources,
+    )

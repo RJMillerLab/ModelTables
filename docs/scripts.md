@@ -192,7 +192,7 @@ Ensure data quality and consistency before generating final ground truth.
 python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/step2_dedup_tables_v2_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet, and others
 python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_v2_<tag>/dup_matrix_v2_<tag>.pkl, deduped_v2_<tag>/stats_v2_<tag>.json. Output: heatmaps heatmap_overlap_v2_<tag>.pdf / heatmap_percentage_v2_<tag>.pdf in data/analysis/
 python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_rerun_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt. Here we filter out over large tables (max_cols=100, max_rows=200)
-python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
+python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode --exclude_resources llm > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
 
 #(Optional) python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 
 # this one is without tag, as we don't run v1 with 251117 anymore.
@@ -372,8 +372,13 @@ python -m src.modelsearch.compare_baselines \
 python -m src.data_analysis.table_model_counts_over_time --tag 251117 --v2_mode > logs/table_model_counts_over_time_v2_251117.log 2>&1  # step3_dedup_<tag>.parquet, all_title_list_valid_<tag>.parquet, output table_model_counts_over_time_<tag>.pdf/png
 
 # step by step filtering img
-python -m src.data_analysis.card_statistics > logs/card_statistics.log 2>&1 # get statistics of model cards
-python -m src.data_analysis.hf_models_analysis > logs/hf_models_analysis.log 2>&1 # get statistics of models in Hugging Face
+python -m src.data_analysis.card_statistics --tag 251117 > logs/card_statistics_251117.log 2>&1 # get statistics of model cards
+python -m src.data_analysis.hf_models_analysis --tag 251117 --v2_mode > logs/hf_models_analysis_v2_251117.log 2>&1 # get statistics of models in Hugging Face: hf_models_analysis.png and hf_cross_analysis.png
+python -m src.data_analysis.model_snapshot_overlap > logs/model_snapshot_overlap_251117.log 2>&1 # compare modelId overlap between two fixed snapshots: V1 (no tag, no v2) vs V2 (tag 251117 + v2): data/analysis/model_snapshot_overlap.png
+
+python -m src.data_analysis.align_tables_output_versions --dir-a data/processed/tables_output --dir-b data/processed/tables_output_v2_251117 > logs/align_tables_output.log 2>&1  
+python -m src.data_analysis.compare_tables_by_content 2503.03556v1 > logs/compare_tables_by_content.log 2>&1 # compare tables by content for base id 2409.19581
+
 # after carefully examining
 python -m src.data_analysis.filtered_gt_visualization > logs/filtered_gt_visualization.log 2>&1
 python -m src.data_analysis.quick_visualization_final > logs/quick_visualization_final.log 2>&1
