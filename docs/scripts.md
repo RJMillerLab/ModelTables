@@ -243,10 +243,10 @@ bash src/postprocess/zip_with_mask.sh 251117 # Step 0: zip with mask
 python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo/ModelTables/data/processed --mode tr --tag 251117 --v2_mode > logs/trick_aug_tr_v2_251117.log 2>&1   
 python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo/ModelTables/data/processed --mode str --tag 251117 --v2_mode > logs/trick_aug_str_v2_251117.log 2>&1  
 # Step 2: Create symlinks from ModelTables to starmie_internal/data/scilake_final_<tag>/datalake
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  
-python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1 
-# Or process all modes at once: --mode all
+# python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  
+# python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  
+# python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1 
+python -m src.data_symlink.ln_scilake_new --repo_root /u1/z6dong/Repo --tag 251117 --v2_mode --n_jobs 32
 ```
 
 ### 6\. Run Updated Starmie Scripts
