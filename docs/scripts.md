@@ -246,7 +246,7 @@ python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo/ModelTables/dat
 # python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  
 # python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  
 # python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1 
-python -m src.data_symlink.ln_scilake_new --repo_root /u1/z6dong/Repo --tag 251117 --v2_mode --n_jobs 32
+python -m src.data_symlink.ln_scilake_new --repo_root /u1/z6dong/Repo --tag 251117 --v2_mode --n_jobs 32 > logs/ln_scilake_new_251117.log 2>&1
 ```
 
 ### 6\. Run Updated Starmie Scripts
