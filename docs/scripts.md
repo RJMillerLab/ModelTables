@@ -240,13 +240,12 @@ Prepare data and augmentations for integration with the Starmie benchmark framew
 ```bash
 bash src/postprocess/zip_with_mask.sh 251117 # Step 0: zip with mask
 # Step 1: Create augmented table folders (tr/str) deduped_hugging_csvs_v2_251117_tr, deduped_hugging_csvs_v2_251117_str
-python -m src.data_symlink.trick_aug --repo_root /u501/z6dong/Repo/ModelTables/data/processed --mode tr --tag 251117 --v2_mode > logs/trick_aug_tr_v2_251117.log 2>&1   
-python -m src.data_symlink.trick_aug --repo_root /u501/z6dong/Repo/ModelTables/data/processed --mode str --tag 251117 --v2_mode > logs/trick_aug_str_v2_251117.log 2>&1  
-
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo/ModelTables/data/processed --mode tr --tag 251117 --v2_mode > logs/trick_aug_tr_v2_251117.log 2>&1   
+python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo/ModelTables/data/processed --mode str --tag 251117 --v2_mode > logs/trick_aug_str_v2_251117.log 2>&1  
 # Step 2: Create symlinks from ModelTables to starmie_internal/data/scilake_final_<tag>/datalake
-python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  
-python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  
-python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1 
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  
+python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1 
 # Or process all modes at once: --mode all
 ```
 
@@ -255,7 +254,7 @@ python -m src.data_symlink.ln_scilake --repo_root /u501/z6dong/Repo --mode tr --
 Execute Starmie's pipeline for contrastive learning, embedding extraction, and search
 
 ```bash
-python -m src.data_symlink.prepare_sample --tag 251117 --v2_mode --root_dir /u501/z6dong/Repo --output_file data/analysis/scilake_final_filelist_v2_251117.txt --limit 1000 --seed 42 > logs/prepare_sample_v2_251117.log 2>&1
+python -m src.data_symlink.prepare_sample --tag 251117 --v2_mode --root_dir /u1/z6dong/Repo --output_file data/analysis/scilake_final_filelist_v2_251117.txt --limit 1000 --seed 42 > logs/prepare_sample_v2_251117.log 2>&1
 # hands to starmie
 bash scripts/step1_pretrain.sh > logs/step1_pretrain.log 2>&1  # Fine-tune contrastive learning model
 bash scripts/step2_extractvectors.sh > logs/step2_extractvectors_v2.log 2>&1  # Encode embeddings for query and datalake items

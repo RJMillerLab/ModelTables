@@ -37,6 +37,7 @@ MODE_SUFFIX = {
 def create_symlink(src, target_dir, cache, file_suffix=""):
     """
     Create a symlink for src in target_dir, appending file_suffix if not already present.
+    Target dir is symlinks only; overwrites existing (e.g. broken) links.
     """
     basename = os.path.basename(src)
     name, ext = os.path.splitext(basename)
@@ -159,7 +160,17 @@ def main():
             print(f"  {status}: {src}")
         
         os.makedirs(target_dir, exist_ok=True)
-        cache = {f for f in os.listdir(target_dir) if f.lower().endswith('.csv')}
+        # Only treat as "existing" if target exists (valid link or real file); broken symlinks will be re-linked.
+        # Cache = source basenames already present in target (map target name back using file_suffix).
+        cache = set()
+        for f in os.listdir(target_dir):
+            if not f.lower().endswith('.csv'):
+                continue
+            if not os.path.exists(os.path.join(target_dir, f)):
+                continue
+            name, ext = os.path.splitext(f)
+            base_name = name[:-len(file_suffix)] if file_suffix and name.endswith(file_suffix) else name
+            cache.add(base_name + ext)
 
         for src in src_folders:
             if not os.path.isdir(src):

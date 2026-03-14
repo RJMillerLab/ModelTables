@@ -26,6 +26,9 @@ prefix = "" #"_429"
 CITATION_URL_TEMPLATE = "https://api.semanticscholar.org/graph/v1/paper/{paper_id}/citations"  ######## Citation endpoint template
 REFERENCE_URL_TEMPLATE = "https://api.semanticscholar.org/graph/v1/paper/{paper_id}/references"  ######## Reference endpoint template
 
+# Semantic Scholar API cap: offset + limit must be < 10000. We use limit=100, so stop at offset 9900.
+S2ORC_CITATION_MAX_OFFSET = 9900
+
 
 load_dotenv()
 API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY")
@@ -54,6 +57,9 @@ def get_single_citations_row(paper_id, sleep_time=1.5, timeout=60, merge_key="co
     retries     = 0
 
     while True:
+        if offset >= S2ORC_CITATION_MAX_OFFSET:
+            print(f"⚠️ Citations cap reached for {id_for_cache} (offset {offset} >= {S2ORC_CITATION_MAX_OFFSET}), keeping {len(all_data)} items.")
+            break
         params = {
             "fields": "citingPaper.title,citingPaper.abstract,contexts,intents,isInfluential",
             "limit": limit,
@@ -80,6 +86,9 @@ def get_single_citations_row(paper_id, sleep_time=1.5, timeout=60, merge_key="co
                 print("❌ Exceeded max retries, skipping this paper")
                 break
 
+        if response.status_code == 400 and "10000" in (response.text or ""):
+            print(f"⚠️ API cap (offset+limit<10000) for {id_for_cache}, keeping {len(all_data)} citations.")
+            break
         if response.status_code != 200:
             print(f"❌ HTTP error {response.status_code} on citations query: {response.text}")
             return {}
@@ -118,6 +127,9 @@ def get_single_references_row(paper_id, sleep_time=1, timeout=60, merge_key="cor
     backoff     = sleep_time
     retries     = 0
     while True:
+        if offset >= S2ORC_CITATION_MAX_OFFSET:
+            print(f"⚠️ References cap reached for {id_for_cache} (offset {offset} >= {S2ORC_CITATION_MAX_OFFSET}), keeping {len(all_data)} items.")
+            break
         params = {
             "fields": "citedPaper.title,citedPaper.abstract,contexts,intents,isInfluential",
             "limit": limit,
@@ -141,9 +153,12 @@ def get_single_references_row(paper_id, sleep_time=1, timeout=60, merge_key="cor
                 retries += 1
                 continue
             else:
-                print("❌ Exceeded max retries, skipping this paper")        
+                print("❌ Exceeded max retries, skipping this paper")
                 break
 
+        if response.status_code == 400 and "10000" in (response.text or ""):
+            print(f"⚠️ API cap (offset+limit<10000) for {id_for_cache}, keeping {len(all_data)} references.")
+            break
         if response.status_code != 200:
             print(f"❌ HTTP error {response.status_code} on references query: {response.text}")
             return {}

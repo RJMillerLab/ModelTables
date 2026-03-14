@@ -1,6 +1,6 @@
 """
-Symlink all .md files from source_dir into target_dir. If a file with the same
-name already exists in target_dir, skip (keep the existing file).
+Symlink all .md files from source_dir into target_dir.
+If target is a symlink: force overwrite (replace). If target is a real file: skip.
 
 Usage:
   python -m src.data_preprocess.ln_giturl --source-dir data/downloaded_github_readmes --target-dir data/downloaded_github_readmes_251117
@@ -28,22 +28,24 @@ def main(source_dir: str, target_dir: str) -> None:
         if not os.path.isfile(src_path) and not os.path.islink(src_path):
             continue
         tgt_path = os.path.join(target_dir, name)
-        if os.path.lexists(tgt_path):
+        if os.path.lexists(tgt_path) and not os.path.islink(tgt_path):
             skipped += 1
             continue
         try:
+            if os.path.islink(tgt_path):
+                os.remove(tgt_path)
             os.symlink(src_path, tgt_path)
             linked += 1
         except OSError as e:
             print(f"Error linking {name}: {e}")
 
-    print(f"Symlinks created: {linked:,}")
-    print(f"Skipped (already in target): {skipped:,}")
+    print(f"Symlinks created/updated: {linked:,}")
+    print(f"Skipped (real file in target): {skipped:,}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Ln -s all .md from source_dir into target_dir; skip if name exists in target."
+        description="Symlink .md from source_dir into target_dir; overwrite symlinks only, skip real files."
     )
     parser.add_argument("--source-dir", required=True, help="Directory to link from (e.g. data/downloaded_github_readmes)")
     parser.add_argument("--target-dir", required=True, help="Directory to link into (e.g. data/downloaded_github_readmes_251117)")
