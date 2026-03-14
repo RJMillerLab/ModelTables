@@ -66,7 +66,7 @@ def main():
         os.makedirs(target_dir, exist_ok=True)
         print(f"\n=== mode {mode or 'base'} ===")
         src_paths = [build_src(line, args.repo_root, dir_suffix, file_suffix, suffix, v2_suffix) for line in base_lines]
-        base_basenames = [os.path.basename(line) for line in base_lines]
+        base_basenames = [os.path.basename(line).replace(".csv", file_suffix) for line in base_lines]
         jobs = (delayed(link_one)(src, target_dir, base_basename) for src, base_basename in zip(src_paths, base_basenames))
         results = Parallel(n_jobs=args.n_jobs, backend="threading")(tqdm(jobs, total=len(src_paths), desc=f"linking ({mode or 'base'})", unit="file"))
         linked = sum(results)
