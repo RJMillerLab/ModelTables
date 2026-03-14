@@ -11,6 +11,7 @@ Usage: python -m src.data_symlink.trick_aug --mode str --repo_root /u501/z6dong/
 """
 
 import os
+import io
 import csv
 from joblib import Parallel, delayed  # for parallel processing
 from tqdm import tqdm  # for progress bar display
@@ -25,6 +26,17 @@ def remove_suffixes(base_with_suffix):
         return base_with_suffix[:-2]
     else:
         return base_with_suffix
+
+def read_csv_rows(csv_in):
+    """
+    Read CSV file into list of rows. Replaces NUL bytes (\\x00) with space so that
+    csv.reader does not raise 'line contains NUL'. Use when source CSVs may be binary-dirty.
+    """
+    with open(csv_in, "rb") as f:
+        raw = f.read()
+    clean = raw.replace(b"\x00", b" ")
+    text = clean.decode("utf-8", errors="replace")
+    return list(csv.reader(io.StringIO(text)))
 
 def get_processed_bases(target_folder):
     """
@@ -48,8 +60,7 @@ def process_file_transpose(csv_in, csv_out):
     3. Transposes the CSV data.
     """
     try:
-        with open(csv_in, "r", newline="", encoding="utf-8") as f_in:
-            reader = list(csv.reader(f_in))
+        reader = read_csv_rows(csv_in)
     except Exception as e:
         return f"Error reading file {csv_in}: {e}"
     if not reader:
@@ -78,8 +89,7 @@ def process_file_str(csv_in, csv_out):
     without transposing the data.
     """
     try:
-        with open(csv_in, "r", newline="", encoding="utf-8") as f_in:
-            reader = list(csv.reader(f_in))
+        reader = read_csv_rows(csv_in)
     except Exception as e:
         return f"Error reading file {csv_in}: {e}"
     if not reader:
@@ -111,8 +121,7 @@ def process_file_str_transpose(csv_in, csv_out):
     Converts each cell to the "colname-value" format and then transposes the processed data.
     """
     try:
-        with open(csv_in, "r", newline="", encoding="utf-8") as f_in:
-            reader = list(csv.reader(f_in))
+        reader = read_csv_rows(csv_in)
     except Exception as e:
         return f"Error reading file {csv_in}: {e}"
     if not reader:
@@ -238,7 +247,7 @@ def main():
         print(f"\nProcessing folder: {full_folder} with mode {args.mode}")
         results = process_folder(args.mode, folder, args.repo_root)
         if isinstance(results, list):
-            for res in results:
+            for res in tqdm(results, desc="Output", leave=False):
                 print(res)
         else:
             print(results)
