@@ -118,6 +118,126 @@ def test_index(INTENTS, df):
             name = f"{mode}_{intent or 'overall'}_{'infl' if infl else 'norm'}"
             print(f"[DEBUG-LOAD] {name}: {len(d)} papers, total links = {total_links}, time = {time.time() - t} seconds")
 
+
+def parse_cit_papers(json_str, id_key = "citingcorpusid"):
+    """
+    Parse the input JSON string and extract cited paper details by intent.
+    
+    This function extracts lists of paper IDs and contexts for three intent types:
+      - "methodology"
+      - "background"
+      - "result"
+      
+    It also produces 'overall' lists that aggregate all cited papers with any intent.
+    
+    Returns:
+      tuple: (
+            method_ids, method_contexts,
+            background_ids, background_contexts,
+            result_ids, result_contexts,
+            overall_ids, overall_contexts
+      )
+    """
+    cit_key = "data" # "cited_papers" or "citing_papers"
+    method_ids = []
+    method_contexts = []
+    background_ids = []
+    background_contexts = []
+    result_ids = []
+    result_contexts = []
+    overall_ids = []
+    none_ids = []
+    
+    method_infl_ids = []
+    method_infl_ctxs = []
+    background_infl_ids = []
+    background_infl_ctxs = []
+    result_infl_ids = []
+    result_infl_ctxs = []
+    overall_infl_ids = []
+
+    if pd.isna(json_str) or not isinstance(json_str, str):
+        # Keep return signature consistent with the main return below:
+        # only *_ids lists, no contexts.
+        return (method_ids,
+                background_ids,
+                result_ids,
+                # method_contexts
+                # background_contexts
+                # result_contexts
+                overall_ids,
+                method_infl_ids,
+                background_infl_ids,
+                result_infl_ids,
+                # method_infl_ctxs
+                # background_infl_ctxs
+                # result_infl_ctxs
+                overall_infl_ids)
+    #try:
+    if True:
+        data = json.loads(json_str)
+        cit_papers = data[cit_key]
+        for item in cit_papers:
+            # Some records may miss the expected id_key; treat them as having no valid paper_id.
+            '''paper_id = item[id_key]
+            intents_nested = item["intents"]
+            contexts = item["contexts"]'''
+            paper_id = item.get(id_key)
+            intents_nested = item.get("intents")
+            contexts = item.get("contexts")
+            if paper_id is None or not intents_nested:
+                none_ids.append(paper_id)
+                overall_ids.append(paper_id)
+                #print(f"Missing paper_id or intents_nested or contexts: {item}")
+                continue
+            # Flatten: intents_nested = [['methodology'], ['result']] -> ['methodology', 'result']
+            intents_flat = [i for sub in intents_nested for i in (sub if isinstance(sub, list) else [sub])]
+
+            if len(intents_flat) == len(contexts):
+                pairs = zip(intents_flat, contexts)
+            else:
+                # fallback: align all intents with a combined context string
+                joined_context = " ".join(contexts)
+                pairs = zip(intents_flat, [joined_context] * len(intents_flat))
+            influential = item["isinfluential"]
+            for intent, ctx in pairs:
+                if intent == "methodology":
+                    method_ids.append(paper_id)
+                    method_contexts.append(ctx)
+                    if influential:
+                        method_infl_ids.append(paper_id)
+                        method_infl_ctxs.append(ctx)
+                elif intent == "background":
+                    background_ids.append(paper_id)
+                    background_contexts.append(ctx)
+                    if influential:
+                        background_infl_ids.append(paper_id)
+                        background_infl_ctxs.append(ctx)
+                elif intent == "result":
+                    result_ids.append(paper_id)
+                    result_contexts.append(ctx)
+                    if influential:
+                        result_infl_ids.append(paper_id)
+                        result_infl_ctxs.append(ctx)
+                elif intent in ["None", "none", None]:
+                    none_ids.append(paper_id)
+                else:
+                    raise ValueError(f"Unknown intent: {intent}")
+                # All intents contribute to overall
+                overall_ids.append(paper_id)
+                if influential:
+                    overall_infl_ids.append(paper_id)
+    # make them unique
+    method_ids        = list(dict.fromkeys(method_ids))
+    background_ids    = list(dict.fromkeys(background_ids))
+    result_ids        = list(dict.fromkeys(result_ids))          
+    overall_ids       = list(dict.fromkeys(overall_ids))         
+    method_infl_ids   = list(dict.fromkeys(method_infl_ids))     
+    background_infl_ids = list(dict.fromkeys(background_infl_ids)) 
+    result_infl_ids   = list(dict.fromkeys(result_infl_ids))     
+    overall_infl_ids  = list(dict.fromkeys(overall_infl_ids))    
+    return (method_ids, background_ids, result_ids, overall_ids, method_infl_ids, background_infl_ids, result_infl_ids, overall_infl_ids)
+
 def main(input_parquet, title2ids_parquet, combined_output_path, skip_threshold=True):
     t1 = time.time()
     # Load
@@ -142,7 +262,7 @@ def main(input_parquet, title2ids_parquet, combined_output_path, skip_threshold=
 
     t2 = time.time()
     # apply
-    from src.data_preprocess.s2orc_merge import parse_cit_papers
+    #from src.data_preprocess.s2orc_merge import parse_cit_papers
     ref_new_cols = df["original_response"].apply(
         lambda x: pd.Series(parse_cit_papers(x, id_key="citedcorpusid"), index=["ref_papers_methodology_ids", "ref_papers_background_ids", "ref_papers_result_ids", "ref_papers_overall_ids", "ref_papers_methodology_infl_ids", "ref_papers_background_infl_ids", "ref_papers_result_infl_ids", "ref_papers_overall_infl_ids"])
     )

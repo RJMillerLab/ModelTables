@@ -1,3 +1,234 @@
+---------------------------------------
+0. Raw snapshot (optional first step)
+---------------------------------------
+[C] python -m src.data_preprocess.download_hf_dataset --date <tag> --type modelcard/datasetcard
+  ↓
+[P] data/raw_<tag>/ (modelcards: train-*.parquet, datasetcards: datasetcard-train-*.parquet)
+
+---------------------------------------
+1. Parse model cards & GitHub READMEs
+---------------------------------------
+[P] data/raw_<tag>/
+  ↓
+[C] python -m src.data_preprocess.step1_parse --raw-date <tag>
+  ↓
+[P] data/processed/modelcard_step1_<tag>.parquet
+  ↓
+[C] python -m src.data_preprocess.step1_down_giturl --tag <tag> --versioning --baseline-cache data/processed/github_readme_cache.parquet
+  ↓
+[P] data/downloaded_github_readmes_<tag>/,
+    data/processed/github_readmes_info_<tag>.parquet,
+    data/processed/github_readme_cache_<tag>.parquet
+  ↓
+[C] python -m src.data_preprocess.ln_giturl --source-dir data/downloaded_github_readmes --target-dir data/downloaded_github_readmes_<tag>
+  ↓
+[C] python -m src.data_preprocess.step2_git_md2text --tag <tag>
+  ↓
+[P] data/downloaded_github_readmes_<tag>_processed/,
+    data/processed/md_parsing_results_v2_<tag>.parquet
+  ↓
+[C] python -m src.data_preprocess.step2_hugging_github_extract --tag <tag>
+  ↓
+[P] data/processed/modelcard_step2_v2_<tag>.parquet,
+    data/processed/deduped_hugging_csvs_v2_<tag>/,
+    data/processed/deduped_github_csvs_v2_<tag>/,
+    data/processed/hugging_deduped_mapping_v2_<tag>.json,
+    data/processed/md_to_csv_mapping.json
+  ↓
+[C] python -m src.data_preprocess.step2_arxiv_github_title --tag <tag>
+  ↓
+[P] data/processed/modelcard_all_title_list_<tag>.parquet,
+    data/processed/all_title_list_intra_row_dedup_groups_<tag>.json
+  ↓
+[C] python -m src.data_preprocess.step2_s2orc_save --tag <tag>
+  ↓
+[P] data/processed/modelcard_dedup_titles_<tag>.json,
+    data/processed/s2orc_cross_row_dedup_groups_<tag>.json
+  ↓
+[C] python -m src.data_preprocess.s2orc_title2ids_API --tag <tag>
+  ↓
+[P] data/processed/s2orc_titles2ids_<tag>.parquet
+  ↓
+[C] python -m src.data_preprocess.s2orc_refcit_API --tag <tag>
+  ↓
+[P] data/processed/s2orc_references_cache_<tag>.parquet
+
+---------------------------------------
+ArXiv branch (HTML tables)
+---------------------------------------
+[C] python -m src.data_preprocess.arxiv_title2ids_oai --tag <tag>
+  ↓
+[P] data/processed/title2arxiv_cache_<tag>.parquet,
+    data/processed/final_missing_titles_from_cache_<tag>.txt
+  ↓
+[C] bash scripts/ln_arxiv_html.sh <tag>
+  ↓
+[P] data/arxiv_fulltext_html_<tag>/ (symlink to shared HTML)
+  ↓
+[C] python -m src.data_preprocess.arxiv_fulltext_api --tag <tag>
+  ↓
+[P] data/arxiv_fulltext_html_<tag>/*.html
+  ↓
+[C] python -m src.data_preprocess.step2_arxiv_parse_v2 --tag <tag> --n_jobs 16 --save_mode csv
+  ↓
+[P] data/processed/html_parsing_results_v2_<tag>.parquet,
+    data/processed/tables_output_v2_<tag>/*.csv
+
+---------------------------------------
+Merge tables at model level
+---------------------------------------
+[C] python -m src.data_preprocess.step2_merge_tables_simplify --tag <tag> --v2_mode
+  ↓
+[P] data/processed/modelcard_step3_merged_v2_<tag>.parquet
+  ↓
+[C] python -m src.data_preprocess.step2_dedup_tables --tag <tag> --v2_mode
+  ↓
+[P] data/processed/modelcard_step3_dedup_v2_<tag>.parquet,
+    data/processed/deduped_v2_<tag>/...
+
+---------------------------------------
+QC / statistics
+---------------------------------------
+[C] python -m src.data_analysis.qc_dedup_fig --tag <tag> --v2_mode
+  ↓
+[P] data/analysis/heatmap_overlap_v2_<tag>.pdf,
+    data/analysis/heatmap_percentage_v2_<tag>.pdf
+  ↓
+[C] python -m src.data_analysis.qc_stats --tag <tag> --v2_mode
+  ↓
+[P] data/processed/benchmark_results_v2_<tag>.parquet,
+    data/processed/all_title_list_valid_v2_<tag>.parquet,
+    data/processed/all_valid_title_valid_v2_<tag>.txt
+  ↓
+[C] python -m src.data_analysis.qc_stats_fig --tag <tag> --v2_mode --exclude_resources llm
+  ↓
+[P] data/analysis/benchmark_metrics_vertical_v2_<tag>.pdf/.png
+
+---------------------------------------
+Citation-based ground truth
+---------------------------------------
+[C] python -m src.data_gt.paper_citation_overlap --tag <tag>
+  ↓
+[P] data/processed/modelcard_citation_all_matrices_<tag>.pkl.gz
+  ↓
+[C] bash src/data_gt/step3_gt.sh <tag>
+  ↓
+[P] data/gt/* (paper / model / dataset level GT npz/pkl)
+  ↓
+[C] python -m src.data_localindexing.turn_tus_into_pickle
+  ↓
+[P] data/gt/sqlite-style GT pickles (if any)
+  ↓
+[C] python -m src.data_gt.modelcard_matrix --tag <tag> --v2_mode
+  ↓
+[P] data/processed/modelcard_gt_related_model_v2_<tag>.parquet,
+    data/gt/scilake_gt_modellink_*_v2_<tag>.npz
+  ↓
+[C] python -m src.data_gt.merge_union --level direct --tag <tag> --v2_mode
+  ↓
+[P] data/gt/csv_pair_union_*_v2_<tag>_processed.npz
+  ↓
+[C] python -m src.data_analysis.gt_distri --tag <tag> --v2_mode
+  ↓
+[P] data/analysis/gt_length_distribution_*.pdf
+  ↓
+[C] python -m src.data_gt.nonzeroedge --gt_dir data/gt --tag <tag> --v2_mode
+  ↓
+[P] non-zero edge stats for citation graphs
+  ↓
+[C] python -m src.data_gt.create_csvlist_variants --level direct --tag <tag> --v2_mode
+  ↓
+[P] data/gt/*_csvlist_*_v2_<tag>.pkl
+
+---------------------------------------
+Starmie integration (datalake + training)
+---------------------------------------
+[C] bash src/postprocess/zip_with_mask.sh <tag>
+  ↓
+[P] zipped table dirs (for transfer to server)
+  ↓
+[C] python -m src.data_symlink.trick_aug --repo_root <REPO_ROOT>/data/processed --mode tr/str --tag <tag> --v2_mode
+  ↓
+[P] data/processed/deduped_hugging_csvs_v2_<tag>_{tr,str}/,
+    data/processed/deduped_github_csvs_v2_<tag>_{tr,str}/,
+    data/processed/tables_output_v2_<tag>_{tr,str}/
+  ↓
+[C] python -m src.data_symlink.ln_scilake_new --repo_root <REPO_ROOT> --tag <tag> --v2_mode --n_jobs 32
+  ↓
+[P] starmie_internal/data/scilake_final_<tag>[_str/_tr]/datalake/*
+  ↓
+[C] python -m src.data_symlink.prepare_sample --tag <tag> --v2_mode --root_dir <REPO_ROOT> --output_file data/analysis/scilake_final_filelist_v2_<tag>.txt --limit 1000 --seed 42
+  ↓
+[P] scilake_final_filelist_v2_<tag>.txt (train/val samples for pretraining)
+  ↓
+[C] bash scripts/step1_pretrain.sh
+    bash scripts/step2_extractvectors.sh
+    bash scripts/step3_hnsw_search.sh
+    bash scripts/step3_processmetrics.sh
+    bash scripts/step3_processmetrics_all.sh
+    bash eval_per_resource.sh
+  ↓
+[P] contrastive checkpoints, embeddings, search results, evaluation metrics
+
+---------------------------------------
+Baselines (dense / sparse / hybrid)
+---------------------------------------
+[C] TAG=<tag> bash src/baseline1/table_retrieval_pipeline_unified.sh base/str/tr
+  ↓
+[P] baseline1 dense search runs, FAISS indices, jsonl results
+  ↓
+[C] TAG=<tag> bash src/baseline1/combine_embedding.sh
+    TAG=<tag> bash src/baseline1/build_aug_faiss.sh
+    TAG=<tag> bash src/baseline1/augment_search.sh
+    TAG=<tag> bash src/baseline1/postprocess_general.sh
+    TAG=<tag> bash src/baseline1/standardize_filenames.sh
+  ↓
+[P] augmented dense-search baselines (ori / tr / str / ori+tr / ori+str / ori+tr+str)
+  ↓
+[C] TAG=<tag> bash src/baseline2/get_metadata.sh
+    TAG=<tag> bash src/baseline2/sparse_search.sh
+  ↓
+[P] sparse-search results (pyserini)
+  ↓
+[C] TAG=<tag> python src/baseline2/search_with_pyserini_hybrid.py ...
+  ↓
+[P] hybrid search results (sparse + dense)
+
+---------------------------------------
+Post-analysis / figures
+---------------------------------------
+[C] python -m src.data_analysis.table_model_counts_over_time --tag <tag> --v2_mode
+  ↓
+[P] data/analysis/table_model_counts_over_time_v2_<tag>.pdf/.png
+  ↓
+[C] python -m src.data_analysis.card_statistics --tag <tag>
+  ↓
+[P] card statistics parquet/figures
+  ↓
+[C] python -m src.data_analysis.hf_models_analysis --tag <tag> --v2_mode
+  ↓
+[P] hf_models_analysis_v2_<tag>.png, hf_cross_analysis_v2_<tag>.png
+  ↓
+[C] python -m src.data_analysis.model_snapshot_overlap
+  ↓
+[P] data/analysis/model_snapshot_overlap.png
+  ↓
+[C] python -m src.data_analysis.align_tables_output_versions
+    python -m src.data_analysis.compare_tables_by_content
+  ↓
+[P] alignment/comparison outputs for tables_output v1 vs v2
+  ↓
+[C] python -m src.data_analysis.valid_table_shapes
+    python -m src.data_analysis.table_usage_stats
+  ↓
+[P] valid_table_shapes_v2_<tag>.parquet,
+    table_usage_stats_v2_<tag>.parquet
+  ↓
+[C] python -m src.data_analysis.filtered_gt_visualization
+    python -m src.data_analysis.quick_visualization_final
+  ↓
+[P] final visualization figures for paper
+
 ----------------------------------------
 0. Raw snapshot (optional first step)
 ----------------------------------------

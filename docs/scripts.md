@@ -38,46 +38,6 @@ python -m src.data_preprocess.ln_giturl --source-dir data/downloaded_github_read
 # (Optional) find data/downloaded_github_readmes -type f -exec stat -f "%z %N" {} + | sort -nr | head -n 50 | awk '{printf "%.2f MB %s\n", $1/1024/1024, $2}' > logs/find_large_readmes.log 2>&1 # some readme files are too large, they are actually model files
 ```
 
-### 2\. Download and Build Database for Faster Querying
-
-This step sets up local databases for efficient querying of Semantic Scholar data.
-
-I don't update this section anymore, as the semantic scholar dataset is too large to maintain.
-
-<details>
-<summary>Click to expand database setup commands</summary>
-
-```bash
-# TODO: add command from privatecommonscript to here, for downloading the semantic scholar here
-# Requirement: cd to the path of downloaded dataset, e.g.: cd ~/shared_data/se_s2orc_250218
-python -m src.data_localindexing.build_mini_s2orc build --directory /u501/z6dong/shared_data/se_s2orc_250218/ # After downloading semantic scholar dataset, build database based on it.
-python -m src.data_localindexing.build_mini_s2orc query --title "BioMANIA: Simplifying bioinformatics data analysis through conversation" --directory /u501/z6dong/shared_data/se_s2orc_250218/ # After building up database, query title based on db file.
-python -m src.data_localindexing.build_mini_s2orc query_cid --corpusid 248779963 --directory /u501/z6dong/shared_data/se_s2orc_250218
-
-# issue: citation edge is hard to store, it is too much ... Solution: I think we better using the API to query citation relationship? Or use cypher to query over graph condensely
-# python -m src.data_localindexing.build_complete_citation build --directory ./ # build db for citation dataset
-# python -m src.data_localindexing.build_complete_citation query --citationid 169 --directory ./
-# (Optional) if you don't have key, use public API for querying citations instead
-# python -m src.data_preprocess.step1_citationAPI # get citations through bibtex only by API. TODO: Update for bibtex + url, not bibtex only. TODO: Update for all bibtex, not the first bibtex
-
-# Optional solution: we use kuzu database to store node and edge
-#python -m src.data_localindexing.build_mini_citation_kuzu --mode build --directory /u501/z6dong/shared_data/se_citations_250218/
-#python -m src.data_localindexing.test_node_edge_db # test how many nodes and edges are in built database
-# issue: slow for our 300G ndjson files, not suitable for this stage
-
-# Optional solution: we use neo4j database to store and query
-#python src.data_localindexing.build_mini_citation_neo4j --mode build --directory ./ --fields minimal
-#python src.data_localindexing.build_mini_citation_neo4j --mode query --citationid 248811336
-# for slurm run this script to keep neo4j open in another terminal
-# sbatch src.data_localindexing.neo4j_slurm
-
-# fuzzy matching: elastic search for s2orc
-python -m src.data_localindexing.build_mini_s2orc_es --mode build --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u501/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
-python -m src.data_localindexing.build_mini_s2orc_es --mode query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --query "BioMANIA: Simplifying bioinformatics data analysis through conversation"
-python -m src.data_localindexing.build_mini_s2orc_es --mode test --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --db_file /u501/z6dong/shared_data/se_s2orc_250218/paper_index_mini.db
-```
-</details>
-
 ### 3\. Extract Tables to Local Folder
 
 This step extracts tabular data from various sources and processes it.
@@ -87,7 +47,6 @@ This step extracts tabular data from various sources and processes it.
 # Process downloaded GitHub HTML files to Markdown. Skips when output file already exists (e.g. ln -s into _processed). 
 # Input: data/downloaded_github_readmes_<tag>/
 # Output: data/downloaded_github_readmes_<tag>_processed/, data/processed/md_parsing_results_v2_<tag>.parquet
-# (Optional) python -m src.data_preprocess.ln_giturl --source-dir data/downloaded_github_readmes_processed --target-dir data/downloaded_github_readmes_251117_processed > logs/ln_giturl_processed_251117.log 2>&1
 python -m src.data_preprocess.step2_git_md2text --tag 251117 > logs/step2_git_md2text_251117.log 2>&1
 
 # Extract tables from Hugging model cards + GitHub READMEs. Input: modelcard_step1, github_readmes_info, downloaded_github_readmes_<tag>/ (not _processed).
@@ -107,28 +66,17 @@ python -m src.data_preprocess.step2_arxiv_github_title --tag 251117 > logs/step2
 python -m src.data_preprocess.step2_s2orc_save --tag 251117 > logs/step2_s2orc_save_251117.log 2>&1
 
 # non-main pipeline scripts are documented in `docs/depre_scripts.md`.
-<details>
+
 #### Option1:
 # save some searched results, only search the missing titles
 #cp -r data/processed/s2orc_titles2ids.parquet data/processed/s2orc_titles2ids_251117.parquet
-#cp -r data/processed/s2orc_citations_cache.parquet data/processed/s2orc_citations_cache_251117.parquet
 #cp -r data/processed/s2orc_references_cache.parquet data/processed/s2orc_references_cache_251117.parquet
 
 # Query Semantic Scholar API for citation information (alternative to local database if no key, but may hit rate limits).
 # Why API over local (build_mini_citation_es): (1) API provides fresher citations/references; (2) API's title fuzzy matching is more accurate (commercialized) than our local ES fuzzy match.
 python -m src.data_preprocess.s2orc_title2ids_API --tag 251117 > logs/s2orc_title2ids_API_251117.log 2>&1 #  Input: modelcard_dedup_titles_<tag>.json  Output: s2orc_titles2ids_<tag>.parquet
-python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_API_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet Output: s2orc_citations_cache_<tag>.parquet, s2orc_references_cache_<tag>.parquet # issue: reference could be queried, but citation not
-# Or 
-# (local corpus version) python -m src.data_localindexing.s2orc_refcit_local --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1 # Input: batch_results + hit_ids_<tag>.txt, output: full_hits_<tag>.jsonl
-# (local corpus version) python -m src.data_localindexing.s2orc_refcit_local_post --tag 251117 > logs/s2orc_local_query_ref_cit_251117.log 2>&1 # Input: full_hits_<tag>.jsonl (or fallback full_hits.jsonl), Output: s2orc_*_<tag>.parquet
-# (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query | I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
-# (deprecate) python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_cit/ref_cache_251117.parquet, O: s2orc_rerun_<tag>.parquet
- #- bash src/data_localindexing/build_mini_citation_es.sh > logs/build_mini_citation_es.log 2>&1 # I: xx | O: batch_results
-# (local corpus version) bash src/data_preprocess/s2orc_fulltext_local.sh # extract fulltext -> ref/cit info
-# I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_merged_df.parquet, tmp_extracted_lines.parquet
-### Option2: batch querying papers_index
-# (local corpus version) python -m src.data_localindexing.build_mini_s2orc_es --mode batch_query --directory /u501/z6dong/shared_data/se_s2orc_250218 --index_name papers_index --titles_file data/processed/modelcard_dedup_titles_251117.json --cache_file data/processed/query_cache_251117.json # getting full tables
-</details>
+python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_API_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet Output: s2orc_references_cache_<tag>.parquet
+
 
 # Download arXiv HTML, extract tables from arXiv HTML files.
 #python -m bak.analyze_bibtex_arxiv_ids --tag 251117 > logs/analyze_bibtex_arxiv_ids_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, Output: bibte_title_arxiv_s2orc_<tag>.parquet  # try saving some title:arxiv from bibtex
@@ -148,31 +96,11 @@ python -m src.data_preprocess.arxiv_fulltext_api --tag 251117 > logs/arxiv_fullt
 # Input: arxiv_fulltext_html_<tag>/*.html. Output: tables_output_v2_<tag>/*.csv, html_parsing_results_v2_<tag>.parquet
 # Incremental by default (skips paper_ids already in parquet). Use --overwrite for full reprocess.
 ###############################################
-#python -m src.data_preprocess.step2_arxiv_parse --tag 251117 > logs/step2_arxiv_parse_251117.log 2>&1  # deprecated v1
 # we don't ln v1 to v2, because we change parsing logic
 python -m src.data_preprocess.step2_arxiv_parse_v2 --n_jobs 16 --tag 251117 --save_mode csv > logs/step2_arxiv_parse_v2_251117.log 2>&1  # --overwrite for full run; save_mode: csv|duckdb 
-
-# Integrate all processed table data (arXiv HTML + S2ORC extracted annotations) and process with LLM.
-# Input: title2arxiv_cache_<tag>.parquet, html_parsing_results_v2_<tag>.parquet, extracted_annotations_<tag>.parquet, pdf_download_cache_<tag>.json
-# Output: llm_markdown_table_results_v2_<tag>.parquet (optional: batch_input_v2_<tag>.jsonl/output_v2_<tag>.jsonl if running LLM)
-# Use --skip-llm to skip LLM entirely (merge only, empty llm_response_raw) when not updating LLM
-# (s2orc+LLM table source, deprecated) python -m src.data_preprocess.step2_integration_s2orc_llm --tag 251117 --skip-llm --v2_mode > logs/step2_integration_s2orc_llm_251117.log 2>&1
-# Check OpenAI batch job status (if using LLM for table processing)
-# bash src/data_preprocess/openai_batchjob_status.sh > logs/openai_batchjob_status.log 2>&1
-
-# If the sequence is wrong, reproduce from the log...
-#python -m src.data_preprocess.quick_repro
-#cp -r llm_outputs/llm_markdown_table_results_aligned.parquet llm_outputs/llm_markdown_table_results_v2_<tag>.parquet
-# Extract LLM-processed tables. Input: llm_markdown_table_results_v2_<tag>.parquet; Output: llm_tables_<tag>/*.csv, final_integration_with_paths_v2_<tag>.parquet
-# (s2orc+LLM table source, deprecated) python -m src.data_preprocess.step2_llm_save --tag 251117 --v2_mode > logs/step2_llm_save_251117.log 2>&1
 ```
 
 Finally, we merge table list from different sources back to modelID level.
-```bash
-# (merge after s2orc + LLM, depreated) python -m src.data_preprocess.step2_merge_tables --tag 251117 --v2_mode > logs/step2_merge_tables_v2_251117.log 2>&1  # Merge all table lists from 4 resources (HuggingFace, GitHub, HTML, LLM) into a unified model ID file.
-# Input: final_integration_with_paths_v2_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, modelcard_step2_v2_<tag>.parquet.
-# Output: modelcard_step3_merged_v2_<tag>.parquet
-```
 
 To substitute step2_integration_s2orc_llm, step2_llm_save (we skip llm tables as it is unstable), step2_merge_tables, we can use step2_merge_tables_simplify to directly generate the final merged table list at modelID level (without running the LLM table extraction pipeline).
 ```bash
@@ -192,32 +120,22 @@ python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/s
 python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_v2_<tag>/dup_matrix_v2_<tag>.pkl, deduped_v2_<tag>/stats_v2_<tag>.json. Output: heatmaps heatmap_overlap_v2_<tag>.pdf / heatmap_percentage_v2_<tag>.pdf in data/analysis/
 python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_titles2ids_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt. Here we filter out over large tables (max_cols=100, max_rows=200)
 python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode --exclude_resources llm > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
-
-# python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 # this one is without tag, as we don't run v1 with 251117 anymore.
-# python -m src.data_analysis.show_table_diff_md 0ae65809ffffa20a2e5ead861e7408ac_table_0.csv > logs/show_table_diff.log 2>&1 # compare v1 and v2 table diff
-# python -m src.data_analysis.qc_dc > logs/qc_dc.log 2>&1 # Double-check deduplication and mapping logic.
 ```
 
 We could go for starmie searching and baselines searching. We need groundtruth for evaluation based on searched results and groundtruth results.
 
 ### 4\. Label Ground Truth for Unionable Search Baselines
+Generate the definitive ground truth files for evaluation.
 
 This section details the process of generating ground truth labels for table unionability.
 ```bash
 python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_references_cache_<tag>.parquet (use columns), s2orc_titles2ids_<tag>.parquet (use minimum corpusIds as main Key). Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
-# (deprecated, only meaningful when computing threshold) python -m src.data_analysis.paper_relatedness_distribution --tag 251117 > logs/paper_relatedness_distribution_251117.log 2>&1  # (Optional) Plot violin figures of paper relatedness distribution. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: overlap_violin_by_mode_<tag>.pdf
-# (Deprecated) python -m src.data_analysis.paper_relatedness_threshold --tag 251117 > logs/paper_relatedness_threshold_251117.log 2>&1  # (Optional) Determine paper relatedness thresholds. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: score_*.pdf files in data/analysis/
-```
 
-### Final Ground Truth Generation
-Generate the definitive ground truth files for evaluation.
-
-```bash
 bash src/data_gt/step3_gt.sh 251117 > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
 # (Optional) python -m src.data_gt.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 
 # (Optional) python -m src.data_gt.debug_npz --gt-dir data/gt/ > logs/debug_npz.log 2>&1 # Debug NPZ ground truth files to ensure valid conditions.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).
-python -m src.data_localindexing.turn_tus_into_pickle > logs/turn_tus_into_pickle.log 2>&1
+python -m src.data_gt.turn_tus_into_pickle > logs/turn_tus_into_pickle.log 2>&1
 # (deprecate) python -m src.data_gt.gt_combine > logs/gt_combine.log 2>&1
 python -m src.data_gt.modelcard_matrix --tag 251117 --v2_mode > logs/modelcard_matrix_v2_251117.log 2>&1  # Add other two levels of citation graphs (modelcard and dataset). Input: modelcard_step1_<tag>.parquet, modelcard_step3_dedup_v2_<tag>.parquet, modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_gt_related_model_v2_<tag>.parquet, data/gt/scilake_gt_modellink_*_v2_<tag>.npz
 python -m src.data_gt.merge_union --level direct --tag 251117 --v2_mode > logs/merge_union_v2_251117.log 2>&1  # Merge union ground truth. Input: data/gt/*_v2_<tag>.npz, *_v2_<tag>.pkl. Output: data/gt/csv_pair_union_*_v2_<tag>_processed.npz
@@ -243,9 +161,6 @@ bash src/postprocess/zip_with_mask.sh 251117 # Step 0: zip with mask
 python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo/ModelTables/data/processed --mode tr --tag 251117 --v2_mode > logs/trick_aug_tr_v2_251117.log 2>&1   
 python -m src.data_symlink.trick_aug --repo_root /u1/z6dong/Repo/ModelTables/data/processed --mode str --tag 251117 --v2_mode > logs/trick_aug_str_v2_251117.log 2>&1  
 # Step 2: Create symlinks from ModelTables to starmie_internal/data/scilake_final_<tag>/datalake
-# python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode base --tag 251117 --v2_mode > logs/ln_scilake_base_251117.log 2>&1  
-# python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode str --tag 251117 --v2_mode > logs/ln_scilake_str_251117.log 2>&1  
-# python -m src.data_symlink.ln_scilake --repo_root /u1/z6dong/Repo --mode tr --tag 251117 --v2_mode > logs/ln_scilake_tr_251117.log 2>&1 
 python -m src.data_symlink.ln_scilake_new --repo_root /u1/z6dong/Repo --tag 251117 --v2_mode --n_jobs 32 > logs/ln_scilake_new_251117.log 2>&1
 ```
 
@@ -254,21 +169,15 @@ python -m src.data_symlink.ln_scilake_new --repo_root /u1/z6dong/Repo --tag 2511
 Execute Starmie's pipeline for contrastive learning, embedding extraction, and search
 
 ```bash
-python -m src.data_symlink.prepare_sample --tag 251117 --v2_mode --root_dir /u1/z6dong/Repo --output_file data/analysis/scilake_final_filelist_v2_251117.txt --limit 1000 --seed 42 > logs/prepare_sample_v2_251117.log 2>&1
+python -m src.data_symlink.prepare_sample --tag 251117 --v2_mode --root_dir /u1/z6dong/Repo --output_file data/analysis/scilake_final_filelist_v2_251117.txt --limit 1000 --seed 42 > logs/prepare_sample_v2_251117.log 2>&1 # sample files for pretraining
 # hands to starmie
-bash scripts/step1_pretrain.sh > logs/step1_pretrain.log 2>&1  # Fine-tune contrastive learning model
-bash scripts/step2_extractvectors.sh > logs/step2_extractvectors.log 2>&1  # Encode embeddings for query and datalake items
-bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search.log 2>&1  # Perform data lake search (retrieval)
-bash scripts/step3_processmetrics.sh > logs/step3_processmetrics.log 2>&1  # Extract metrics based on ground truth and retrieval results; plot figures
-bash eval_per_resource.sh > logs/eval_per_resource.log 2>&1  # Run ablation study on different resources (after getting results)
-
 # Using date-based tag (e.g., 251117)
-bash scripts/step1_pretrain.sh > logs/step1_pretrain_251117.log 2>&1
-bash scripts/step2_extractvectors.sh > logs/step2_extractvectors_251117.log 2>&1
-bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search_251117.log 2>&1
-bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_251117.log 2>&1
-bash scripts/step3_processmetrics_all.sh <EXPERIMENT_INDEX> > logs/step3_processmetrics_all_251117.log 2>&1
-bash eval_per_resource.sh > logs/eval_per_resource_251117.log 2>&1
+bash scripts/step1_pretrain.sh > logs/step1_pretrain_251117.log 2>&1 # Fine-tune contrastive learning model
+bash scripts/step2_extractvectors.sh > logs/step2_extractvectors_251117.log 2>&1 # Encode embeddings for query and datalake items
+bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search_251117.log 2>&1 # Perform data lake search (retrieval)
+bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_251117.log 2>&1 # Extract metrics based on ground truth and retrieval results; plot figures
+bash scripts/step3_processmetrics_all.sh <EXPERIMENT_INDEX> > logs/step3_processmetrics_all_251117.log 2>&1 # run baselines
+bash eval_per_resource.sh > logs/eval_per_resource_251117.log 2>&1 # Run ablation study on different resources (after getting results)
 ```
 
 ### 7\. Baseline: Dense Search, Sparse Search, Hybrid Search
