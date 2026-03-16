@@ -131,7 +131,11 @@ def compute_subset_pt_tm(FILES):
     """
     Subset titles to only used ones, compute comb_sub full p x m.
     """
-    df_metadata = pd.read_parquet(FILES["integration"], columns=["corpusId", "query_title"]).assign(corpusId=lambda x: x["corpusId"].astype(str).str.replace(".0", "", regex=False))
+    # Use titles2ids as canonical source of (corpusId, query_title)
+    df_metadata = pd.read_parquet(FILES["titles2ids"],columns=["corpusId", "query_title"])
+    # Keep only rows where both corpusId and query_title are non-null, and normalize corpusId
+    df_metadata = df_metadata[df_metadata["corpusId"].notna() & df_metadata["query_title"].notna()].copy()
+    df_metadata["corpusId"] = df_metadata["corpusId"].astype(str).str.strip().str.replace(".0", "", regex=False)
 
     df_titles = pd.read_parquet(FILES["title_list"], columns=["modelId", "all_title_list"])
     df_titles_exploded = df_titles.explode("all_title_list")
@@ -169,7 +173,11 @@ def build_ground_truth(rel_key, overlap_rate_threshold, save_matrix_flag=True, t
     print(f"  - First 3 paper_index IDs: {list(paper_index)[:3]}")
     print(f"  - First 3 paper_index ID types: {[type(x) for x in list(paper_index)[:3]]}")
 
-    title_df = pd.read_parquet(FILES["integration"], columns=["corpusId", "query_title"]).assign(corpusId=lambda x: x["corpusId"].astype(str).str.replace(".0", "", regex=False))
+    # Use titles2ids as canonical source of (corpusId, query_title)
+    title_df = pd.read_parquet(FILES["titles2ids"],columns=["corpusId", "query_title"])
+    # Keep only rows where both corpusId and query_title are non-null, and normalize corpusId
+    title_df = title_df[title_df["corpusId"].notna() & title_df["query_title"].notna()].copy()
+    title_df["corpusId"] = title_df["corpusId"].astype(str).str.strip().str.replace(".0", "", regex=False)
 
     print(f"[DEBUG] Loaded title_df with shape: {title_df.shape}")
     cid2titles = defaultdict(list)
@@ -371,7 +379,7 @@ if __name__ == "__main__":
 
     FILES = {
         "combined": f"data/processed/modelcard_citation_all_matrices{suffix}.pkl.gz",
-        "integration": f"data/processed/s2orc_rerun{suffix}.parquet",
+        "titles2ids": f"data/processed/s2orc_titles2ids{suffix}.parquet",
         "title_list": f"data/processed/modelcard_all_title_list{suffix}.parquet",
         "step3_dedup": f"data/processed/modelcard_step3_dedup{v2_suffix}{suffix}.parquet",
         "valid_title": f"data/processed/all_title_list_valid{v2_suffix}{suffix}.parquet"

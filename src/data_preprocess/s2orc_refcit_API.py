@@ -276,7 +276,10 @@ if __name__ == "__main__":
     # this is fixed after paper is released
     update_all_single_references(query_ids, sleep_time=1.01, timeout=60, force_refresh=force_refresh, cache_file=references_cache_file, merge_key=MERGE_KEY)
     print(f"\n💾 All single references queries have been processed and saved to {references_cache_file}.")
-    # this might be updated as new papers come out
-    update_all_single_citations(query_ids, sleep_time=1.01, timeout=60, force_refresh=force_refresh, cache_file=citations_cache_file, merge_key=MERGE_KEY)
-    print(f"\n💾 All single citations queries have been processed and saved to {citations_cache_file}.")
+
+    RUN_CITATIONS = False
+    if RUN_CITATIONS:
+        # this might be updated as new papers come out
+        update_all_single_citations(query_ids, sleep_time=1.01, timeout=60, force_refresh=force_refresh, cache_file=citations_cache_file, merge_key=MERGE_KEY)
+        print(f"\n💾 All single citations queries have been processed and saved to {citations_cache_file}.")
     

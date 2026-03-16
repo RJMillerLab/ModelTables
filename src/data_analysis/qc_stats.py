@@ -642,7 +642,8 @@ if __name__ == "__main__":
 
     # Determine input/output paths based on tag (tag is full suffix like v2 or v2_251117; no hardcoded _v2).
     input_file_dedup = os.path.join(base_path, 'processed', f"modelcard_step3_dedup{v2_suffix}{suffix}.parquet")
-    query_file = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
+    # Use titles2ids as canonical source of query/retrieved titles
+    query_file = os.path.join(base_path, 'processed', f"s2orc_titles2ids{suffix}.parquet")
     modelid2titles_path = os.path.join(base_path, 'processed', f"modelcard_all_title_list{suffix}.parquet")
     
     print("📁 Paths in use:")
@@ -651,7 +652,13 @@ if __name__ == "__main__":
     print(f"   Input modelid2titles: {modelid2titles_path}")
 
     df = pd.read_parquet(modelid2titles_path, columns=['modelId', 'all_title_list'])
-    df_integration = pd.read_parquet(query_file, columns=['query_title'])
+    # Only keep entries where both query_title and retrieved_title are non-null,
+    # then drop retrieved_title for downstream stats.
+    df_integration = pd.read_parquet(query_file, columns=['query_title', 'retrieved_title'])
+    df_integration = df_integration[
+        df_integration['query_title'].notna() & df_integration['retrieved_title'].notna()
+    ].copy()
+    df_integration = df_integration.drop(columns=['retrieved_title'])
     df_integration.rename(columns={'query_title': 'query'}, inplace=True)
     # read data/processed/modelcard_step3_dedup.parquet and get modelId and 4 resources keys
     df_dedup = pd.read_parquet(input_file_dedup, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'])

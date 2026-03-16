@@ -27,37 +27,35 @@ from src.utils import load_config, is_list_like, to_list_safe
 THRESHOLD = 0.1
 SAVE_THRESHOLD_OVERLAP = True
 MODE = "reference"  # or "citation"
+PAPER_KEY = 'corpusId' # or "paperId"
 
-def load_Id_lists(df, mode, influential=False, intent=None):   ########
+def load_Id_lists(df, mode, influential=False, intent=None):
     """
     mode: 'reference' or 'citation'
     intent: None → overall  / 'methodology' / 'result'
     influential: bool
     """
-    if intent == "methodology_or_result":                                                   ########
-        prefix = "ref_papers" if mode=="reference" else "cit_papers"                        ########
-        suffix = "_infl_ids" if influential else "_ids"                                    ########
-        col1 = f"{prefix}_methodology{suffix}"                                             ########
-        col2 = f"{prefix}_result{suffix}"                                                  ########
-    else:                                                                                   ########
-        prefix = "ref_papers" if mode == "reference" else "cit_papers"                     ########
-        base   = f"{prefix}_{'overall' if intent is None else intent}"                     ########
-        col    = f"{base}_{'infl_ids' if influential else 'ids'}"     
-
-    Id_to_ids = {}
-    for _, row in df.iterrows():
-        pid = str(row["corpusId"])
-        #ids = row[col]
-        if intent == "methodology_or_result":                                               ########
-            ids1 = row[col1]                                                       ########
-            ids2 = row[col2]                                                       ########
-            ids  = list(set(ids1) | set(ids2))                ########
-        else:                                                                              ########
-            ids = row[col] 
-        if not is_list_like(ids):
-            ids = []
-        Id_to_ids[pid] = set(map(str, ids))
-    return {pid: list(v) for pid, v in Id_to_ids.items()}
+    if intent=="methodology_or_result":
+        prefix="ref_papers" if mode=="reference" else "cit_papers"; suffix="_infl_ids" if influential else "_ids"
+        col1=f"{prefix}_methodology{suffix}"; col2=f"{prefix}_result{suffix}"
+        pids=df[PAPER_KEY].astype(str).tolist(); ids_list1=df[col1].tolist(); ids_list2=df[col2].tolist()
+        out={}
+        for pid,ids1,ids2 in zip(pids,ids_list1,ids_list2):
+            if not is_list_like(ids1): ids1=[]
+            if not is_list_like(ids2): ids2=[]
+            # Normalize all IDs to string so they live in the same space as PAPER_KEY / Id_list
+            out[pid]=list(set(map(str, ids1))|set(map(str, ids2)))
+        return out
+    else:
+        prefix="ref_papers" if mode=="reference" else "cit_papers"
+        col=f"{prefix}_{'overall' if intent is None else intent}_{'infl_ids' if influential else 'ids'}"
+        pids=df[PAPER_KEY].astype(str).tolist(); ids_list=df[col].tolist()
+        out={}
+        for pid,idt in zip(pids,ids_list):
+            if not is_list_like(idt): idt=[]
+            # Normalize all IDs to string so they live in the same space as PAPER_KEY / Id_list
+            out[pid]=list(set(map(str, idt)))
+        return out
 
 def compute_overlap_matrices(Id_to_ref, paper_list):
     # Inverted index
@@ -78,6 +76,7 @@ def compute_overlap_matrices(Id_to_ref, paper_list):
         rows.append(i); cols.append(i); data.append(len(Id_to_ref[pid]))
     n = len(paper_list)
     intersection = coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
+    # intersection = intersection.maximum(intersection.T)
     lens = np.array([len(Id_to_ref[pid]) for pid in paper_list], dtype=np.float32)
     # Jaccard
     union = lens[:, None] + lens[None, :] - intersection.toarray()
@@ -107,36 +106,68 @@ def compute_direct_matrix(Id_to_all, paper_list):
                 cols += [j, i]
     n = len(paper_list)
     mat = coo_matrix((np.ones(len(rows), dtype=bool), (rows, cols)), shape=(n, n)).tocsr()
+    mat = mat.maximum(mat.T) # if we only have reference, we need this to be symmetric. This work because citation is reversed of reference when filter out those papers don't in paper list.
     return mat
 
-def main(input_parquet, combined_path):
-    df = pd.read_parquet(input_parquet)
-    df['corpusId'] = df['corpusId'].astype(str)
-    print(f"Loaded {len(df)} rows")
-    print('keys:', list(df.keys()))
-
+def test_index(INTENTS, df):
     for intent in INTENTS + [None]:
-        for mode, infl in [("reference", False), ("reference", True), ("citation", False), ("citation", True)]:
+        for mode, infl in [("reference", False), ("reference", True)]: #, ("citation", False), ("citation", True)
+            t = time.time()
             d = load_Id_lists(df, mode, influential=infl, intent=intent)
             total_links = sum(len(v) for v in d.values())
             name = f"{mode}_{intent or 'overall'}_{'infl' if infl else 'norm'}"
-        print(f"[DEBUG-LOAD] {name}: {len(d)} papers, total links = {total_links}")
+            print(f"[DEBUG-LOAD] {name}: {len(d)} papers, total links = {total_links}, time = {time.time() - t} seconds")
+
+def main(input_parquet, title2ids_parquet, combined_output_path, skip_threshold=True):
+    t1 = time.time()
+    # Load
+    df = pd.read_parquet(input_parquet)
+    df_title2ids = pd.read_parquet(title2ids_parquet, columns=[PAPER_KEY])
+    print(f"Loaded {len(df)} rows from input_parquet")
+    # 1) Drop rows where PAPER_KEY is null/NaN
+    df = df[df[PAPER_KEY].notna()].copy()
+    print("Columns:", list(df.keys()))
+    print(f"Rows after dropping null {PAPER_KEY}: {len(df)}")
+    # 2) Normalize PAPER_KEY in both dataframes to string without trailing '.0'
+    df[PAPER_KEY] = df[PAPER_KEY].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    df_title2ids[PAPER_KEY] = df_title2ids[PAPER_KEY].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    # 3) Build allowed id set from titles2ids and filter df by this set
+    title_ids = set(df_title2ids[PAPER_KEY].dropna().unique())
+    df = df[df[PAPER_KEY].isin(title_ids)].copy()
+    print(f"Rows with {PAPER_KEY} present in titles2ids: {len(df)}")
+    # 4) Deduplicate on PAPER_KEY after filtering
+    df = df.drop_duplicates(subset=[PAPER_KEY]).copy()
+    print(f"Rows after deduplicating by {PAPER_KEY}: {len(df)}")
+    print(f"Time taken for deduplicating: {time.time() - t1} seconds")
+
+    t2 = time.time()
+    # apply
+    from src.data_preprocess.s2orc_merge import parse_cit_papers
+    ref_new_cols = df["original_response"].apply(
+        lambda x: pd.Series(parse_cit_papers(x, id_key="citedcorpusid"), index=["ref_papers_methodology_ids", "ref_papers_background_ids", "ref_papers_result_ids", "ref_papers_overall_ids", "ref_papers_methodology_infl_ids", "ref_papers_background_infl_ids", "ref_papers_result_infl_ids", "ref_papers_overall_infl_ids"])
+    )
+    df = pd.concat([df, ref_new_cols], axis=1) # cit_new_cols, 
+    print(f"Time taken for parse_cit_papers: {time.time() - t2} seconds")
+    #test_index(INTENTS, df)
 
     Id_to_ref        = load_Id_lists(df, "reference", influential=False)
     Id_to_ref_infl   = load_Id_lists(df, "reference", influential=True)
-    Id_to_cite       = load_Id_lists(df, "citation",  influential=False)
-    Id_to_cite_infl  = load_Id_lists(df, "citation",  influential=True)
-    Id_to_all        = {pid: Id_to_ref.get(pid, []) + Id_to_cite.get(pid, [])            for pid in set(Id_to_ref)|set(Id_to_cite)}
-    Id_to_all_infl   = {pid: Id_to_ref_infl.get(pid, []) + Id_to_cite_infl.get(pid, [])  for pid in set(Id_to_ref_infl)|set(Id_to_cite_infl)}
-    Id_list = sorted(set(df["corpusId"]))
+    #Id_to_cite       = load_Id_lists(df, "citation",  influential=False)
+    #Id_to_cite_infl  = load_Id_lists(df, "citation",  influential=True)
+    #Id_to_all        = {pid: Id_to_ref.get(pid, []) + Id_to_cite.get(pid, [])            for pid in set(Id_to_ref)|set(Id_to_cite)}
+    #Id_to_all_infl   = {pid: Id_to_ref_infl.get(pid, []) + Id_to_cite_infl.get(pid, [])  for pid in set(Id_to_ref_infl)|set(Id_to_cite_infl)}
+    Id_list = sorted(set(df[PAPER_KEY]))
 
     time_start = time.time()
-    overlap_all       = compute_overlap_matrices(Id_to_ref,       Id_list)
-    overlap_all_infl  = compute_overlap_matrices(Id_to_ref_infl,  Id_list)
-    direct            = compute_direct_matrix(Id_to_all,          Id_list)
-    direct_infl       = compute_direct_matrix(Id_to_all_infl,     Id_list)
+    #direct            = compute_direct_matrix(Id_to_all,          Id_list)
+    #direct_infl       = compute_direct_matrix(Id_to_all_infl,     Id_list)
+    direct            = compute_direct_matrix(Id_to_ref,          Id_list)
+    direct_infl       = compute_direct_matrix(Id_to_ref_infl,     Id_list)
+    if not skip_threshold:
+        overlap_all       = compute_overlap_matrices(Id_to_ref,       Id_list)
+        overlap_all_infl  = compute_overlap_matrices(Id_to_ref_infl,  Id_list)
     print(f"[DEBUG] direct nnz={direct.nnz}, direct_infl nnz={direct_infl.nnz}")
-    print(f"Time taken for normal: {time.time() - time_start} seconds")
+    print(f"Time taken for computing matrix: {time.time() - time_start} seconds")
 
     # --- intent loops
     intent_overlap       = {}
@@ -147,12 +178,13 @@ def main(input_parquet, combined_path):
         d_norm = load_Id_lists(df, "reference", False, intent)
         d_infl = load_Id_lists(df, "reference", True,  intent)
         print(f"[DEBUG-LOAD] methodology_or_result? intent={intent}, norm links={sum(len(v) for v in d_norm.values())}, infl links={sum(len(v) for v in d_infl.values())}")
-        intent_overlap[intent]      = compute_overlap_matrices(d_norm, Id_list)
-        intent_overlap_infl[intent] = compute_overlap_matrices(d_infl, Id_list)
         intent_direct[intent]       = compute_direct_matrix(d_norm, Id_list)
         intent_direct_infl[intent]  = compute_direct_matrix(d_infl, Id_list)
-        print(f"[DEBUG-OVR] {intent} non-zero per score: ", {k: mat.nnz for k,mat in intent_overlap[intent].items()})
-        print(f"[DEBUG-OVR] {intent} non-zero per score: ", {k: mat.nnz for k,mat in intent_overlap_infl[intent].items()})
+        if not skip_threshold:
+            intent_overlap[intent]      = compute_overlap_matrices(d_norm, Id_list)
+            intent_overlap_infl[intent] = compute_overlap_matrices(d_infl, Id_list)
+            print(f"[DEBUG-OVR] {intent} non-zero per score: ", {k: mat.nnz for k,mat in intent_overlap[intent].items()})
+            print(f"[DEBUG-OVR] {intent} non-zero per score: ", {k: mat.nnz for k,mat in intent_overlap_infl[intent].items()})
 
     # --- threshold helpers
     def thresh(m):  ########
@@ -163,27 +195,33 @@ def main(input_parquet, combined_path):
         "direct_label":            direct,
         "direct_label_influential":direct_infl
     }
-    # overall
-    for k in SIMILARITY_MODES:
-        combined[k]                     = overlap_all[k]
-        combined[f"{k}_influential"]    = overlap_all_infl[k]
-        combined[f"{k}_thresholded"]    = thresh(overlap_all[k])
-        combined[f"{k}_influential_thresholded"] = thresh(overlap_all_infl[k])
-    # intents
-    for intent in INTENTS:
+    
+    if not skip_threshold:
+        print('Thresholding matrices...')
+        # overall
         for k in SIMILARITY_MODES:
-            combined[f"{k}_{intent}"]                           = intent_overlap[intent][k]
-            combined[f"{k}_{intent}_influential"]               = intent_overlap_infl[intent][k]
-            combined[f"{k}_{intent}_thresholded"]               = thresh(intent_overlap[intent][k])
-            combined[f"{k}_{intent}_influential_thresholded"]   = thresh(intent_overlap_infl[intent][k])
+            combined[k]                     = overlap_all[k]
+            combined[f"{k}_influential"]    = overlap_all_infl[k]
+            combined[f"{k}_thresholded"]    = thresh(overlap_all[k])
+            combined[f"{k}_influential_thresholded"] = thresh(overlap_all_infl[k])
+            # intent
+            for intent in INTENTS:
+                combined[f"{k}_{intent}"]                           = intent_overlap[intent][k]
+                combined[f"{k}_{intent}_influential"]               = intent_overlap_infl[intent][k]
+                combined[f"{k}_{intent}_thresholded"]               = thresh(intent_overlap[intent][k])
+                combined[f"{k}_{intent}_influential_thresholded"]   = thresh(intent_overlap_infl[intent][k])
+    # intents
+    print('Computing direct matrices...')
+    for intent in INTENTS:
         combined[f"direct_label_{intent}"]                            = intent_direct[intent]
         combined[f"direct_label_{intent}_influential"]                = intent_direct_infl[intent]
 
     # Save
-    os.makedirs(os.path.dirname(combined_path), exist_ok=True)
-    with gzip.open(combined_path, "wb") as f:
+    print('Saving matrices...')
+    os.makedirs(os.path.dirname(combined_output_path), exist_ok=True)
+    with gzip.open(combined_output_path, "wb") as f:
         pickle.dump(combined, f)
-    print(f"Saved all matrices to {combined_path}")
+    print(f"Saved all matrices to {combined_output_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compute paper-pair overlap scores for citation analysis")
@@ -197,11 +235,15 @@ if __name__ == "__main__":
     
     # Determine input/output paths based on tag
     #INPUT_PARQUET = "data/processed/modelcard_citation_enriched.parquet" # original query id from online
-    input_parquet = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
-    combined_path = os.path.join(base_path, 'processed', f"modelcard_citation_all_matrices{suffix}.pkl.gz")
+    #input_parquet = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
+    input_parquet = os.path.join(base_path, 'processed', f"s2orc_references_cache{suffix}.parquet")
+    title2ids_parquet = os.path.join(base_path, 'processed', f"s2orc_titles2ids{suffix}.parquet")
+    combined_output_path = os.path.join(base_path, 'processed', f"modelcard_citation_all_matrices{suffix}.pkl.gz")
     
     print("📁 Paths in use:")
     print(f"   Input annotations:   {input_parquet}")
-    print(f"   Output matrices:     {combined_path}")
+    print(f"   Title2ids parquet:    {title2ids_parquet}")
+    print(f"   Output matrices:     {combined_output_path}")
     
-    main(input_parquet=input_parquet, combined_path=combined_path)
+    SKIP_THRESHOLD = True # don't run threshold mode
+    main(input_parquet=input_parquet, title2ids_parquet=title2ids_parquet, combined_output_path=combined_output_path, skip_threshold=SKIP_THRESHOLD)

@@ -154,14 +154,7 @@ def parse_cit_papers(json_str, id_key = "citingcorpusid"):
     background_infl_ids = list(dict.fromkeys(background_infl_ids)) 
     result_infl_ids   = list(dict.fromkeys(result_infl_ids))     
     overall_infl_ids  = list(dict.fromkeys(overall_infl_ids))    
-    return (method_ids,
-            background_ids, 
-            result_ids, 
-            overall_ids,
-            method_infl_ids, 
-            background_infl_ids, 
-            result_infl_ids, 
-            overall_infl_ids)
+    return (method_ids, background_ids, result_ids, overall_ids, method_infl_ids, background_infl_ids, result_infl_ids, overall_infl_ids)
 
 def count_intents(final_df, col_name="original_response_references", cit_key="data"):
     """
@@ -189,6 +182,42 @@ def count_intents(final_df, col_name="original_response_references", cit_key="da
         except Exception as e:
             print(f"Error parsing JSON in count_intents: {e}")
     return counter
+
+
+def summarize_row_intents(final_df, col_name="original_response_references", cit_key="data"):
+    """Row-level intent coverage stats: how many rows contain at least one item of each intent."""
+    n_total = len(final_df)
+    n_non_null = final_df[col_name].notna().sum()
+    row_has = {"methodology": 0, "background": 0, "result": 0, "None": 0}
+
+    for js in final_df[col_name].dropna():
+        try:
+            data = json.loads(js)
+            cit_papers = data.get(cit_key, [])
+            intents_in_row = set()
+            for item in cit_papers:
+                intents = item.get("intents")
+                if intents:
+                    flat = [i for sub in intents for i in (sub if isinstance(sub, list) else [sub])]
+                    intents_in_row.update(flat)
+                else:
+                    intents_in_row.add("None")
+            if "methodology" in intents_in_row:
+                row_has["methodology"] += 1
+            if "background" in intents_in_row:
+                row_has["background"] += 1
+            if "result" in intents_in_row:
+                row_has["result"] += 1
+            if "None" in intents_in_row:
+                row_has["None"] += 1
+        except Exception:
+            continue
+
+    print("\nRow-level intent coverage (based on original_response_references):")
+    print(f"  Total rows: {n_total}")
+    print(f"  Non-null {col_name} rows: {n_non_null}")
+    for intent, cnt in row_has.items():
+        print(f"  Rows with at least one '{intent}' item: {cnt}")
 
 def analyze_intent_influential_correlation(json_series, cit_key="data"):
     """
@@ -247,6 +276,14 @@ def merge_cit_ref(df_titles, df_citations, df_references, merge_key):
     #print(f"💾 Merged results saved to {output_file}")
     return df_merged
 
+def merge_cit(df_titles, df_citations, merge_key):
+    df_titles[merge_key] = df_titles[merge_key].astype(str)
+    # Merge titles with citations and references using left join on merge_key
+    df_merged = pd.merge(df_titles, df_citations, on=merge_key, how="left")
+    #to_parquet(df_merged, output_file)
+    #print(f"💾 Merged results saved to {output_file}")
+    return df_merged
+
 def merge_all_results(titles_cache, citations_cache, references_cache, merge_key):
     """
     Merge the titles mapping, single citations, and single references parquet files into one consolidated parquet.
@@ -261,37 +298,68 @@ def merge_all_results(titles_cache, citations_cache, references_cache, merge_key
     """
     df_titles = pd.read_parquet(titles_cache)
     df_citations = pd.read_parquet(citations_cache)
+
+    # Normalize merge key here to avoid int/float/string drift downstream.
+    if merge_key == "corpusId": # 
+        for df in (df_titles, df_citations):
+            df[merge_key] = df[merge_key].astype(str).str.strip().str.replace(r"\.0$", "", regex=True).replace({"nan": None, "NaN": None, "None": None, "": None})
+            # drop na
+            df.dropna(subset=[merge_key], inplace=True)
+
     # Rename columns with _citations suffix (except merge_key)
-    df_citations = df_citations.rename(columns={"original_response": "original_response_citations"})
-    df_references = pd.read_parquet(references_cache)
-    df_references = df_references.rename(columns={"original_response": "original_response_references"})
-    #"parsed_response": "parsed_response_references"
-    df_merged = merge_cit_ref(df_titles, df_citations, df_references, merge_key)
+    df_citations = df_citations.rename(columns={"original_response": "original_response_citations"})#"parsed_response": "parsed_response_references"
+
+    #df_references = pd.read_parquet(references_cache)
+    #df_references = df_references.rename(columns={"original_response": "original_response_references"})#"parsed_response": "parsed_response_references"
+    #df_merged = merge_cit_ref(df_titles, df_citations, df_references, merge_key)
+    df_merged = merge_cit(df_titles, df_citations, merge_key)
     return df_merged
 
 
 def merge_all_results_sql(titles_cache, citations_cache, references_cache, merge_key):
     """
-    SQL-based merge: use DuckDB to join titles, citations, and references parquet files.
-    Same output structure as merge_all_results (titles + original_response_citations + original_response_references).
-    Faster than pandas merge for large datasets.
-
     Compared with merge_all_results (pandas): output is equivalent except for value types (e.g. str vs int)
     and row order; no deduplication or join-semantics inconsistency.
     """
     con = duckdb.connect()
     try:
-        query = f"""
-            SELECT
-                t.*,
-                c.original_response AS original_response_citations,
-                r.original_response AS original_response_references
-            FROM read_parquet('{titles_cache}') AS t
-            LEFT JOIN read_parquet('{citations_cache}') AS c
-              ON CAST(t.{merge_key} AS VARCHAR) = CAST(c.{merge_key} AS VARCHAR)
-            LEFT JOIN read_parquet('{references_cache}') AS r
-              ON CAST(t.{merge_key} AS VARCHAR) = CAST(r.{merge_key} AS VARCHAR)
-        """
+        if merge_key == "corpusId":
+            # For corpusId: keep only rows with non-null titles and numeric corpusId,
+            # cast corpusId to BIGINT on both sides, and join on that.
+            query = f"""
+                WITH
+                t_clean AS (
+                    SELECT
+                        *,
+                        TRY_CAST(corpusId AS BIGINT) AS corpusId_big
+                    FROM read_parquet('{titles_cache}')
+                    WHERE query_title IS NOT NULL
+                      AND retrieved_title IS NOT NULL
+                ),
+                r_clean AS (
+                    SELECT
+                        *,
+                        TRY_CAST(corpusId AS BIGINT) AS corpusId_big
+                    FROM read_parquet('{references_cache}')
+                )
+                SELECT
+                    t.*,
+                    r.original_response AS original_response_references
+                FROM t_clean AS t
+                LEFT JOIN r_clean AS r
+                  ON t.corpusId_big = r.corpusId_big
+                WHERE t.corpusId_big IS NOT NULL
+            """
+        else:
+            # Fallback: generic string-based join on merge_key
+            query = f"""
+                SELECT
+                    t.*,
+                    r.original_response AS original_response_references
+                FROM read_parquet('{titles_cache}') AS t
+                LEFT JOIN read_parquet('{references_cache}') AS r
+                  ON CAST(t.{merge_key} AS VARCHAR) = CAST(r.{merge_key} AS VARCHAR)
+            """
         return con.execute(query).fetchdf()
     finally:
         con.close()
@@ -308,52 +376,31 @@ if __name__ == "__main__":
     titles_cache_file = data_path / f"s2orc_titles2ids{suffix}.parquet"
     citations_cache_file = data_path / f"s2orc_citations_cache{suffix}.parquet"
     references_cache_file = data_path / f"s2orc_references_cache{suffix}.parquet"
-    #merged_results_file = data_path / f"s2orc_query_results{suffix}.parquet"
-    # 5. Merge all caches into one consolidated parquet file (SQL-based, faster).
+    # merged_results_file = data_path / f"s2orc_query_results{suffix}.parquet"
     # final_merged_df = merge_all_results(titles_cache=titles_cache_file, citations_cache=citations_cache_file,  references_cache=references_cache_file, merge_key=MERGE_KEY)
-    final_merged_df = merge_all_results_sql(
-        titles_cache=titles_cache_file,
-        citations_cache=citations_cache_file,
-        references_cache=references_cache_file,
-        merge_key=MERGE_KEY,
-    )
+    final_merged_df = merge_all_results_sql(titles_cache=titles_cache_file, citations_cache=citations_cache_file, references_cache=references_cache_file, merge_key=MERGE_KEY)
     print("\n💾 Merge process complete.")
 
     #final_merged_df = pd.read_parquet(merged_results_file)
-    cit_new_cols = final_merged_df["original_response_citations"].apply(
-        lambda x: pd.Series(
-            parse_cit_papers(x, id_key="citingcorpusid"),
-            index=[
-                "cit_papers_methodology_ids", "cit_papers_background_ids", "cit_papers_result_ids", "cit_papers_overall_ids",
-                "cit_papers_methodology_infl_ids", "cit_papers_background_infl_ids", "cit_papers_result_infl_ids", "cit_papers_overall_infl_ids"
-            ]
-        )
-    )
+    '''cit_new_cols = final_merged_df["original_response_citations"].apply(
+        lambda x: pd.Series(parse_cit_papers(x, id_key="citingcorpusid"), index=["cit_papers_methodology_ids", "cit_papers_background_ids", "cit_papers_result_ids", "cit_papers_overall_ids", "cit_papers_methodology_infl_ids", "cit_papers_background_infl_ids", "cit_papers_result_infl_ids", "cit_papers_overall_infl_ids"])
+    )'''
     ref_new_cols = final_merged_df["original_response_references"].apply(
-        lambda x: pd.Series(
-            parse_cit_papers(x, id_key="citedcorpusid"),
-            index=[
-                "ref_papers_methodology_ids", "ref_papers_background_ids", "ref_papers_result_ids", "ref_papers_overall_ids",
-                "ref_papers_methodology_infl_ids", "ref_papers_background_infl_ids", "ref_papers_result_infl_ids", "ref_papers_overall_infl_ids"
-            ]
-        )
+        lambda x: pd.Series(parse_cit_papers(x, id_key="citedcorpusid"), index=["ref_papers_methodology_ids", "ref_papers_background_ids", "ref_papers_result_ids", "ref_papers_overall_ids", "ref_papers_methodology_infl_ids", "ref_papers_background_infl_ids", "ref_papers_result_infl_ids", "ref_papers_overall_infl_ids"])
     )
-    final_merged_df = pd.concat([final_merged_df, cit_new_cols, ref_new_cols], axis=1)
+    final_merged_df = pd.concat([final_merged_df, ref_new_cols], axis=1) # cit_new_cols, 
     # Normalize corpusId to integer-like values without trailing '.0', robust to non-numeric entries
-    if "corpusId" in final_merged_df.columns:
-        corpus_str = (
-            final_merged_df["corpusId"]
-            .astype(str)
-            .str.strip()
-            .str.replace(r"\.0$", "", regex=True)
-            .replace({"nan": None, "NaN": None, "None": None, "": None})
-        )
+    if "corpusId" in final_merged_df.columns: # num -> str -> int
+        corpus_str = final_merged_df["corpusId"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True).replace({"nan": None, "NaN": None, "None": None, "": None})
         corpus_numeric = pd.to_numeric(corpus_str, errors="coerce", downcast="integer")
         # Use pandas nullable integer type to allow missing values
         final_merged_df["corpusId"] = corpus_numeric.astype("Int64")
     to_parquet(final_merged_df, output_file)
     print('Save merged dataframe to', output_file)
     
+    # Row-level intent coverage
+    summarize_row_intents(final_merged_df, col_name="original_response_references")
+
     # Compute and print the intents counter statistics
     intents_counter = count_intents(final_merged_df, col_name="original_response_references")
     print("Intent Counter Stats:")

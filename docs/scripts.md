@@ -122,7 +122,7 @@ python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_
 # (local corpus version) python -m src.data_localindexing.s2orc_refcit_local --tag 251117 --src_dir /u501/z6dong/shared_data/se_citations_250218 > logs/extract_full_records.log 2>&1 # Input: batch_results + hit_ids_<tag>.txt, output: full_hits_<tag>.jsonl
 # (local corpus version) python -m src.data_localindexing.s2orc_refcit_local_post --tag 251117 > logs/s2orc_local_query_ref_cit_251117.log 2>&1 # Input: full_hits_<tag>.jsonl (or fallback full_hits.jsonl), Output: s2orc_*_<tag>.parquet
 # (deprecate) - bash src/data_localindexing/build_mini_s2orc_es.sh # choose dump data to setup and batch query | I: paper_index_mini.db, modelcard_dedup_titles.json → O: Elasticsearch index (e.g., papers_index), query_cache.parquet
-python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_cit/ref_cache_251117.parquet, O: s2orc_rerun_251117.parquet
+# (deprecate) python -m src.data_preprocess.s2orc_merge --tag 251117 > logs/s2orc_merge_251117.log 2>&1 # parse refs/cits | I: s2orc_cit/ref_cache_251117.parquet, O: s2orc_rerun_<tag>.parquet
  #- bash src/data_localindexing/build_mini_citation_es.sh > logs/build_mini_citation_es.log 2>&1 # I: xx | O: batch_results
 # (local corpus version) bash src/data_preprocess/s2orc_fulltext_local.sh # extract fulltext -> ref/cit info
 # I: query_cache.parquet/s2orc_rerun.parquet, paper_index_mini.db, NDJSON files in /se_s2orc_250218 → O: extracted_annotations.parquet, tmp_merged_df.parquet, tmp_extracted_lines.parquet
@@ -177,7 +177,7 @@ Finally, we merge table list from different sources back to modelID level.
 To substitute step2_integration_s2orc_llm, step2_llm_save (we skip llm tables as it is unstable), step2_merge_tables, we can use step2_merge_tables_simplify to directly generate the final merged table list at modelID level (without running the LLM table extraction pipeline).
 ```bash
 python -m src.data_preprocess.step2_merge_tables_simplify --tag 251117 --v2_mode > logs/step2_merge_tables_simplify_251117.log 2>&1 
-  # Input: s2orc_rerun_<tag>.parquet, title2arxiv_cache_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, 
+  # Input: s2orc_titles2ids_<tag>.parquet, title2arxiv_cache_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, 
   #        hugging_deduped_mapping_v2_<tag>.json, deduped_github_csvs_v2_<tag>/md_to_csv_mapping.json. html_parsing_results_v2_<tag>.parquet, modelcard_step2_v2_<tag>.parquet,
   # Output: modelcard_step3_merged_v2_<tag>.parquet
 ```
@@ -187,10 +187,10 @@ python -m src.data_preprocess.step2_merge_tables_simplify --tag 251117 --v2_mode
 Ensure data quality and consistency before generating final ground truth.
 
 ```bash
-# Umm, dedup better happen before merge, e.g. in s2orc_rerun.parquet.
+# Umm, dedup better happen before merge, maybe in the future TODO
 python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/step2_dedup_tables_v2_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet, and others
 python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_v2_<tag>/dup_matrix_v2_<tag>.pkl, deduped_v2_<tag>/stats_v2_<tag>.json. Output: heatmaps heatmap_overlap_v2_<tag>.pdf / heatmap_percentage_v2_<tag>.pdf in data/analysis/
-python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_rerun_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt. Here we filter out over large tables (max_cols=100, max_rows=200)
+python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_titles2ids_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt. Here we filter out over large tables (max_cols=100, max_rows=200)
 python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode --exclude_resources llm > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
 
 # python -m src.data_analysis.qc_anomaly --recursive > logs/qc_anomaly.log 2>&1 # this one is without tag, as we don't run v1 with 251117 anymore.
@@ -204,8 +204,8 @@ We could go for starmie searching and baselines searching. We need groundtruth f
 
 This section details the process of generating ground truth labels for table unionability.
 ```bash
-python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_rerun_<tag>.parquet. Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
-python -m src.data_analysis.paper_relatedness_distribution --tag 251117 > logs/paper_relatedness_distribution_251117.log 2>&1  # (Optional) Plot violin figures of paper relatedness distribution. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: overlap_violin_by_mode_<tag>.pdf
+python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_references_cache_<tag>.parquet (use columns), s2orc_titles2ids_<tag>.parquet (use minimum corpusIds as main Key). Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
+# (deprecated, only meaningful when computing threshold) python -m src.data_analysis.paper_relatedness_distribution --tag 251117 > logs/paper_relatedness_distribution_251117.log 2>&1  # (Optional) Plot violin figures of paper relatedness distribution. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: overlap_violin_by_mode_<tag>.pdf
 # (Deprecated) python -m src.data_analysis.paper_relatedness_threshold --tag 251117 > logs/paper_relatedness_threshold_251117.log 2>&1  # (Optional) Determine paper relatedness thresholds. Input: modelcard_citation_all_matrices_<tag>.pkl.gz. Output: score_*.pdf files in data/analysis/
 ```
 
@@ -213,7 +213,7 @@ python -m src.data_analysis.paper_relatedness_distribution --tag 251117 > logs/p
 Generate the definitive ground truth files for evaluation.
 
 ```bash
-bash src/data_gt/step3_gt.sh 251117 > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_rerun_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
+bash src/data_gt/step3_gt.sh 251117 > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
 # (Optional) python -m src.data_gt.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 
 # (Optional) python -m src.data_gt.debug_npz --gt-dir data/gt/ > logs/debug_npz.log 2>&1 # Debug NPZ ground truth files to ensure valid conditions.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).
@@ -257,18 +257,18 @@ Execute Starmie's pipeline for contrastive learning, embedding extraction, and s
 python -m src.data_symlink.prepare_sample --tag 251117 --v2_mode --root_dir /u1/z6dong/Repo --output_file data/analysis/scilake_final_filelist_v2_251117.txt --limit 1000 --seed 42 > logs/prepare_sample_v2_251117.log 2>&1
 # hands to starmie
 bash scripts/step1_pretrain.sh > logs/step1_pretrain.log 2>&1  # Fine-tune contrastive learning model
-bash scripts/step2_extractvectors.sh > logs/step2_extractvectors_v2.log 2>&1  # Encode embeddings for query and datalake items
-bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search_v2.log 2>&1  # Perform data lake search (retrieval)
-bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_v2.log 2>&1  # Extract metrics based on ground truth and retrieval results; plot figures
-bash eval_per_resource.sh > logs/eval_per_resource_v2.log 2>&1  # Run ablation study on different resources (after getting results)
+bash scripts/step2_extractvectors.sh > logs/step2_extractvectors.log 2>&1  # Encode embeddings for query and datalake items
+bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search.log 2>&1  # Perform data lake search (retrieval)
+bash scripts/step3_processmetrics.sh > logs/step3_processmetrics.log 2>&1  # Extract metrics based on ground truth and retrieval results; plot figures
+bash eval_per_resource.sh > logs/eval_per_resource.log 2>&1  # Run ablation study on different resources (after getting results)
 
 # Using date-based tag (e.g., 251117)
-TAG=251117 bash scripts/step2_extractvectors.sh > logs/step2_extractvectors_251117.log 2>&1
-TAG=251117 bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search_251117.log 2>&1
-TAG=251117 bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_251117.log 2>&1
-TAG=251117 bash scripts/step3_processmetrics_all.sh <EXPERIMENT_INDEX> > logs/step3_processmetrics_all_251117.log 2>&1
-TAG=251117 bash eval_per_resource.sh > logs/eval_per_resource_251117.log 2>&1
-# bash eval_per_resource.sh  # (Alternatively, run before getting results)
+bash scripts/step1_pretrain.sh > logs/step1_pretrain_251117.log 2>&1
+bash scripts/step2_extractvectors.sh > logs/step2_extractvectors_251117.log 2>&1
+bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search_251117.log 2>&1
+bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_251117.log 2>&1
+bash scripts/step3_processmetrics_all.sh <EXPERIMENT_INDEX> > logs/step3_processmetrics_all_251117.log 2>&1
+bash eval_per_resource.sh > logs/eval_per_resource_251117.log 2>&1
 ```
 
 ### 7\. Baseline: Dense Search, Sparse Search, Hybrid Search

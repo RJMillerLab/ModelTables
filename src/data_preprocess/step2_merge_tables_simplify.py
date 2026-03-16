@@ -3,7 +3,7 @@ Author: Zhengyuan Dong
 Created: 2026-03-11
 Last Modified: 2026-03-11
 Description: Merge title2arxiv and html_parsing_results_v2 to get title2htmltab.
-Usage: python -m src.data_preprocess.step2_merge_tables_simplify --tag v2_251117
+Usage: python -m src.data_preprocess.step2_merge_tables_simplify --tag 251117 --v2_mode
 """
 
 import os
@@ -25,18 +25,21 @@ def main():
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
 
-    TITLE_PARQUET = os.path.join(base_path, 'processed', f"s2orc_rerun{suffix}.parquet")
+    # Use titles2ids as the canonical source of titles
+    TITLE_PARQUET = os.path.join(base_path, 'processed', f"s2orc_titles2ids{suffix}.parquet")
     TITLE2ARXIV_PARQUET = os.path.join(base_path, 'processed', f"title2arxiv_cache{suffix}.parquet")
     HTML_TABLE_PARQUET = os.path.join(base_path, 'processed', f"html_parsing_results{v2_suffix}{suffix}.parquet")
     #FINAL_OUTPUT_PARQUET = os.path.join(base_path, 'processed', f"title2htmltab{suffix}.parquet")
 
     print("📁 Paths in use:")
-    print(f"   Query titles:        {TITLE_PARQUET}")
+    print(f"   Query titles (titles2ids, non-null only): {TITLE_PARQUET}")
     print(f"   Title→arxiv cache:  {TITLE2ARXIV_PARQUET}")
     print(f"   HTML table list:      {HTML_TABLE_PARQUET}")
 
-    # --- Step 1: Load extracted annotations ---
+    # --- Step 1: Load titles (filter to non-null query_title & retrieved_title) ---
     df_title = pd.read_parquet(TITLE_PARQUET, columns=['query_title', 'retrieved_title'])
+    df_title = df_title[df_title['query_title'].notna() & df_title['retrieved_title'].notna()].copy()
+    
     df_title["norm_title"] = df_title["retrieved_title"].apply(normalize_title)
     df_title["preproc_title"] = df_title["retrieved_title"].apply(preprocess_title)
     print("📝 df_title shape:", df_title.shape)
