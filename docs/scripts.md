@@ -132,17 +132,17 @@ This section details the process of generating ground truth labels for table uni
 python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_references_cache_<tag>.parquet (use columns), s2orc_titles2ids_<tag>.parquet (use minimum corpusIds as main Key). Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
 
 PYTHONUNBUFFERED=1 python -m src.data_gt.step3_gt --tag 251117 --v2_mode > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
-# (Optional) python -m src.data_gt.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 
-# (Optional) python -m src.data_gt.debug_npz --gt-dir data/gt/ > logs/debug_npz.log 2>&1 # Debug NPZ ground truth files to ensure valid conditions.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).
 python -m src.data_gt.turn_tus_into_pickle > logs/turn_tus_into_pickle.log 2>&1
 # (deprecate) python -m src.data_gt.gt_combine > logs/gt_combine.log 2>&1
 python -m src.data_gt.modelcard_matrix --tag 251117 --v2_mode > logs/modelcard_matrix_v2_251117.log 2>&1  # Add other two levels of citation graphs (modelcard and dataset). Input: modelcard_step1_<tag>.parquet, modelcard_step3_dedup_v2_<tag>.parquet, modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_gt_related_model_v2_<tag>.parquet, data/gt/scilake_gt_modellink_*_v2_<tag>.npz
 python -m src.data_gt.merge_union --level direct --tag 251117 --v2_mode > logs/merge_union_v2_251117.log 2>&1  # Merge union ground truth. Input: data/gt/*_v2_<tag>.npz, *_v2_<tag>.pkl. Output: data/gt/csv_pair_union_*_v2_<tag>_processed.npz
-python -m src.data_analysis.gt_distri --tag 251117 --v2_mode > logs/gt_distri_251117.log 2>&1  # Plot GT length distribution (boxplot/violin). Input: data/gt/*_v2_<tag>.npz and *_v2_<tag>_processed.npz (requires merge_union first). Use same --tag as merge_union.
-python -m src.data_gt.nonzeroedge --gt_dir data/gt --tag 251117 --v2_mode > logs/nonzeroedge_v2_251117.log 2>&1  # Compute non-zero edge statistics for citation graphs. Input: data/gt/*_v2_<tag>.npz
-python -m src.data_gt.create_csvlist_variants --level direct --tag 251117 --v2_mode > logs/create_csvlist_variants_251117.log 2>&1  # Update CSV lists for various ground truth variants. Input: data/gt/*_v2_<tag>.pkl
-# (deprecate) python -m src.data_analysis.gt_fig # plot stats
+python -m src.data_gt.gt_distri --tag 251117 --v2_mode > logs/gt_distri_251117.log 2>&1  # Plot GT length distribution (boxplot/violin). Input: data/gt/*_v2_<tag>.npz and *_v2_<tag>_processed.npz (requires merge_union first). Use same --tag as merge_union.
+python -m src.data_gt.nonzeroedge --tag 251117 --v2_mode > logs/nonzeroedge_v2_251117.log 2>&1  # Compute non-zero edge statistics for citation graphs. Input: data/gt/*_v2_<tag>.npz
+
+# input: table, query how many tables related to this table in the ground truth
+python -m src.data_gt.query_table2related_from_gt --query 1910.09700_table0.csv --levels direct --out tmp/direct_table_1910.txt
+python -m src.data_gt.query_table2related_from_gt --query 1910.09700_table0.csv --targets table_b.csv table_c.csv --level direct
 ```
 
 ### 5\. Create Symlinks for Starmie Integration
@@ -171,6 +171,7 @@ Execute Starmie's pipeline for contrastive learning, embedding extraction, and s
 ```bash
 python -m src.data_symlink.prepare_sample --tag 251117 --v2_mode --root_dir /u1/z6dong/Repo --output_file data/analysis/scilake_final_filelist_v2_251117.txt --limit 1000 --seed 42 > logs/prepare_sample_v2_251117.log 2>&1 # sample files for pretraining
 # hands to starmie
+cd ../starmie_internal
 # Using date-based tag (e.g., 251117)
 bash scripts/step1_pretrain.sh > logs/step1_pretrain_251117.log 2>&1 # Fine-tune contrastive learning model
 bash scripts/step2_extractvectors.sh > logs/step2_extractvectors_251117.log 2>&1 # Encode embeddings for query and datalake items

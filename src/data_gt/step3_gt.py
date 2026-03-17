@@ -19,6 +19,40 @@ from itertools import combinations
 from scipy.sparse import csr_matrix, coo_matrix, save_npz, load_npz
 from src.utils import is_list_like, to_list_safe
 
+############## defined path ####################
+def get_npz_path(v2_suffix, suffix, root_dir="data/gt"):
+    LEVEL_NPZ = {
+        "direct": os.path.join(root_dir, f"csv_pair_matrix_direct_label{v2_suffix}{suffix}.npz"),
+        "direct_influential": os.path.join(root_dir, f"csv_pair_matrix_direct_label_influential{v2_suffix}{suffix}.npz"),
+        "direct_methodology_or_result": os.path.join(root_dir, f"csv_pair_matrix_direct_label_methodology_or_result{v2_suffix}{suffix}.npz"),
+        "direct_methodology_or_result_influential": os.path.join(root_dir, f"csv_pair_matrix_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.npz"),
+        "max_pr": os.path.join(root_dir, f"csv_pair_matrix_max_pr{v2_suffix}{suffix}.npz"),
+        "max_pr_influential": os.path.join(root_dir, f"csv_pair_matrix_max_pr_influential{v2_suffix}{suffix}.npz"),
+        "max_pr_methodology_or_result": os.path.join(root_dir, f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.npz"),
+        "max_pr_methodology_or_result_influential": os.path.join(root_dir, f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.npz"),
+        "union": os.path.join(root_dir, f"csv_pair_union_direct_processed{v2_suffix}{suffix}.npz"),
+        "model": os.path.join(root_dir, f"scilake_gt_modellink_model_adj_processed{v2_suffix}{suffix}.npz"),
+        "dataset": os.path.join(root_dir, f"scilake_gt_modellink_dataset_adj_processed{v2_suffix}{suffix}.npz"),
+    }
+
+    # Mapping of level names to CSV list pickle filenames
+    CANONICAL_CSVLIST = f"csv_list{v2_suffix}{suffix}.pkl"
+    LEVEL_CSVLIST = {
+        "direct": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
+        "direct_influential": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
+        "direct_methodology_or_result": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
+        "direct_methodology_or_result_influential": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
+        "max_pr": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
+        "max_pr_influential": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
+        "max_pr_methodology_or_result": os.path.join(root_dir, f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.pkl"),
+        "max_pr_methodology_or_result_influential": os.path.join(root_dir, f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.pkl"),
+        "union": os.path.join(root_dir, f"csv_pair_union_direct_processed_csv_list{v2_suffix}{suffix}.pkl"),
+        "model": os.path.join(root_dir, f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}_processed.pkl"),
+        "dataset": os.path.join(root_dir, f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}_processed.pkl"),
+    }
+    return LEVEL_NPZ, LEVEL_CSVLIST
+
+
 # ===== FACTORIES =========================================================== #
 def load_score_matrix(rel_key: str):
     """Factory loader for paperId‑level relationship graphs."""
@@ -140,7 +174,7 @@ def build_A_matrix_paper2csv(titles_to_tables_with_modelid, csv2idx):
     col_i = np.concatenate([p[1] for p in parts]) if parts else np.array([], dtype=np.int64)
     A = coo_matrix((np.ones(len(row_i), bool),(row_i,col_i)), shape=(len(paper_index), len(csv2idx))).astype(bool).tocsr()
     # save A as sparse matrix
-    save_npz(f"data/gt{v2_suffix}{suffix}/A_matrix_{v2_suffix}{suffix}.npz", A, compressed=True)
+    save_npz(f"data/gt{v2_suffix}{suffix}/A_matrix{v2_suffix}{suffix}.npz", A, compressed=True)
     return A
 
 def build_B_matrix_csv2csv_within_model(titles_to_tables_with_modelid, csv2idx):
@@ -153,7 +187,7 @@ def build_B_matrix_csv2csv_within_model(titles_to_tables_with_modelid, csv2idx):
             col_b.extend([j, i])
     csv_csv_adj_within_model = coo_matrix((np.ones(len(row_b), int), (row_b, col_b)), shape=(len(csv2idx), len(csv2idx))).tocsr() # B
     print(f"Step2: [Intra-row] Adjacency shape: {csv_csv_adj_within_model.shape}: ", csv_csv_adj_within_model.nnz)
-    save_npz(f"data/gt{v2_suffix}{suffix}/B_matrix_{v2_suffix}{suffix}.npz", csv_csv_adj_within_model, compressed=True)
+    save_npz(f"data/gt{v2_suffix}{suffix}/B_matrix{v2_suffix}{suffix}.npz", csv_csv_adj_within_model, compressed=True)
 
 def build_titles2cid():
     # Use titles2ids as canonical source of (corpusId, query_title)
@@ -182,7 +216,7 @@ def build_element_matrix_at_one_time():
     flat = [c for _, cs in titles_to_tables_with_modelid for c in cs]
     all_csvs = list(dict.fromkeys(flat))# already basename in titles_to_tables_with_modelid
     #all_csvs = [os.path.basename(csv) for csv in all_csvs]
-    csv_list_path = f"data/gt{v2_suffix}{suffix}/csv_list_{v2_suffix}{suffix}.pkl"
+    csv_list_path = f"data/gt{v2_suffix}{suffix}/csv_list{v2_suffix}{suffix}.pkl"
     with open(csv_list_path, "wb") as f:
         pickle.dump(all_csvs, f)
     print(f"✅ CSV list saved (order matches matrix rows/cols) to {csv_list_path}")
@@ -206,8 +240,8 @@ def build_ground_truth(rel_key, overlap_rate_threshold, suffix, v2_suffix):
     print(f"  - Non-zero elements: {paper_paper_adj.nnz}")
 
     t1 = time.time()
-    csv_csv_adj_within_model = load_npz(f"data/gt{v2_suffix}{suffix}/B_matrix_{v2_suffix}{suffix}.npz")
-    paper_csv_adj = load_npz(f"data/gt{v2_suffix}{suffix}/A_matrix_{v2_suffix}{suffix}.npz")
+    csv_csv_adj_within_model = load_npz(f"data/gt{v2_suffix}{suffix}/B_matrix{v2_suffix}{suffix}.npz")
+    paper_csv_adj = load_npz(f"data/gt{v2_suffix}{suffix}/A_matrix{v2_suffix}{suffix}.npz")
     csv_csv_adj_outside_model = paper_csv_adj.T.dot(paper_paper_adj).dot(paper_csv_adj).tocsr()
     print(f"Step2: [Inter-row] Adjacency shape: {csv_csv_adj_outside_model.shape}: ", csv_csv_adj_outside_model.nnz)
     # 3) sum and extract

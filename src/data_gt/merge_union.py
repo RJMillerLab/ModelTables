@@ -14,7 +14,7 @@ import argparse
 import pickle
 import numpy as np
 from scipy.sparse import load_npz, csr_matrix, save_npz
-from src.data_gt.debug_npz import get_npz_path
+from src.data_gt.step3_gt import get_npz_path
 DATA_DIR = "data/gt"
 
 def _full(p):
@@ -31,17 +31,7 @@ def load_bool_matrix(path):
     print(f"Loaded matrix '{path}' → shape={M.shape}, nnz={M.nnz}, dtype={M.dtype}")
     return M
 
-def infer_list_path(npz_path):
-    base = os.path.splitext(npz_path)[0]
-    candidate = base + '_csv_list.pkl'
-    if os.path.exists(candidate):
-        return candidate
-    raise FileNotFoundError(f"Could not infer list file for {npz_path}")
-
-def build_union_matrix(matrix_paths, list_paths=None):
-    if list_paths is None:
-        list_paths = [p.replace('.npz', '_csv_list.pkl') for p in matrix_paths]
-
+def build_union_matrix(matrix_paths, list_paths):
     # Load ID lists
     print("Loading CSV lists…")
     lists = []
