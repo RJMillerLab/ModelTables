@@ -94,7 +94,12 @@ def load_titles_to_tables_with_modelid():
     finally:
         con.close()
 
-    rows = [(list(p), list(c)) for p, c in zip(df["all_title_list_valid"], df["all_table_list_dedup"])]
+    # Normalize CSV paths to basenames once here so downstream code only sees basenames.
+    rows = []
+    for titles, csvs in zip(df["all_title_list_valid"], df["all_table_list_dedup"]):
+        titles = list(titles)
+        csvs = [os.path.basename(c) for c in csvs]
+        rows.append((titles, csvs))
     count_after_dedup = len(rows)
     print(f"[DEBUG] Dedup (by titles+csvs): before {count_before_dedup}, after {count_after_dedup}")
     print(f"[DEBUG] Loaded titles_to_tables_with_modelid with length: {len(rows)}")
@@ -175,8 +180,8 @@ def build_element_matrix_at_one_time():
     t1 = time.time()
     # build global CSV list & index
     flat = [c for _, cs in titles_to_tables_with_modelid for c in cs]
-    all_csvs = list(dict.fromkeys(flat))
-    all_csvs = [os.path.basename(csv) for csv in all_csvs]
+    all_csvs = list(dict.fromkeys(flat))# already basename in titles_to_tables_with_modelid
+    #all_csvs = [os.path.basename(csv) for csv in all_csvs]
     csv_list_path = f"data/gt{v2_suffix}{suffix}/csv_list_{v2_suffix}{suffix}.pkl"
     with open(csv_list_path, "wb") as f:
         pickle.dump(all_csvs, f)
