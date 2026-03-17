@@ -14,7 +14,7 @@ import argparse
 import pickle
 import numpy as np
 from scipy.sparse import load_npz, csr_matrix, save_npz
-
+from src.data_gt.debug_npz import get_npz_path
 DATA_DIR = "data/gt"
 
 def _full(p):
@@ -145,33 +145,7 @@ if __name__ == '__main__':
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
 
-    LEVEL_NPZ = {
-        "direct"  : f"csv_pair_matrix_direct_label{v2_suffix}{suffix}.npz",
-        "direct_influential": f"csv_pair_matrix_direct_label_influential{v2_suffix}{suffix}.npz",
-        "direct_methodology_or_result": f"csv_pair_matrix_direct_label_methodology_or_result{v2_suffix}{suffix}.npz",
-        "direct_methodology_or_result_influential": f"csv_pair_matrix_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.npz",
-        "max_pr": f"csv_pair_matrix_max_pr{v2_suffix}{suffix}.npz",
-        "max_pr_influential": f"csv_pair_matrix_max_pr_influential{v2_suffix}{suffix}.npz",
-        "max_pr_methodology_or_result": f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.npz",
-        "max_pr_methodology_or_result_influential": f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.npz",
-        #"union" : f"csv_pair_union{v2_suffix}{suffix}.npz",
-        "model" : f"scilake_gt_modellink_model_adj{v2_suffix}{suffix}.npz",
-        "dataset": f"scilake_gt_modellink_dataset_adj{v2_suffix}{suffix}.npz",
-    }
-
-    LEVEL_CSVLIST = {
-        "direct"  : f"csv_list_direct_label{v2_suffix}{suffix}.pkl",
-        "direct_influential": f"csv_list_direct_label_influential{v2_suffix}{suffix}.pkl",
-        "direct_methodology_or_result": f"csv_list_direct_label_methodology_or_result{v2_suffix}{suffix}.pkl",
-        "direct_methodology_or_result_influential": f"csv_list_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.pkl",
-        "max_pr": f"csv_list_max_pr{v2_suffix}{suffix}.pkl",
-        "max_pr_influential": f"csv_list_max_pr_influential{v2_suffix}{suffix}.pkl",
-        "max_pr_methodology_or_result": f"csv_list_max_pr_methodology_or_result{v2_suffix}{suffix}.pkl",
-        "max_pr_methodology_or_result_influential": f"csv_list_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.pkl",
-        #"union" : f"csv_pair_union_csv_list{v2_suffix}{suffix}.pkl",
-        "model" : f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}.pkl",
-        "dataset": f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}.pkl",
-    }
+    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix)
 
     primary_key = args.level
     primary_npz = _full(LEVEL_NPZ[primary_key])

@@ -5,6 +5,7 @@ python -m src.data_gt.compare_gt_stats --gt_dir data/gt
 import os, pickle, hashlib
 from collections import Counter
 from scipy.sparse import load_npz
+from src.data_gt.debug_npz import get_npz_path
 
 def load_gt(path):
     """Load a pickled adjacency dict."""
@@ -50,17 +51,11 @@ def summarize(adj):
     avg_degree = row_counts.mean() if num_nodes else 0
     return num_nodes, total_links, avg_degree
 
-def main(gt_dir):
-    LEVELS = [
-        "direct_label",
-        "direct_label_influential",
-        "direct_label_methodology_or_result",
-        "direct_label_methodology_or_result_influential",
-        "max_pr",
-        "max_pr_influential",
-        "max_pr_methodology_or_result",
-        "max_pr_methodology_or_result_influential",
-    ]
+def main(gt_dir, v2_mode, tag):
+    v2_suffix = "_v2" if v2_mode else ""
+    suffix = f"_{tag}" if tag else ""
+    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix)
+    LEVELS = LEVEL_NPZ.keys()
 
     adjs = {}
     hashes = {}
@@ -135,5 +130,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Compare GT adjacency pickle files with deeper debug')
     parser.add_argument('--gt_dir', type=str, default='data/gt', help='Directory of GT pickles')
+    parser.add_argument('--v2_mode', action='store_true', help="Use v2 mode.")
+    parser.add_argument('--tag', default=None, help="Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.")
     args = parser.parse_args()
-    main(args.gt_dir)
+    main(args.gt_dir, args.v2_mode, args.tag)

@@ -15,35 +15,37 @@ except ImportError:
 import numpy as np
 from scipy.sparse import load_npz
 
-# Mapping of level names to NPZ filenames
-LEVEL_NPZ = {
-    "direct": "csv_pair_matrix_direct_label.npz",
-    "direct_influential": "csv_pair_matrix_direct_label_influential.npz",
-    "direct_methodology_or_result": "csv_pair_matrix_direct_label_methodology_or_result.npz",
-    "direct_methodology_or_result_influential": "csv_pair_matrix_direct_label_methodology_or_result_influential.npz",
-    "max_pr": "csv_pair_matrix_max_pr.npz",
-    "max_pr_influential": "csv_pair_matrix_max_pr_influential.npz",
-    "max_pr_methodology_or_result": "csv_pair_matrix_max_pr_methodology_or_result.npz",
-    "max_pr_methodology_or_result_influential": "csv_pair_matrix_max_pr_methodology_or_result_influential.npz",
-    "union": "csv_pair_union_direct_processed.npz",
-    "model": "scilake_gt_modellink_model_adj_processed.npz",
-    "dataset": "scilake_gt_modellink_dataset_adj_processed.npz",
-}
+def get_npz_path(v2_suffix, suffix):
+    LEVEL_NPZ = {
+        "direct": f"csv_pair_matrix_direct_label{v2_suffix}{suffix}.npz",
+        "direct_influential": f"csv_pair_matrix_direct_label_influential{v2_suffix}{suffix}.npz",
+        "direct_methodology_or_result": f"csv_pair_matrix_direct_label_methodology_or_result{v2_suffix}{suffix}.npz",
+        "direct_methodology_or_result_influential": f"csv_pair_matrix_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.npz",
+        "max_pr": f"csv_pair_matrix_max_pr{v2_suffix}{suffix}.npz",
+        "max_pr_influential": f"csv_pair_matrix_max_pr_influential{v2_suffix}{suffix}.npz",
+        "max_pr_methodology_or_result": f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.npz",
+        "max_pr_methodology_or_result_influential": f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.npz",
+        "union": f"csv_pair_union_direct_processed{v2_suffix}{suffix}.npz",
+        "model": f"scilake_gt_modellink_model_adj_processed{v2_suffix}{suffix}.npz",
+        "dataset": f"scilake_gt_modellink_dataset_adj_processed{v2_suffix}{suffix}.npz",
+    }
 
-# Mapping of level names to CSV list pickle filenames
-LEVEL_CSVLIST = {
-    "direct": "csv_list_direct_label.pkl",
-    "direct_influential": "csv_list_direct_label_influential.pkl",
-    "direct_methodology_or_result": "csv_list_direct_label_methodology_or_result.pkl",
-    "direct_methodology_or_result_influential": "csv_list_direct_label_methodology_or_result_influential.pkl",
-    "max_pr": "csv_list_max_pr.pkl",
-    "max_pr_influential": "csv_list_max_pr_influential.pkl",
-    "max_pr_methodology_or_result": "csv_list_max_pr_methodology_or_result.pkl",
-    "max_pr_methodology_or_result_influential": "csv_list_max_pr_methodology_or_result_influential.pkl",
-    "union": "csv_pair_union_direct_processed_csv_list.pkl",
-    "model": "scilake_gt_modellink_model_adj_csv_list_processed.pkl",
-    "dataset": "scilake_gt_modellink_dataset_adj_csv_list_processed.pkl",
-}
+    # Mapping of level names to CSV list pickle filenames
+    CANONICAL_CSVLIST = f"csv_list{v2_suffix}{suffix}.pkl"
+    LEVEL_CSVLIST = {
+        "direct": f"{CANONICAL_CSVLIST}",
+        "direct_influential": f"{CANONICAL_CSVLIST}",
+        "direct_methodology_or_result": f"{CANONICAL_CSVLIST}",
+        "direct_methodology_or_result_influential": f"{CANONICAL_CSVLIST}",
+        "max_pr": f"{CANONICAL_CSVLIST}",
+        "max_pr_influential": f"{CANONICAL_CSVLIST}",
+        "max_pr_methodology_or_result": f"{CANONICAL_CSVLIST}",
+        "max_pr_methodology_or_result_influential": f"{CANONICAL_CSVLIST}",
+        "union": f"{CANONICAL_CSVLIST}",
+        "model": f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}_processed.pkl",
+        "dataset": f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}_processed.pkl",
+    }
+    return LEVEL_NPZ, LEVEL_CSVLIST
 
 def inspect_npz(matrix_path, csvlist_path, row_idx):
     print(f"\n=== Inspecting matrix: {os.path.basename(matrix_path)} ===")
@@ -91,19 +93,19 @@ def inspect_npz(matrix_path, csvlist_path, row_idx):
     print(f"  CSV list length: {len(csv_list)}, sample entries: {csv_list[:3]}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Batch inspect multiple CSR matrices (.npz) and their CSV lists"
-    )
-    parser.add_argument(
-        "--gt-dir", required=True,
-        help="Directory containing the ground-truth .npz and .pkl files"
-    )
-    parser.add_argument(
-        "--row", type=int, default=0,
-        help="Row index to inspect in each matrix (0-based)"
-    )
+    parser = argparse.ArgumentParser(description="Batch inspect multiple CSR matrices (.npz) and their CSV lists")
+    parser.add_argument("--gt-dir", required=True, help="Directory containing the ground-truth .npz and .pkl files")
+    parser.add_argument("--row", type=int, default=0, help="Row index to inspect in each matrix (0-based)")
+    parser.add_argument("--v2_mode", action="store_true", help="Use v2 mode.")
+    parser.add_argument("--tag", default=None, help="Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.")
     args = parser.parse_args()
 
+    v2_suffix = "_v2" if args.v2_mode else ""
+    suffix = f"_{args.tag}" if args.tag else ""
+
+    # Mapping of level names to NPZ filenames
+    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix)
+    
     for level, npz_name in LEVEL_NPZ.items():
         npz_path = os.path.join(args.gt_dir, npz_name)
         csvlist_name = LEVEL_CSVLIST[level]

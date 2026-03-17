@@ -131,7 +131,7 @@ This section details the process of generating ground truth labels for table uni
 ```bash
 python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_references_cache_<tag>.parquet (use columns), s2orc_titles2ids_<tag>.parquet (use minimum corpusIds as main Key). Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
 
-bash src/data_gt/step3_gt.sh 251117 > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level, model-level, dataset-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
+PYTHONUNBUFFERED=1 python -m src.data_gt.step3_gt --tag 251117 --v2_mode > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
 # (Optional) python -m src.data_gt.check_gt_coverage --csv-name 1910.09700_table0.csv --levels direct --mode both > logs/check_gt_coverage.log 2>&1 
 # (Optional) python -m src.data_gt.debug_npz --gt-dir data/gt/ > logs/debug_npz.log 2>&1 # Debug NPZ ground truth files to ensure valid conditions.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).

@@ -14,7 +14,7 @@ import os
 import argparse
 import pickle
 from pathlib import Path
-
+from src.data_gt.debug_npz import get_npz_path
 # Mapping of level to CSV list file
 
 SUFFIXES = {
@@ -65,19 +65,7 @@ def main():
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
 
-    LEVEL_CSVLIST = {
-        "direct": f"csv_list_direct_label{v2_suffix}{suffix}.pkl",
-        "direct_influential": f"csv_list_direct_label_influential{v2_suffix}{suffix}.pkl",
-        "direct_methodology_or_result": f"csv_list_direct_label_methodology_or_result{v2_suffix}{suffix}.pkl",
-        "direct_methodology_or_result_influential": f"csv_list_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.pkl",
-        "max_pr": f"csv_list_max_pr{v2_suffix}{suffix}.pkl",
-        "max_pr_influential": f"csv_list_max_pr_influential{v2_suffix}{suffix}.pkl",
-        "max_pr_methodology_or_result": f"csv_list_max_pr_methodology_or_result{v2_suffix}{suffix}.pkl",
-        "max_pr_methodology_or_result_influential": f"csv_list_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.pkl",
-        "model": f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}_processed.pkl",
-        "dataset": f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}_processed.pkl",
-        "union": f"csv_pair_union_direct{v2_suffix}{suffix}_processed_csv_list.pkl",
-    }
+    NPZ_PATH, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix)
     process_csvlist(os.path.join("data", "gt", LEVEL_CSVLIST[args.level]))
 
 if __name__ == "__main__":

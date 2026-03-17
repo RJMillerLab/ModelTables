@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 from scipy.sparse import load_npz, csr_matrix, csc_matrix
-
+from src.data_gt.debug_npz import get_npz_path
 
 DEFAULT_GT_DIR = os.path.join('data', 'gt')
 
@@ -151,6 +151,10 @@ def main():
     parser.add_argument('--gt-dir', default=DEFAULT_GT_DIR, help='Directory containing GT .npz and csv index.')
     parser.add_argument('--mode', choices=['row', 'col', 'both'], default='both', help='Coverage mode: row/col/both')
     args = parser.parse_args()
+
+    v2_suffix = "_v2" if args.v2_mode else ""
+    suffix = f"_{args.tag}" if args.tag else ""
+    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix)
 
     if not os.path.isdir(args.gt_dir):
         print(f"GT dir not found: {args.gt_dir}")

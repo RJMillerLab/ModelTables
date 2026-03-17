@@ -21,21 +21,7 @@ LEVELS = [
     "dataset",
 ]
 
-LEVEL_NPZ = {
-    "direct": "csv_pair_matrix_direct_label.npz",
-    "max_pr": "csv_pair_matrix_max_pr.npz",
-    "union": "csv_pair_union_direct_processed.npz",
-    "model": "scilake_gt_modellink_model_adj_processed.npz",
-    "dataset": "scilake_gt_modellink_dataset_adj_processed.npz",
-}
-
-LEVEL_CSVLIST = {
-    "direct": "csv_list_direct_label.pkl",
-    "max_pr": "csv_list_max_pr.pkl",
-    "union": "csv_pair_union_direct_processed_csv_list.pkl",
-    "model": "scilake_gt_modellink_model_adj_csv_list_processed.pkl",
-    "dataset": "scilake_gt_modellink_dataset_adj_csv_list_processed.pkl",
-}
+from src.data_gt.debug_npz import get_npz_path
 
 def check_pair_fast(gt_dir, csv1, csv2_list):
     for level in LEVELS:
@@ -69,7 +55,14 @@ if __name__ == "__main__":
     parser.add_argument('--gt-dir', required=True, help="Directory containing the ground-truth .npz and .pkl files")
     parser.add_argument('--csv1', required=True, help="First CSV filename (with extension)")
     parser.add_argument('--csv2', required=True, nargs='+', help="Second CSV filename(s) (with extension)")
+    parser.add_argument('--v2_mode', action='store_true', help="Use v2 mode.")
+    parser.add_argument('--tag', default=None, help="Tag suffix for versioning (e.g., 251117). Enables versioning mode for GT files.")
     args = parser.parse_args()
+
+    v2_suffix = "_v2" if args.v2_mode else ""
+    suffix = f"_{args.tag}" if args.tag else ""
+
+    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix)
 
     print(f"\nResults for {args.csv1} <-> {args.csv2}")
     check_pair_fast(args.gt_dir, args.csv1, args.csv2) 
