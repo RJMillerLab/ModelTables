@@ -654,11 +654,12 @@ if __name__ == "__main__":
     df = pd.read_parquet(modelid2titles_path, columns=['modelId', 'all_title_list'])
     # Only keep entries where both query_title and retrieved_title are non-null,
     # then drop retrieved_title for downstream stats.
-    df_integration = pd.read_parquet(query_file, columns=['query_title', 'retrieved_title'])
-    df_integration = df_integration[
-        df_integration['query_title'].notna() & df_integration['retrieved_title'].notna()
-    ].copy()
-    df_integration = df_integration.drop(columns=['retrieved_title'])
+    df_integration = pd.read_parquet(query_file, columns=['query_title', 'retrieved_title', 'corpusId'])
+    df_integration = df_integration[df_integration['query_title'].notna() & df_integration['retrieved_title'].notna()].copy()
+    print(f"df_integration shape after dropping null query_title and retrieved_title: {df_integration.shape}")
+    df_integration = df_integration[df_integration['corpusId'].notna()].copy()
+    print(f"df_integration shape after dropping null corpusId: {df_integration.shape}")
+    df_integration = df_integration.drop(columns=['retrieved_title', 'corpusId'])
     df_integration.rename(columns={'query_title': 'query'}, inplace=True)
     # read data/processed/modelcard_step3_dedup.parquet and get modelId and 4 resources keys
     df_dedup = pd.read_parquet(input_file_dedup, columns=['modelId', 'hugging_table_list_dedup', 'github_table_list_dedup', 'html_table_list_mapped_dedup', 'llm_table_list_mapped_dedup'])

@@ -19,36 +19,120 @@ from itertools import combinations
 from scipy.sparse import csr_matrix, coo_matrix, save_npz, load_npz
 from src.utils import is_list_like, to_list_safe
 
+
+def fast_multiply(A: csr_matrix, B: csr_matrix):
+    """
+    Fast multiply C = A @ B with two layers of simple pruning
+
+    First layer of pruning:
+    - Drop rows of A that are all zero
+    - Drop columns of B that are all zero
+
+    Second layer of pruning:
+    - Drop columns of A that are all zero
+    - Drop rows of B that are all zero
+
+    Finally, restore the dropped rows/columns with zeros, so the returned C is still the original size.
+    Also print the pruning ratios and a rough "dense computation ratio".
+    """
+    # Ensure A and B are CSR matrices for stable getnnz / slicing
+    if not isinstance(A, csr_matrix):
+        A = A.tocsr()
+    if not isinstance(B, csr_matrix):
+        B = B.tocsr()
+
+    n_rows_A, n_cols_A = A.shape
+    n_rows_B, n_cols_B = B.shape
+    assert n_cols_A == n_rows_B, "Shape mismatch for A @ B"
+
+    print("[fast-matmul] === A @ B start ===")
+    print("[fast-matmul] A:", A.shape, "nnz", A.nnz,
+          "| B:", B.shape, "nnz", B.nnz)
+
+    # 1) Outer layer: non-zero rows of A / non-zero columns of B
+    row_mask_A = np.diff(A.indptr) > 0
+    col_nnz_B = np.asarray(B.getnnz(axis=0)).ravel()
+    col_mask_B = col_nnz_B > 0
+
+    kept_rows_A = int(row_mask_A.sum())
+    kept_cols_B = int(col_mask_B.sum())
+    print(f"[fast-matmul] keep A rows: {kept_rows_A}/{n_rows_A} "
+          f"(dropped {n_rows_A - kept_rows_A} zero rows)")
+    print(f"[fast-matmul] keep B cols: {kept_cols_B}/{n_cols_B} "
+          f"(dropped {n_cols_B - kept_cols_B} zero cols)")
+
+    A_outer = A[row_mask_A]
+    B_outer = B[:, col_mask_B]
+
+    # 2) Shared dimension: only keep k where both A_outer[:, k] and B_outer[k, :] are non-zero
+    col_nnz_A = np.asarray(A_outer.getnnz(axis=0)).ravel()
+    row_nnz_B = np.asarray(B_outer.getnnz(axis=1)).ravel()
+    active = (col_nnz_A > 0) & (row_nnz_B > 0)
+    idx = np.where(active)[0]
+
+    print(f"[fast-matmul] active shared indices: {len(idx)}/{A_outer.shape[1]} "
+          f"(dropped {A_outer.shape[1] - len(idx)} columns(A)/rows(B))")
+
+    # Rough dense work estimate: original ~ n_rows_A * n_cols_A * n_cols_B
+    dense_before = float(n_rows_A) * float(n_cols_A) * float(n_cols_B)
+    dense_after = float(kept_rows_A) * float(len(idx)) * float(kept_cols_B)
+    ratio = dense_after / dense_before if dense_before > 0 else 1.0
+    print(f"[fast-matmul] approx dense-work ratio after pruning: {ratio:.4e} "
+          f"(~{ratio*100:.2f}% of original)")
+
+    # 3) Perform multiplication on the pruned submatrices
+    A_inner = A_outer[:, idx]
+    B_inner = B_outer[idx, :]
+    C_inner = A_inner.dot(B_inner)
+    print("[fast-matmul] inner result shape:", C_inner.shape, "nnz:", C_inner.nnz)
+
+    # 4) Restore rows/columns to original size (dropped positions are all zeros)
+    if kept_rows_A == n_rows_A:
+        C_rows_restored = C_inner
+    else:
+        C_rows_restored = csr_matrix((n_rows_A, kept_cols_B), dtype=C_inner.dtype)
+        C_rows_restored[row_mask_A] = C_inner
+
+    if kept_cols_B == n_cols_B:
+        C_full = C_rows_restored
+    else:
+        C_full = csr_matrix((n_rows_A, n_cols_B), dtype=C_inner.dtype)
+        C_full[:, col_mask_B] = C_rows_restored
+
+    print("[fast-matmul] full result shape:", C_full.shape, "nnz:", C_full.nnz)
+    print("[fast-matmul] === A @ B done ===")
+    return C_full
+
 ############## defined path ####################
-def get_npz_path(v2_suffix, suffix, root_dir="data/gt"):
+def get_npz_path(v2_suffix, suffix, root_dir):
     LEVEL_NPZ = {
-        "direct": os.path.join(root_dir, f"csv_pair_matrix_direct_label{v2_suffix}{suffix}.npz"),
-        "direct_influential": os.path.join(root_dir, f"csv_pair_matrix_direct_label_influential{v2_suffix}{suffix}.npz"),
-        "direct_methodology_or_result": os.path.join(root_dir, f"csv_pair_matrix_direct_label_methodology_or_result{v2_suffix}{suffix}.npz"),
-        "direct_methodology_or_result_influential": os.path.join(root_dir, f"csv_pair_matrix_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.npz"),
-        "max_pr": os.path.join(root_dir, f"csv_pair_matrix_max_pr{v2_suffix}{suffix}.npz"),
-        "max_pr_influential": os.path.join(root_dir, f"csv_pair_matrix_max_pr_influential{v2_suffix}{suffix}.npz"),
-        "max_pr_methodology_or_result": os.path.join(root_dir, f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.npz"),
-        "max_pr_methodology_or_result_influential": os.path.join(root_dir, f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.npz"),
-        "union": os.path.join(root_dir, f"csv_pair_union_direct_processed{v2_suffix}{suffix}.npz"),
-        "model": os.path.join(root_dir, f"scilake_gt_modellink_model_adj_processed{v2_suffix}{suffix}.npz"),
-        "dataset": os.path.join(root_dir, f"scilake_gt_modellink_dataset_adj_processed{v2_suffix}{suffix}.npz"),
+        "direct": os.path.join(root_dir, 'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_direct_label{v2_suffix}{suffix}.npz"),
+        "direct_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_direct_label_influential{v2_suffix}{suffix}.npz"),
+        "direct_methodology_or_result": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_direct_label_methodology_or_result{v2_suffix}{suffix}.npz"),
+        "direct_methodology_or_result_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.npz"),
+        "max_pr": os.path.join('data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr{v2_suffix}{suffix}.npz"),
+        "max_pr_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_influential{v2_suffix}{suffix}.npz"),
+        "max_pr_methodology_or_result": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.npz"),
+        "max_pr_methodology_or_result_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.npz"),
+        "union": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_union_direct_processed{v2_suffix}{suffix}.npz"),
+        "model": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"scilake_gt_modellink_model_adj_processed{v2_suffix}{suffix}.npz"),
+        "dataset": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"scilake_gt_modellink_dataset_adj_processed{v2_suffix}{suffix}.npz"),
     }
 
     # Mapping of level names to CSV list pickle filenames
     CANONICAL_CSVLIST = f"csv_list{v2_suffix}{suffix}.pkl"
     LEVEL_CSVLIST = {
-        "direct": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
-        "direct_influential": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
-        "direct_methodology_or_result": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
-        "direct_methodology_or_result_influential": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
-        "max_pr": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
-        "max_pr_influential": os.path.join(root_dir, f"{CANONICAL_CSVLIST}"),
-        "max_pr_methodology_or_result": os.path.join(root_dir, f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.pkl"),
-        "max_pr_methodology_or_result_influential": os.path.join(root_dir, f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.pkl"),
-        "union": os.path.join(root_dir, f"csv_pair_union_direct_processed_csv_list{v2_suffix}{suffix}.pkl"),
-        "model": os.path.join(root_dir, f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}_processed.pkl"),
-        "dataset": os.path.join(root_dir, f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}_processed.pkl"),
+        "direct": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
+        "direct_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
+        "direct_methodology_or_result": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
+        "direct_methodology_or_result_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
+        "max_pr": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
+        "max_pr_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
+        "max_pr_methodology_or_result": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.pkl"),
+        "max_pr_methodology_or_result_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.pkl"),
+        "union": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_union_direct_processed_csv_list{v2_suffix}{suffix}.pkl"),
+        "model": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}_processed.pkl"),
+        "dataset": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}_processed.pkl"),
     }
     return LEVEL_NPZ, LEVEL_CSVLIST
 
@@ -216,7 +300,9 @@ def build_element_matrix_at_one_time():
     flat = [c for _, cs in titles_to_tables_with_modelid for c in cs]
     all_csvs = list(dict.fromkeys(flat))# already basename in titles_to_tables_with_modelid
     #all_csvs = [os.path.basename(csv) for csv in all_csvs]
-    csv_list_path = f"data/gt{v2_suffix}{suffix}/csv_list{v2_suffix}{suffix}.pkl"
+    #csv_list_path = f"data/gt{v2_suffix}{suffix}/csv_list{v2_suffix}{suffix}.pkl"
+    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix, "/Users/doradong/Repo/ModelTables")
+    csv_list_path = LEVEL_CSVLIST["direct"]
     with open(csv_list_path, "wb") as f:
         pickle.dump(all_csvs, f)
     print(f"✅ CSV list saved (order matches matrix rows/cols) to {csv_list_path}")
@@ -239,10 +325,23 @@ def build_ground_truth(rel_key, overlap_rate_threshold, suffix, v2_suffix):
     print(f"[DEBUG] Paper-paper adjacency matrix statistics:")
     print(f"  - Non-zero elements: {paper_paper_adj.nnz}")
 
-    t1 = time.time()
     csv_csv_adj_within_model = load_npz(f"data/gt{v2_suffix}{suffix}/B_matrix{v2_suffix}{suffix}.npz")
+    csv_csv_adj_within_model = csv_csv_adj_within_model.astype(np.int8).tocsr() # it is said that int has better multiplication
+    #assert csv_csv_adj_within_model.data.dtype == np.bool_
     paper_csv_adj = load_npz(f"data/gt{v2_suffix}{suffix}/A_matrix{v2_suffix}{suffix}.npz")
-    csv_csv_adj_outside_model = paper_csv_adj.T.dot(paper_paper_adj).dot(paper_csv_adj).tocsr()
+    #assert paper_csv_adj.data.dtype == np.bool_
+    paper_csv_adj = paper_csv_adj.astype(np.int8).tocsr()
+
+    print('dot 1:')
+    t1 = time.time()
+    tmp = paper_csv_adj.T.dot(paper_paper_adj)
+    print('dot 1 done with time: ', time.time() - t1)
+    print('dot 2:')
+    t1 = time.time()
+    # Prune zero rows/cols to reduce matmul workload
+    csv_csv_adj_outside_model = fast_multiply(A=tmp, B=paper_csv_adj)
+    #csv_csv_adj_outside_model = tmp.dot(paper_csv_adj).astype(bool).tocsr()
+    print('dot 2 done with time: ', time.time() - t1)
     print(f"Step2: [Inter-row] Adjacency shape: {csv_csv_adj_outside_model.shape}: ", csv_csv_adj_outside_model.nnz)
     # 3) sum and extract
     M = (csv_csv_adj_within_model + csv_csv_adj_outside_model).astype(bool).tocsr() # we didn't care count
