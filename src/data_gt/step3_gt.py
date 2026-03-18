@@ -216,24 +216,67 @@ def get_final_csv_csv_adj_by_join(
     local_csrnpz_to_parquet(P_npz_path, pathP, row_col_names=("paper_i", "paper_j"))
     print(f"[join] Step2 wrote P edge Parquet for {stem} in {base_dir}")
 
-    # 3) DuckDB join → write csv‑csv edges to Parquet (no in-memory edge DataFrame kept)
+    # 2) Chunked DuckDB join (split by paper_i range) to keep temp usage bounded.
+    n_paper = get_n_rows_from_csrnpz(P_npz_path)
+    chunk_size = 10_000
+    out_parts_glob = os.path.join(base_dir, f"{stem}_outside_part_*.parquet")
+
+    temp_dir = os.path.join("data", "tmp", "duckdb_temp")
+    os.makedirs(temp_dir, exist_ok=True)
+
     con = duckdb.connect()
     try:
+        con.execute(f"PRAGMA temp_directory='{temp_dir}';")
+        con.execute("PRAGMA enable_object_cache=false;")
+
+        t_all = time.time()
+        part_paths = []
+        part_idx = 0
+        for start in range(0, n_paper, chunk_size):
+            end = min(start + chunk_size, n_paper)
+            part_path = os.path.join(base_dir, f"{stem}_outside_part_{part_idx:05d}.parquet")
+            part_paths.append(part_path)
+
+            t1 = time.time()
+            query = f"""
+            COPY (
+                SELECT DISTINCT a.csv AS src_csv, b.csv AS dst_csv
+                FROM read_parquet('{A_parquet_path}') a
+                JOIN read_parquet('{pathP}') p
+                  ON a.paper = p.paper_i
+                JOIN read_parquet('{A_parquet_path}') b
+                  ON p.paper_j = b.paper
+                WHERE p.paper_i >= {start} AND p.paper_i < {end}
+            ) TO '{part_path}' (FORMAT PARQUET);
+            """
+            con.execute(query)
+            print(f"[join] Step2 chunk {part_idx}: paper_i=[{start},{end}) time={time.time() - t1:.4f}s out={part_path}")
+            part_idx += 1
+
+        # 3) Merge all part Parquets into the final outside Parquet (dedup on (src_csv, dst_csv)).
         t1 = time.time()
-        query = f"""
+        merge_query = f"""
         COPY (
-            SELECT DISTINCT a.csv AS src_csv, b.csv AS dst_csv
-            FROM read_parquet('{A_parquet_path}') a
-            JOIN read_parquet('{pathP}') p
-              ON a.paper = p.paper_i
-            JOIN read_parquet('{A_parquet_path}') b
-              ON p.paper_j = b.paper
+            SELECT DISTINCT src_csv, dst_csv
+            FROM read_parquet('{out_parts_glob}')
         ) TO '{path_outside_parquet}' (FORMAT PARQUET);
         """
-        con.execute(query)
-        print(f"[join] Step2 via DuckDB→Parquet: time={time.time() - t1:.4f}s, out={path_outside_parquet}")
+        con.execute(merge_query)
+        print(f"[join] Step2 merge parts: time={time.time() - t1:.4f}s out={path_outside_parquet}")
+        print(f"[join] Step2 total time={time.time() - t_all:.4f}s chunks={part_idx} n_paper={n_paper} chunk_size={chunk_size}")
     finally:
         con.close()
+
+    # 4) Cleanup chunk outputs and temp P edges to reduce disk usage.
+    for p in part_paths:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    try:
+        os.remove(pathP)
+    except OSError:
+        pass
 
 def concat_csv_csv_adj_by_addition(csv_csv_adj_within_model, csv_csv_adj_outside_model):
     M = (csv_csv_adj_within_model + csv_csv_adj_outside_model).astype(bool).tocsr() # we didn't care count
