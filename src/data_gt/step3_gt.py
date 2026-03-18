@@ -20,6 +20,8 @@ from scipy.sparse import csr_matrix, coo_matrix, save_npz, load_npz
 from src.utils import is_list_like, to_list_safe
 
 
+############## Multiplication ####################
+
 def fast_multiply(A: csr_matrix, B: csr_matrix):
     """
     Fast multiply C = A @ B with two layers of simple pruning
@@ -102,6 +104,186 @@ def fast_multiply(A: csr_matrix, B: csr_matrix):
     print("[fast-matmul] full result shape:", C_full.shape, "nnz:", C_full.nnz)
     print("[fast-matmul] === A @ B done ===")
     return C_full
+
+def get_final_csv_csv_adj_by_multiplication(paper_csv_adj, paper_paper_adj):
+    paper_csv_adj = paper_csv_adj.astype(np.int8).tocsr()
+    paper_paper_adj = paper_paper_adj.astype(np.int8).tocsr()
+    t1 = time.time()
+    tmp = paper_csv_adj.T.dot(paper_paper_adj)
+    print(f"dot1: A^T @ P done, time={time.time() - t1:.4f}s, shape={tmp.shape}, nnz={tmp.nnz}")
+
+    t1 = time.time()
+    # Prune zero rows/cols to reduce matmul workload
+    csv_csv_adj_outside_model = fast_multiply(A=tmp, B=paper_csv_adj)
+    #csv_csv_adj_outside_model = tmp.dot(paper_csv_adj).astype(bool).tocsr()
+    print(f"dot2: C=A^T P A via fast_multiply done, time={time.time() - t1:.4f}s, shape={csv_csv_adj_outside_model.shape}, nnz={csv_csv_adj_outside_model.nnz}")
+    return csv_csv_adj_outside_model
+
+############## Local CSR <-> Parquet helpers ####################
+
+def local_csrnpz_to_parquet(npz_path: str, parquet_path: str, row_col_names=("row_idx", "col_idx")) -> None:
+    """
+    Convert a local CSR .npz file into a Parquet edge list.
+
+    - npz_path: path to CSR matrix saved via scipy.sparse.save_npz
+    - parquet_path: output Parquet path
+    - row_col_names: (row_name, col_name) to use as column names in the Parquet file
+    """
+    row_name, col_name = row_col_names
+    mat = load_npz(npz_path).tocsr()
+    rows, cols = mat.nonzero()
+    df = pd.DataFrame(
+        {
+            row_name: rows.astype(np.int64),
+            col_name: cols.astype(np.int64),
+        }
+    )
+    os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
+    df.to_parquet(parquet_path)
+    print(f"[local] csrnpz→parquet: npz={npz_path}, parquet={parquet_path}, edges={len(df)}")
+
+
+def local_parquet_to_csrnpz(
+    parquet_path: str,
+    npz_path: str,
+    shape: tuple[int, int],
+    row_col_names=("row_idx", "col_idx"),
+) -> None:
+    """
+    Convert a local Parquet edge list into a CSR .npz file.
+
+    - parquet_path: input Parquet with (row, col) index columns
+    - npz_path: output .npz path to save CSR matrix
+    - shape: (n_rows, n_cols) of the target matrix
+    - row_col_names: (row_name, col_name) used in the Parquet file
+    """
+    row_name, col_name = row_col_names
+    con = duckdb.connect()
+    try:
+        t_load = time.time()
+        df = con.execute(
+            f"SELECT {row_name}, {col_name} FROM read_parquet('{parquet_path}')"
+        ).df()
+        print(f"[local] parquet→csrnpz load: parquet={parquet_path}, rows={len(df)}, time={time.time() - t_load:.4f}s")
+    finally:
+        con.close()
+
+    n_rows, n_cols = shape
+    if df.empty:
+        M = csr_matrix((n_rows, n_cols), dtype=bool)
+    else:
+        rows = df[row_name].to_numpy(dtype=np.int64)
+        cols = df[col_name].to_numpy(dtype=np.int64)
+        data = np.ones(len(rows), dtype=np.int8)
+        t_mat = time.time()
+        M = csr_matrix((data, (rows, cols)), shape=(n_rows, n_cols)).astype(bool).tocsr()
+        print(f"[local] parquet→csrnpz materialize: shape={M.shape}, nnz={M.nnz}, build_time={time.time() - t_mat:.4f}s")
+
+    os.makedirs(os.path.dirname(npz_path), exist_ok=True)
+    save_npz(npz_path, M, compressed=True)
+    print(f"[local] parquet→csrnpz saved: npz={npz_path}")
+
+
+def get_n_rows_from_csrnpz(npz_path: str) -> int:
+    """
+    Lightweight helper to read the number of rows from a CSR .npz file
+    without loading the full sparse matrix into memory.
+    """
+    with np.load(npz_path, allow_pickle=False) as f:
+        shape = f["shape"]
+    return int(shape[0])
+
+def get_final_csv_csv_adj_by_join(
+    A_parquet_path: str,
+    P_npz_path: str,
+    path_outside_parquet: str,
+) -> None:
+    """
+    Step2: compute csv‑csv adjacency edges (Aᵀ·P·A) and write them directly to a Parquet file.
+
+    - Input files:
+      - A_parquet_path: global edge-list Parquet for A (paper → csv), built once
+      - P_npz_path:     CSR .npz for P (paper → paper) for this rel_key
+    - Output file:
+      - path_outside_parquet: Parquet with columns (src_csv, dst_csv), deduplicated
+    """
+    # 1) write temporary Parquet file for P edges for DuckDB to consume
+    base_dir = os.path.dirname(path_outside_parquet)
+    os.makedirs(base_dir, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(path_outside_parquet))[0]
+    pathP = os.path.join(base_dir, f"{stem}_P_edges_tmp.parquet")
+
+    local_csrnpz_to_parquet(P_npz_path, pathP, row_col_names=("paper_i", "paper_j"))
+    print(f"[join] Step2 wrote P edge Parquet for {stem} in {base_dir}")
+
+    # 3) DuckDB join → write csv‑csv edges to Parquet (no in-memory edge DataFrame kept)
+    con = duckdb.connect()
+    try:
+        t1 = time.time()
+        query = f"""
+        COPY (
+            SELECT DISTINCT a.csv AS src_csv, b.csv AS dst_csv
+            FROM read_parquet('{A_parquet_path}') a
+            JOIN read_parquet('{pathP}') p
+              ON a.paper = p.paper_i
+            JOIN read_parquet('{A_parquet_path}') b
+              ON p.paper_j = b.paper
+        ) TO '{path_outside_parquet}' (FORMAT PARQUET);
+        """
+        con.execute(query)
+        print(f"[join] Step2 via DuckDB→Parquet: time={time.time() - t1:.4f}s, out={path_outside_parquet}")
+    finally:
+        con.close()
+
+def concat_csv_csv_adj_by_addition(csv_csv_adj_within_model, csv_csv_adj_outside_model):
+    M = (csv_csv_adj_within_model + csv_csv_adj_outside_model).astype(bool).tocsr() # we didn't care count
+    M.setdiag(False)# remove self-loop if any
+    return M
+
+def concat_csv_csv_adj_by_join(
+    within_npz_path: str,
+    path_outside_parquet: str,
+    path_final_parquet: str,
+) -> None:
+    """
+    Step3: merge within‑model and outside‑model csv‑csv adjacencies on the edge level, fully in DuckDB/Parquet.
+
+    This is logically equivalent to:
+        boolean OR of the two matrices, followed by removing self-loops.
+
+    Implementation:
+    - Convert within‑model adjacency .npz to an edge list Parquet (src_csv, dst_csv).
+    - Use DuckDB to concatenate with outside‑model edges Parquet.
+    - Drop self-loops (src_csv == dst_csv).
+    - Drop duplicate edges.
+    - Write the merged edges as a Parquet file; no DataFrame is returned.
+    """
+    base_dir = os.path.dirname(path_final_parquet)
+    os.makedirs(base_dir, exist_ok=True)
+    path_within_parquet = os.path.join(base_dir, "csv_csv_within_tmp.parquet")
+
+    # 1) within-model npz → edge list Parquet
+    local_csrnpz_to_parquet(within_npz_path, path_within_parquet, row_col_names=("src_csv", "dst_csv"))
+
+    # 2) DuckDB concat + dedup + remove self-loops → write final Parquet
+    con = duckdb.connect()
+    try:
+        t1 = time.time()
+        query = f"""
+        COPY (
+            SELECT DISTINCT src_csv, dst_csv
+            FROM (
+                SELECT src_csv, dst_csv FROM read_parquet('{path_within_parquet}')
+                UNION ALL
+                SELECT src_csv, dst_csv FROM read_parquet('{path_outside_parquet}')
+            )
+            WHERE src_csv <> dst_csv
+        ) TO '{path_final_parquet}' (FORMAT PARQUET);
+        """
+        con.execute(query)
+        print(f"[join] Step3 concat via DuckDB→Parquet: time={time.time() - t1:.4f}s, out={path_final_parquet}")
+    finally:
+        con.close()
 
 ############## defined path ####################
 def get_npz_path(v2_suffix, suffix, root_dir):
@@ -256,9 +438,12 @@ def build_A_matrix_paper2csv(titles_to_tables_with_modelid, csv2idx):
     parts = [(np.repeat(ps, len(cs)), np.tile(cs, len(ps))) for ps, cs in zip(all_row_ps, all_row_cs) if len(ps) > 0 and len(cs) > 0]
     row_i = np.concatenate([p[0] for p in parts]) if parts else np.array([], dtype=np.int64)
     col_i = np.concatenate([p[1] for p in parts]) if parts else np.array([], dtype=np.int64)
-    A = coo_matrix((np.ones(len(row_i), bool),(row_i,col_i)), shape=(len(paper_index), len(csv2idx))).astype(bool).tocsr()
-    # save A as sparse matrix
-    save_npz(f"data/gt{v2_suffix}{suffix}/A_matrix{v2_suffix}{suffix}.npz", A, compressed=True)
+    A = coo_matrix((np.ones(len(row_i), bool), (row_i, col_i)), shape=(len(paper_index), len(csv2idx))).astype(bool).tocsr()
+    # Save A as sparse matrix and also as a global edge-list Parquet (paper, csv).
+    A_npz_path = f"data/gt{v2_suffix}{suffix}/A_matrix{v2_suffix}{suffix}.npz"
+    A_parquet_path = f"data/gt{v2_suffix}{suffix}/A_edges{v2_suffix}{suffix}.parquet"
+    save_npz(A_npz_path, A, compressed=True)
+    local_csrnpz_to_parquet(A_npz_path, A_parquet_path, row_col_names=("paper", "csv"))
     return A
 
 def build_B_matrix_csv2csv_within_model(titles_to_tables_with_modelid, csv2idx):
@@ -325,36 +510,60 @@ def build_ground_truth(rel_key, overlap_rate_threshold, suffix, v2_suffix):
     print(f"[DEBUG] Paper-paper adjacency matrix statistics:")
     print(f"  - Non-zero elements: {paper_paper_adj.nnz}")
 
-    csv_csv_adj_within_model = load_npz(f"data/gt{v2_suffix}{suffix}/B_matrix{v2_suffix}{suffix}.npz")
-    csv_csv_adj_within_model = csv_csv_adj_within_model.astype(np.int8).tocsr() # it is said that int has better multiplication
-    #assert csv_csv_adj_within_model.data.dtype == np.bool_
-    paper_csv_adj = load_npz(f"data/gt{v2_suffix}{suffix}/A_matrix{v2_suffix}{suffix}.npz")
-    #assert paper_csv_adj.data.dtype == np.bool_
-    paper_csv_adj = paper_csv_adj.astype(np.int8).tocsr()
+    within_npz_path = f"data/gt{v2_suffix}{suffix}/B_matrix{v2_suffix}{suffix}.npz"
+    A_npz_path = f"data/gt{v2_suffix}{suffix}/A_matrix{v2_suffix}{suffix}.npz"
+    A_parquet_path = f"data/gt{v2_suffix}{suffix}/A_edges{v2_suffix}{suffix}.parquet"
+    P_npz_path = f"data/gt{v2_suffix}{suffix}/P_matrix_{rel_key}{v2_suffix}{suffix}.npz"
+    n_csv = get_n_rows_from_csrnpz(within_npz_path)
+    # Persist paper-paper adjacency once so Step2 can work purely from disk.
+    save_npz(P_npz_path, paper_paper_adj, compressed=True)
 
-    print('dot 1:')
-    t1 = time.time()
-    tmp = paper_csv_adj.T.dot(paper_paper_adj)
-    print('dot 1 done with time: ', time.time() - t1)
-    print('dot 2:')
-    t1 = time.time()
-    # Prune zero rows/cols to reduce matmul workload
-    csv_csv_adj_outside_model = fast_multiply(A=tmp, B=paper_csv_adj)
-    #csv_csv_adj_outside_model = tmp.dot(paper_csv_adj).astype(bool).tocsr()
-    print('dot 2 done with time: ', time.time() - t1)
-    print(f"Step2: [Inter-row] Adjacency shape: {csv_csv_adj_outside_model.shape}: ", csv_csv_adj_outside_model.nnz)
-    # 3) sum and extract
-    M = (csv_csv_adj_within_model + csv_csv_adj_outside_model).astype(bool).tocsr() # we didn't care count
-    M.setdiag(False)# remove self-loop if any
-    print(f"[DEBUG] Final M matrix shape: {M.shape}, nnz: {M.nnz}")
-    del csv_csv_adj_within_model, csv_csv_adj_outside_model
-    print(f"time to build final GT matrix: ", time.time() - t1)
+    # Derive Parquet paths for outside edges and final merged edges.
+    gt_dir = f"data/gt{v2_suffix}{suffix}"
+    os.makedirs(gt_dir, exist_ok=True)
+    outside_parquet = os.path.join(gt_dir, f"csv_csv_outside_{rel_key}{v2_suffix}{suffix}.parquet")
+    final_parquet = os.path.join(gt_dir, f"csv_csv_final_{rel_key}{v2_suffix}{suffix}.parquet")
 
-    print('saving matrix and csv list')
-    matrix_path = f"data/gt{v2_suffix}{suffix}/csv_pair_matrix_{rel_key}{v2_suffix}{suffix}.npz"
+    '''
+    # by multiplication: old implementation, deprecated for memory 
+    usage
+    csv_csv_adj_within_model = load_npz(f"data/gt{v2_suffix}
+    {suffix}/B_matrix{v2_suffix}{suffix}.npz")
+    paper_csv_adj = load_npz(f"data/gt{v2_suffix}{suffix}/A_matrix
+    {v2_suffix}{suffix}.npz")
+    csv_csv_adj_within_model = csv_csv_adj_within_model.astype(np.
+    int8).tocsr()
+    paper_csv_adj = load_npz(A_npz_path)
+
+    outside_edges = get_final_csv_csv_adj_by_multiplication
+    (paper_csv_adj, paper_paper_adj)
+    M = concat_csv_csv_adj_by_addition(csv_csv_adj_within_model, 
+    outside_edges)
+    matrix_path = f"data/gt{v2_suffix}{suffix}/csv_pair_matrix_
+    {rel_key}{v2_suffix}{suffix}.npz"
     save_npz(matrix_path, M, compressed=True)
     print(f"✅ Sparse matrix saved to {matrix_path}")
-    
+    print(f"[DEBUG] Final M matrix shape: {M.shape}, nnz: {M.nnz}")
+    print(f"time to build final GT matrix: ", time.time() - t1)
+    '''
+
+    # Step 2: compute outside-model csv‑csv edges via DuckDB join (Aᵀ·P·A semantics) → Parquet only.
+    get_final_csv_csv_adj_by_join(A_parquet_path, P_npz_path, outside_parquet)
+    # Step 3: merge within-model adjacency with outside edges, fully in DuckDB/Parquet.
+    concat_csv_csv_adj_by_join(within_npz_path, outside_parquet, final_parquet)
+
+    '''# Materialize final boolean csr matrix from the merged Parquet edges into .npz.
+    matrix_path = f"data/gt{v2_suffix}{suffix}/csv_pair_matrix_{rel_key}{v2_suffix}{suffix}.npz"
+    local_parquet_to_csrnpz(
+        parquet_path=final_parquet,
+        npz_path=matrix_path,
+        shape=(n_csv, n_csv),
+        row_col_names=("src_csv", "dst_csv"),
+    )'''
+
+    print(f"time to build final GT matrix: ", time.time() - t1)
+    print(f"✅ Sparse matrix saved to {matrix_path}")
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build SciLake union benchmark tables.")

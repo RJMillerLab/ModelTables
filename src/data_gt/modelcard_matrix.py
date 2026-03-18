@@ -405,46 +405,6 @@ if __name__ == "__main__":
     with open(f'data/gt/scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}.pkl','wb') as f:
         pickle.dump(all_csvs_model, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"✔️ Saved MODEL-BASED CSV adjacency matrix ({M_model.nnz} edges) after trimming")
-    '''
-    # original for-loop version
-    csv_counts_model = defaultdict(int)    
-    # inside model               
-    for m, csvs in model_to_csvs.items():
-        for a, b in combinations(sorted(set(csvs)), 2):
-            if a != b:
-                key = tuple(sorted((a, b)))
-                csv_counts_model[key] += 1          ######## NEW
-    # between models                            
-    for m, neighs in related_model.items():
-        cs_m = model_to_csvs.get(m, [])
-        for n in neighs:
-            if m >= n: # only count once for each pair
-                continue
-            cs_n = model_to_csvs.get(n, [])
-            for a, b in product(cs_m, cs_n):
-                if a == b: # skip self-pair
-                    continue
-                key = tuple(sorted((a, b)))
-                csv_counts_model[key] += 1
-    # keep original tuple→count
-    #with open('data/gt/scilake_gt_modellink_model_counts.pkl', 'wb') as f:
-    #    pickle.dump(dict(csv_counts_model), f)
-    # convert to adjacency mapping {csv: [related_csvs]}
-    adj_model = defaultdict(set)
-    for (a, b), cnt in csv_counts_model.items():
-        if cnt > 0:
-            adj_model[a].add(b); adj_model[b].add(a)
-    adj_model = {k: sorted(v) for k, v in adj_model.items()}
-    processed_model_adj = {os.path.basename(k): [os.path.basename(x) for x in v] for k, v in adj_model.items()}
-    # save to npz
-    from src.data_gt.convert_adj_to_npz import dict_to_boolean_csr
-    M, M_csv_list = dict_to_boolean_csr(processed_model_adj)
-    save_npz('data/gt/scilake_gt_modellink_model_adj.npz', M, compressed=True)
-    with open('data/gt/scilake_gt_modellink_model_csv_list.pkl','wb') as f:
-        pickle.dump(list(M_csv_list), f, protocol=pickle.HIGHEST_PROTOCOL)
-    #with open('data/gt/scilake_gt_modellink_model_adj_processed.pkl', 'wb') as f:
-    #    pickle.dump(processed_model_adj, f)
-    print(f"✔️  Saved MODEL-BASED CSV adjacency ({len(adj_model):,} keys)")'''
 
     ########################################################################
     # 5b ) BUILD CSV-LEVEL GT FROM related_dataset_list (Dataset-based)
@@ -458,43 +418,7 @@ if __name__ == "__main__":
             mem = grp.tolist()
             for a, b in combinations(mem, 2):
                 related_ds[a].add(b); related_ds[b].add(a)                                  
-    '''
-    # original for-loop version
-    # cross model→csv to dataset-GT
-    csv_counts_ds = defaultdict(int)
-    # intra-model
-    for m, csvs in model_to_csvs.items():
-        for a, b in combinations(sorted(set(csvs)), 2):
-            if a != b:
-                key = tuple(sorted((a, b)))
-                csv_counts_ds[key] += 1
-    # between models
-    for m, neighs in related_ds.items():
-        cs_m = model_to_csvs.get(m, [])
-        for n in neighs:
-            if m >= n: continue
-            cs_n = model_to_csvs.get(n, [])
-            for a, b in product(cs_m, cs_n):
-                if a == b: continue                                                         
-                key = tuple(sorted((a, b)))
-                csv_counts_ds[key] += 1
-    #with open('data/gt/scilake_gt_modellink_dataset_counts.pkl', 'wb') as f:
-    #    pickle.dump(dict(csv_counts_ds), f)
-    adj_ds = defaultdict(set)
-    for (a, b), cnt in csv_counts_ds.items():
-        if cnt > 0:                                                                       
-            adj_ds[a].add(b); adj_ds[b].add(a)                                            
-    adj_ds = {k: sorted(v) for k, v in adj_ds.items()}
-    processed_ds_adj = {os.path.basename(k): [os.path.basename(x) for x in v] for k, v in adj_ds.items()}
-    # save npz
-    from src.data_gt.convert_adj_to_npz import dict_to_boolean_csr
-    D, D_csv_list = dict_to_boolean_csr(processed_ds_adj)
-    save_npz('data/gt/scilake_gt_modellink_dataset_adj.npz', D, compressed=True)
-    with open('data/gt/scilake_gt_modellink_dataset_csv_list.pkl','wb') as f:
-        pickle.dump(list(D_csv_list), f, protocol=pickle.HIGHEST_PROTOCOL)
-    #with open('data/gt/scilake_gt_modellink_dataset_adj_processed.pkl', 'wb') as f:
-    #    pickle.dump(processed_ds_adj, f)
-    print(f"✔️  Saved DATASET-BASED CSV adjacency ({len(adj_ds):,} keys)")'''
+    
     # 1) Full model and csv list (same as above model_ids & all_csvs_m)
     # 2) incidence matrix A_model already constructed (same as above)
     # 3) construct dataset-level adjacency P_ds

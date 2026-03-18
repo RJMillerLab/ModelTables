@@ -1,3 +1,4 @@
+.tmp/
 pyserini_demo/
 output/
 config.yaml
