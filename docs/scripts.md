@@ -185,55 +185,90 @@ bash eval_per_resource.sh > logs/eval_per_resource_251117.log 2>&1 # Run ablatio
 
 Run baseline table embedding and retrieval methods for comparison, for faiss cpu/gpu installation, see [FAISS GitHub repository](https://github.com/facebookresearch/faiss).
 
+7.1 Baseline1: Dense Search
+Unified script - supports base/str/tr modes
+Note: All three modes use the same Python script (table_retrieval_pipeline.py) with different --mode arguments
+The unified script replaces the separate pipeline_str.sh and pipeline_tr.sh scripts
+
+This works on table
+
 ```bash
-### 1. Baseline1: Dense Search
-# Unified script - supports base/str/tr modes
-# Note: All three modes use the same Python script (table_retrieval_pipeline.py) with different --mode arguments
-# The unified script replaces the separate pipeline_str.sh and pipeline_tr.sh scripts
-TAG=251117 bash src/baseline1/table_retrieval_pipeline_unified.sh base > logs/baseline1_pipeline_base_251117.log 2>&1  # base mode: full pipeline (filter + encode + build_faiss + search + postprocess)
-TAG=251117 bash src/baseline1/table_retrieval_pipeline_unified.sh str --skip-search > logs/baseline1_pipeline_str_251117.log 2>&1  # str mode: filter + encode only (for mixed experiments)
-TAG=251117 bash src/baseline1/table_retrieval_pipeline_unified.sh tr --skip-search > logs/baseline1_pipeline_tr_251117.log 2>&1   # tr mode: filter + encode only (for mixed experiments)
-TAG=251117 bash src/baseline1/combine_embedding.sh > logs/baseline1_combine_embedding_251117.log 2>&1  # for augmented ablation studies: step2 combine embedding and jsonl for ori+tr, ori+str, ori+tr+str
-TAG=251117 bash src/baseline1/build_aug_faiss.sh > logs/baseline1_build_aug_faiss_251117.log 2>&1  # step3: build faiss
-TAG=251117 bash src/baseline1/augment_search.sh > logs/baseline1_augment_search_251117.log 2>&1  # step4: search
-TAG=251117 bash src/baseline1/postprocess_general.sh > logs/baseline1_postprocess_general_251117.log 2>&1  # step5: postprocess: split into ori / tr / str json
-TAG=251117 bash src/baseline1/standardize_filenames.sh > logs/baseline1_standardize_filenames_251117.log 2>&1  # step6: postprocess: all files back to ori csv name
-TAG=251117 bash scripts/step3_processmetrics_all.sh <index> > logs/baseline1_processmetrics_251117.log 2>&1  # compute metrics under starmie: run baseline metrics computation
+# encode
+python src/baseline1/table_retrieval_pipeline.py encode --base_path /u501/z6dong/Repo/ModelTables --mask_file /u501/z6dong/Repo/ModelTables/data/analysis/all_valid_title_valid_v2_251117.txt --model_name all-MiniLM-L6-v2 --batch_size 512 --output_npz /u501/z6dong/Repo/ModelTables/data/baseline1_251117/valid_tables_v2_251117_embeddings.npz
+# search 
+python src/baseline1/table_retrieval_pipeline.py search --emb_npz /u501/z6dong/Repo/ModelTables/data/baseline1_251117/valid_tables_v2_251117_embeddings.npz --top_k 5 --output_json /u501/z6dong/Repo/ModelTables/data/baseline1_251117/table_neighbors_v2_251117.json
+# postprocess: add .csv back to id
+python src/baseline1/table_retrieval_pipeline.py postprocess --input_json /u501/z6dong/Repo/ModelTables/data/baseline1_251117/table_neighbors_v2_251117.json
 
-### 2. Baseline2: Sparse search
-# Note: Requires pyserini and Java/JDK (for pyserini to work)
-# Recommended conda environment: faiss_gpu_env (or any environment with pyserini installed)
-# Output: data/tmp/baseline2_sparse_results_251117.json
-TAG=251117 bash src/baseline2/get_metadata.sh > logs/baseline2_get_metadata_251117.log 2>&1 # Baseline2: Sparse search get metadata
-TAG=251117 bash src/baseline2/sparse_search.sh > logs/baseline2_sparse_search_251117.log 2>&1 # Baseline2: Sparse search
+# Augmentation experiment
+# Step1: encode: run above src/baseline1/table_retrieval_pipeline.py encode only for str and tr modes
+# TODO:
+# Step1.2: merge: run merge scripts for ori+tr, ori+str, ori+tr+str
+python -m src.baseline1.aug_merge_embeddings --v2_mode --tag 251117 > logs/baseline1_aug_merge_embeddings_251117.log 2>&1  # for augmented ablation studies: step2 combine embedding and jsonl for ori+tr, ori+str, ori+tr+str
 
-### 3. Baseline3: Hybrid (Sparse + Dense search)
-# Note: Hybrid search uses Python scripts with command-line arguments
+# Step2: search: run search scripts for ori+tr, ori+str, ori+tr+str
+python -m src.baseline1.table_retrieval_pipeline \
+  search --emb_npz data/baseline1_251117/valid_tables_ori_tr_251117_embeddings.npz \
+  --top_k 11 \
+  --output_json data/baseline1_251117/table_neighbors_ori_tr_251117.json
+# TODO for ori+str and ori+tr+str
+# step3: postprocess: split into ori / tr / str json
+V2_MODE=true TAG=251117 bash src/baseline1/aug_postprocess.sh > logs/baseline1_aug_postprocess_251117.log 2>&1  
+# step4: postprocess: all files back to ori csv name
+V2_MODE=true TAG=251117 bash src/baseline1/aug_suffix_remove.sh > logs/baseline1_aug_suffix_remove_251117.log 2>&1  
+# Hands to starmie for computing metrics
+bash scripts/step3_processmetrics_all.sh <index> > logs/baseline1_processmetrics_251117.log 2>&1  
+```
+
+7.2 Baseline2: Sparse search
+Note: Requires pyserini and Java/JDK (for pyserini to work)
+Recommended conda environment: faiss_gpu_env (or any environment with pyserini installed)
+Output: data/tmp/baseline2_sparse_results_251117.json
+
+This works on modelcard content retrieval
+
+```bash
+# 1. generate mapping from csv_path:readme_path
+python src/baseline2/create_raw_csv_to_text_mapping.py
+# 2. get incontext embedding for each csv_path, save to data/tmp/corpus/collection.jsonl
+python src/baseline2/create_dedup_table_to_text_mapping.py
+# 3. build index: sparse retrieval by pyserini
+python -m pyserini.index.lucene --collection JsonCollection --input data/tmp/corpus --index data/tmp/index_v2_251117 --generator DefaultLuceneDocumentGenerator --threads 1 --storePositions --storeDocvectors --storeRaw
+# 4. build up tsv
+python src/baseline2/create_queries_from_table.py
+# or python src/baseline2/create_queries_from_corpus.py
+# 4. search pyserini
+#python -m pyserini.search.lucene --index data/tmp/index_v2_251117 --topics data/tmp/queries_table.tsv --output data/tmp/search_result.txt --bm25 --hits 11 --threads 8 --batch-size 64 # as this can not solve truncating clause automatically
+# or python batch_search.py
+python src/baseline2/search_with_pyserini.py --hits 11 --output data/tmp/search_result_v2_251117.json
+# 5. postprocess
+python -m src.baseline1.table_retrieval_pipeline postprocess --input_json data/tmp/baseline2_sparse_results_251117.json
+```
+
+7.3 Baseline3: Hybrid (Sparse + Dense search)
+Note: Hybrid search uses Python scripts with command-line arguments
+```bash
 # Requires: 
 #   - Sparse index from Baseline2: data/tmp/index_251117
 #   - Dense index directory: data/tmp/index_dense_251117/ (must contain index.faiss or index file)
 #   - To create dense index, first encode corpus and build faiss index:
 #     mkdir -p data/tmp/index_dense_251117
 #     python src/baseline1/table_retrieval_pipeline.py encode \
-#       --jsonl data/tmp/corpus/collection.jsonl \
+#       --base_path data/processed --mask_file data/analysis/all_valid_title_valid.txt \
 #       --model_name sentence-transformers/all-MiniLM-L6-v2 \
-#       --batch_size 256 --output_npz data/tmp/index_dense_251117/embeddings.npz --device cuda
-#     python src/baseline1/table_retrieval_pipeline.py build_faiss \
-#       --emb_npz data/tmp/index_dense_251117/embeddings.npz \
-#       --output_index data/tmp/index_dense_251117/index.faiss
+#       --batch_size 256 --output_index data/tmp/index_dense_251117/index.faiss --device cuda
 # Output: data/tmp/search_result_hybrid_251117.json (then postprocess to baseline3_hybrid_results_251117.json)
-TAG=251117 python src/baseline2/search_with_pyserini_hybrid.py \
+TAG=251117 python -m src.baseline2.search_with_pyserini_hybrid \
   --sparse-index data/tmp/index_251117 \
   --dense-index data/tmp/index_dense_251117 \
   --queries data/tmp/queries_table.tsv \
   --mapping data/tmp/queries_table_mapping.json \
   --k 11 --alpha 0.45 --device cpu > logs/baseline2_hybrid_search_251117.log 2>&1
-# Postprocess hybrid results (if postprocess.py supports hybrid results)
-# TAG=251117 python src/baseline2/postprocess.py \
-#   --input data/tmp/search_result_hybrid_251117.json \
-#   --output data/tmp/baseline3_hybrid_results_251117.json \
-#   --top1-list data/tmp/hybrid_queries_with_top1_matches.txt
+
+python -m src.baseline1.table_retrieval_pipeline postprocess --input_json data/tmp/baseline3_hybrid_results_251117.json
 ```
+
+For Blend baseline, refer to blend repository for instructions.
 
 
 ### 8\. Figure post-analysis
