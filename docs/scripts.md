@@ -258,14 +258,9 @@ Note: Hybrid search uses Python scripts with command-line arguments
 #       --model_name sentence-transformers/all-MiniLM-L6-v2 \
 #       --batch_size 256 --output_index data/tmp/index_dense_251117/index.faiss --device cuda
 # Output: data/tmp/search_result_hybrid_251117.json (then postprocess to baseline3_hybrid_results_251117.json)
-TAG=251117 python -m src.baseline2.search_with_pyserini_hybrid \
-  --sparse-index data/tmp/index_251117 \
-  --dense-index data/tmp/index_dense_251117 \
-  --queries data/tmp/queries_table.tsv \
-  --mapping data/tmp/queries_table_mapping.json \
-  --k 11 --alpha 0.45 --device cpu > logs/baseline2_hybrid_search_251117.log 2>&1
+python -m src.baseline2.search_with_pyserini_hybrid --top_k 11 --alpha 0.45 --tag 251117 --v2_mode > logs/baseline2_hybrid_search_v2_251117.log 2>&1
 
-python -m src.baseline1.table_retrieval_pipeline postprocess --input_json data/tmp/baseline3_hybrid_results_251117.json
+python -m src.baseline1.table_retrieval_pipeline postprocess --input_json data/tmp/baseline3_hybrid_results_v2_251117.json
 ```
 
 For Blend baseline, refer to blend repository for instructions.

@@ -73,7 +73,7 @@ def main():
     mapping_path = f'data/tmp/queries_table{v2_suffix}{suffix}_mapping.json'
     sparse_index_path = f'data/tmp/index_sparse{v2_suffix}{suffix}'
     dense_index_path = f'data/tmp/index_dense{v2_suffix}{suffix}/index.faiss'
-    out_file = f'data/tmp/search_result_hybrid{v2_suffix}{suffix}.json'
+    out_file = f'data/tmp/baseline3_hybrid_results{v2_suffix}{suffix}.json'
     encoder_name = "sentence-transformers/all-MiniLM-L6-v2"  # 384‑d
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
