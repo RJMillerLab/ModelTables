@@ -9,7 +9,7 @@ import re
 import pickle
 from joblib import Parallel, delayed
 from tqdm import tqdm
-
+import argparse
 # Add project root to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
@@ -17,24 +17,22 @@ if project_root not in sys.path:
 
 from src.utils import to_parquet
 
-def create_tmp_folders():
+def create_tmp_folders(v2_suffix, suffix):
     """
     Create temporary folders for processed text and embeddings.
     """
     tmp_dirs = {
-        'readmes': os.path.join('data', 'tmp', 'processed_readmes'),
+        'readmes': os.path.join('data', 'tmp', f'processed_readmes{v2_suffix}{suffix}'),
         'embeddings': {
-            'single': os.path.join('data', 'tmp', 'embeddings', 'single'),
-            'group': os.path.join('data', 'tmp', 'embeddings', 'group')
+            'single': os.path.join('data', 'tmp', f'embeddings{v2_suffix}{suffix}', 'single'),
+            'group': os.path.join('data', 'tmp', f'embeddings{v2_suffix}{suffix}', 'group')
         }
     }
-    
     # Create main directories
     for dir_path in [tmp_dirs['readmes'], tmp_dirs['embeddings']['single'], tmp_dirs['embeddings']['group']]:
         if os.path.exists(dir_path):
             shutil.rmtree(dir_path)
         os.makedirs(dir_path)
-    
     return tmp_dirs
 
 def remove_tables_from_text(text):
@@ -47,25 +45,18 @@ def remove_tables_from_text(text):
     """
     if not isinstance(text, str):
         return text
-    
     # Pattern to match markdown tables (same as in step2_hugging_github_extract.py)
     markdown_table_pattern = r"(?:\|[^\n]*?\|[\s]*\n)+\|[-:| ]*\|[\s]*\n(?:\|[^\n]*?\|(?:\n|$))+"
-    
     # Pattern to match HTML tables
     html_table_pattern = r"<table[^>]*>.*?</table>"
-    
     # Pattern to match LaTeX tables
     latex_table_pattern = r"\\begin{table}.*?\\end{table}"
-    
     # Remove markdown tables
     text = re.sub(markdown_table_pattern, '', text, flags=re.DOTALL)
-    
     # Remove HTML tables
     text = re.sub(html_table_pattern, '', text, flags=re.DOTALL)
-    
     # Remove LaTeX tables
     text = re.sub(latex_table_pattern, '', text, flags=re.DOTALL)
-    
     return text
 
 def extract_table_caption(html_content, table_name):
@@ -75,7 +66,6 @@ def extract_table_caption(html_content, table_name):
     """
     if not isinstance(html_content, str):
         return ""
-    
     # Patterns to match any table captions (not specific to table number)
     caption_patterns = [
         r'<caption[^>]*>.*?Table\s*\d+[.:]\s*([^<]*)</caption>',
@@ -83,7 +73,6 @@ def extract_table_caption(html_content, table_name):
         r'TABLE\s*\d+[.:]\s*([^\n\r]*)',
         r'<p[^>]*>\s*Table\s*\d+[.:]\s*([^<]*)</p>',
     ]
-    
     captions = []
     for pattern in caption_patterns:
         matches = re.findall(pattern, html_content, re.IGNORECASE | re.DOTALL)
@@ -91,7 +80,6 @@ def extract_table_caption(html_content, table_name):
             caption = re.sub(r'<[^>]+>', '', match).strip()  # Remove HTML tags
             if caption and len(caption) > 10:  # Filter out very short captions
                 captions.append(caption)
-    
     # Return unique captions
     unique_captions = list(set(captions))
     return '\n'.join(unique_captions) if unique_captions else ""
@@ -103,22 +91,17 @@ def extract_table_context_paragraphs(html_content, table_name):
     """
     if not isinstance(html_content, str):
         return ""
-    
     # Remove HTML tables first to avoid matching within table content
     content_no_tables = re.sub(r'<table[^>]*>.*?</table>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
-    
     # Split into paragraphs (by <p> tags or double newlines)
     paragraphs = []
-    
     # Extract paragraphs from <p> tags
     p_paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', content_no_tables, re.DOTALL | re.IGNORECASE)
     paragraphs.extend(p_paragraphs)
-    
     # Also try splitting by double newlines for plain text sections
     text_content = re.sub(r'<[^>]+>', ' ', content_no_tables)  # Remove remaining HTML tags
     text_paragraphs = [p.strip() for p in text_content.split('\n\n') if p.strip()]
     paragraphs.extend(text_paragraphs)
-    
     # Patterns to match references to any table (not specific table number)
     table_reference_patterns = [
         r'\btable\s*\d+\b',
@@ -130,20 +113,17 @@ def extract_table_context_paragraphs(html_content, table_name):
         r'\bTables?\b',
         r'\bTABLES?\b',
     ]
-    
     relevant_paragraphs = []
     for paragraph in paragraphs:
         # Clean HTML tags from paragraph
         clean_paragraph = re.sub(r'<[^>]+>', ' ', paragraph).strip()
         if not clean_paragraph or len(clean_paragraph) < 20:  # Skip very short paragraphs
             continue
-            
         # Check if paragraph mentions any table
         for pattern in table_reference_patterns:
             if re.search(pattern, clean_paragraph, re.IGNORECASE):
                 relevant_paragraphs.append(clean_paragraph)
                 break
-    
     # Remove duplicates while preserving order
     seen = set()
     unique_paragraphs = []
@@ -151,7 +131,6 @@ def extract_table_context_paragraphs(html_content, table_name):
         if para not in seen:
             unique_paragraphs.append(para)
             seen.add(para)
-    
     return '\n\n'.join(unique_paragraphs)
 
 def extract_all_table_content(html_content, table_name=None):
@@ -309,7 +288,7 @@ def process_group_texts(group_row):
         "contents": combined_text.strip()
     }
 
-def create_enhanced_mapping():
+def create_enhanced_mapping(v2_suffix, suffix):
     """
     Create enhanced mapping with dedup paths and processed text paths.
     For each deduped table (e.g., table1), combine all surrounding texts from its variants
@@ -319,19 +298,16 @@ def create_enhanced_mapping():
     print("Step1: Loading valid titles list...")
     valid_titles = set()
     # Support tag via environment variable
-    tag = os.environ.get('TAG', '')
-    suffix = f"_{tag}" if tag else ""
-    mask_file = f'data/analysis/all_valid_title_valid{suffix}.txt'
-    with open(mask_file, 'r') as f:
+    mask_file = f'data/analysis/all_valid_title_valid{v2_suffix}{suffix}.txt'
+    with open(mask_file, 'r', encoding='utf-8') as f:
         for line in f:
-            valid_titles.add(os.path.basename(line.strip()))
+            line = line.strip()
+            if line:
+                valid_titles.add(line)
+    valid_titles = set(os.path.basename(line) for line in valid_titles)
     print(f"Loaded {len(valid_titles)} valid titles from {mask_file}")
     
-    # Support tag for raw_csv_to_text_mapping file
-    raw_mapping_path = os.path.join('data', 'processed', f'raw_csv_to_text_mapping{suffix}.parquet')
-    # Fallback to default if tag version doesn't exist
-    if not os.path.exists(raw_mapping_path):
-        raw_mapping_path = os.path.join('data', 'processed', 'raw_csv_to_text_mapping.parquet')
+    raw_mapping_path = os.path.join('data', 'tmp', f'raw_csv_to_text_mapping{v2_suffix}{suffix}.parquet')
     
     df_raw = pd.read_parquet(raw_mapping_path)
     df_raw['csv_path'] = df_raw['csv_path'].apply(lambda x: os.path.basename(x))
@@ -345,9 +321,7 @@ def create_enhanced_mapping():
         print(f"Found {len(duplicate_csv)} rows with duplicate csv_path")
         print(duplicate_csv[['csv_path', 'source', 'readme_path']].head())
     
-    mapping_path = os.path.join('data', 'deduped', 'duplicate_mapping.json')
-    if not os.path.exists(mapping_path):
-        raise FileNotFoundError(f"Duplicate mapping not found at {mapping_path}")
+    mapping_path = os.path.join('data', f'deduped{v2_suffix}{suffix}', f'duplicate_mapping{suffix}.json')
     with open(mapping_path, 'r') as f:
         duplicate_mapping = json.load(f)
     df_raw['dedup_csv_path'] = df_raw['csv_path'].map(lambda x: duplicate_mapping.get(x, x))
@@ -374,7 +348,7 @@ def create_enhanced_mapping():
     print(df_raw[['csv_path', 'dedup_csv_path', 'source']].head())
     
     print("Creating temporary directories...")
-    tmp_dirs = create_tmp_folders()
+    tmp_dirs = create_tmp_folders(v2_suffix, suffix)
     
     print("Step3: Processing readme files, remove tables from the text...")
     # Process each readme file in parallel
@@ -392,7 +366,7 @@ def create_enhanced_mapping():
     
     # Save the processed paths DataFrame for later use
     print("Step5: Saving processed paths DataFrame...")
-    processed_paths_path = os.path.join('data', 'processed', 'processed_paths.parquet')
+    processed_paths_path = os.path.join('data', 'tmp', f'processed_paths{v2_suffix}{suffix}.parquet')
     to_parquet(df_raw, processed_paths_path)
     print(f"Saved processed paths to {processed_paths_path}")
     
@@ -413,15 +387,15 @@ def create_enhanced_mapping():
     
     # Save the group mapping
     print("Step6: Saving group mapping...")
-    group_mapping_path = os.path.join('data', 'processed', 'group_mapping.parquet')
+    group_mapping_path = os.path.join('data', 'tmp', f'group_mapping{v2_suffix}{suffix}.parquet')
     to_parquet(dedup_groups, group_mapping_path)
     print(f"Saved group mapping to {group_mapping_path}")
     
     # Build corpus in jsonl format
     print("Step7: Building corpus in jsonl format...")
-    corpus_dir = os.path.join('data', 'tmp', 'corpus')
+    corpus_dir = os.path.join('data', 'tmp', f'corpus{v2_suffix}{suffix}')
     os.makedirs(corpus_dir, exist_ok=True)
-    corpus_file = os.path.join(corpus_dir, 'collection.jsonl')
+    corpus_file = os.path.join(corpus_dir, f'collection{v2_suffix}{suffix}.jsonl')
     
     # Process each group and write to jsonl
     with open(corpus_file, 'w', encoding='utf-8') as f:
@@ -457,22 +431,27 @@ def create_enhanced_mapping():
     return corpus_file
 
 def main():
-    try:
-        corpus_file = create_enhanced_mapping()
-        print(f"\nCorpus built at {corpus_file}")
-        print("\nNext steps:")
-        print("1. Build index using pyserini:")
-        print("   python -m pyserini.index.lucene \\")
-        print("     --collection JsonCollection \\")
-        print("     --input data/tmp/corpus \\")
-        print("     --index data/tmp/index \\")
-        print("     --generator DefaultLuceneDocumentGenerator \\")
-        print("     --threads 1 \\")
-        print("     --storePositions --storeDocvectors --storeRaw")
-        print("2. Use batch_search.py for retrieval")
-        
-    except Exception as e:
-        print(f"Error: {str(e)}")
+    parser = argparse.ArgumentParser(description='Create dedup table to text mapping')
+    parser.add_argument('--tag', type=str, default=None, help='Tag suffix for versioning (e.g., 251117)')
+    parser.add_argument('--v2_mode', action='store_true', help='Use v2 mode.')
+    args = parser.parse_args()
+    
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
+    
+    corpus_file = create_enhanced_mapping(v2_suffix, suffix)
+    print(f"\nCorpus built at {corpus_file}")
+    print("\nNext steps:")
+    print("1. Build index using pyserini:")
+    print("   python -m pyserini.index.lucene \\")
+    print("     --collection JsonCollection \\")
+    print(f"     --input data/tmp/corpus{v2_suffix}{suffix} \\")
+    print("     --index data/tmp/index \\")
+    print("     --generator DefaultLuceneDocumentGenerator \\")
+    print("     --threads 1 \\")
+    print("     --storePositions --storeDocvectors --storeRaw")
+    print("2. Use batch_search.py for retrieval")
+    
 
 if __name__ == "__main__":
     main() 

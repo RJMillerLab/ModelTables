@@ -11,32 +11,14 @@ if project_root not in sys.path:
 
 from src.utils import to_parquet
 
-def load_mappings():
+def load_mappings(suffix, v2_suffix):
     """
     Load all mapping files and return a list of (csv_path, readme_path, source)
-    Supports TAG environment variable for versioning (e.g., TAG=251117)
     """
-    # Support TAG environment variable for versioning
-    tag = os.environ.get('TAG', '')
-    suffix = f"_{tag}" if tag else ""
-    v2_suffix = f"_v2{suffix}" if suffix else "_v2"  # For files with _v2 pattern
-    
     records = []
-
-    # GitHub
     print("\nLoading GitHub mapping...")
-    # Require TAG environment variable
-    if not tag:
-        raise ValueError("TAG environment variable is required. Please set TAG=251117 (or your tag)")
-    
     github_info_path = os.path.join('data', 'processed', f'github_readmes_info{suffix}.parquet')
-    if not os.path.exists(github_info_path):
-        raise FileNotFoundError(f"GitHub info file not found: {github_info_path}")
-    
-    # For md_to_csv_mapping, use v2_tag directory
-    md_map_path = os.path.join('data', 'processed', f'deduped_github_csvs_v2_{tag}', 'md_to_csv_mapping.json')
-    if not os.path.exists(md_map_path):
-        raise FileNotFoundError(f"GitHub mapping file not found: {md_map_path}")
+    md_map_path = os.path.join('data', 'processed', f'deduped_github_csvs{v2_suffix}{suffix}', 'md_to_csv_mapping.json')
     
     if os.path.exists(github_info_path) and os.path.exists(md_map_path):
         # Load the mapping files
@@ -205,48 +187,43 @@ def get_file_size(file_path):
     return f"{size_mb:.2f} MB"
 
 def main():
-    # Support TAG environment variable for versioning
-    tag = os.environ.get('TAG', '')
-    suffix = f"_{tag}" if tag else ""
+    parser = argparse.ArgumentParser(description='Create raw csv to text mapping')
+    parser.add_argument('--tag', type=str, default=None, help='Tag suffix for versioning (e.g., 251117)')
+    parser.add_argument('--v2_mode', action='store_true', help='Use v2 mode.')
+    args = parser.parse_args()
+    
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     
     # Load mask file to filter only valid files
-    mask_file = f'data/analysis/all_valid_title_valid{suffix}.txt'
+    mask_file = f'data/analysis/all_valid_title_valid{v2_suffix}{suffix}.txt'
     valid_csv_basenames = set()
-    if os.path.exists(mask_file):
-        print(f"\nLoading mask file: {mask_file}")
-        with open(mask_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    # Extract basename from full path
-                    basename = os.path.basename(line)
-                    valid_csv_basenames.add(basename)
-        print(f"Loaded {len(valid_csv_basenames)} valid CSV files from mask file")
-    else:
-        print(f"Warning: Mask file not found at {mask_file}, will process all records")
+    print(f"\nLoading mask file: {mask_file}")
+    with open(mask_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                valid_csv_basenames.add(basename)
+    valid_csv_basenames = set(os.path.basename(line) for line in valid_csv_basenames)
+    print(f"Loaded {len(valid_csv_basenames)} valid CSV files from mask file")
     
-    df = load_mappings()
+    df = load_mappings(suffix, v2_suffix)
     print(f"\nTotal records before filtering: {len(df)}")
     print("\nRecords by source (before filtering):")
     print(df['source'].value_counts())
     
     # Filter by mask file if available
-    if valid_csv_basenames:
-        # Extract basename from csv_path for comparison
-        df['csv_basename'] = df['csv_path'].apply(lambda x: os.path.basename(x))
-        df_filtered = df[df['csv_basename'].isin(valid_csv_basenames)].copy()
-        df_filtered = df_filtered.drop(columns=['csv_basename'])
-        print(f"\nTotal records after filtering by mask file: {len(df_filtered)}")
-        print("\nRecords by source (after filtering):")
-        print(df_filtered['source'].value_counts())
-        df = df_filtered
-    else:
-        print("No mask file filtering applied")
+    # Extract basename from csv_path for comparison
+    df['csv_basename'] = df['csv_path'].apply(lambda x: os.path.basename(x))
+    df = df[df['csv_basename'].isin(valid_csv_basenames)].copy()
+    df = df.drop(columns=['csv_basename'])
+    print(f"\nTotal records after filtering by mask file: {len(df)}")
+    print("\nRecords by source (after filtering):")
+    print(df['source'].value_counts())
     
-    output_path = os.path.join('data', 'processed', f'raw_csv_to_text_mapping{suffix}.parquet')
+    output_path = os.path.join('data', 'processed', f'raw_csv_to_text_mapping{v2_suffix}{suffix}.parquet')
     to_parquet(df, output_path)
-    
-    df = pd.read_parquet(output_path)
+    #df = pd.read_parquet(output_path)
 
     # Check exact duplicates
     print("\nChecking for exact duplicates in csv_path:")

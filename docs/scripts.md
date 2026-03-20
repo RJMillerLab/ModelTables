@@ -229,20 +229,20 @@ This works on modelcard content retrieval
 
 ```bash
 # 1. generate mapping from csv_path:readme_path
-python src/baseline2/create_raw_csv_to_text_mapping.py
+python src/baseline2/create_raw_csv_to_text_mapping.py --tag 251117 --v2_mode
 # 2. get incontext embedding for each csv_path, save to data/tmp/corpus/collection.jsonl
-python src/baseline2/create_dedup_table_to_text_mapping.py
+python src/baseline2/create_dedup_table_to_text_mapping.py --tag 251117 --v2_mode
 # 3. build index: sparse retrieval by pyserini
-python -m pyserini.index.lucene --collection JsonCollection --input data/tmp/corpus --index data/tmp/index_v2_251117 --generator DefaultLuceneDocumentGenerator --threads 1 --storePositions --storeDocvectors --storeRaw
+python -m pyserini.index.lucene --collection JsonCollection --input data/tmp/corpus_v2_251117 --index data/tmp/index_sparse_v2_251117 --generator DefaultLuceneDocumentGenerator --threads 1 --storePositions --storeDocvectors --storeRaw
 # 4. build up tsv
-python src/baseline2/create_queries_from_table.py
+python src/baseline2/create_queries_from_table.py --tag 251117 --v2_mode
 # or python src/baseline2/create_queries_from_corpus.py
 # 4. search pyserini
-#python -m pyserini.search.lucene --index data/tmp/index_v2_251117 --topics data/tmp/queries_table.tsv --output data/tmp/search_result.txt --bm25 --hits 11 --threads 8 --batch-size 64 # as this can not solve truncating clause automatically
+#python -m pyserini.search.lucene --index data/tmp/index_sparse_v2_251117 --topics data/tmp/queries_table_v2_251117.tsv --output data/tmp/search_result.txt --bm25 --hits 11 --threads 8 --batch-size 64 # as this can not solve truncating clause automatically
 # or python batch_search.py
-python src/baseline2/search_with_pyserini.py --hits 11 --output data/tmp/search_result_v2_251117.json
+python src/baseline2/search_with_pyserini.py --top_k 11 --output data/tmp/baseline2_sparse_results_v2_251117.json
 # 5. postprocess
-python -m src.baseline1.table_retrieval_pipeline postprocess --input_json data/tmp/baseline2_sparse_results_251117.json
+python -m src.baseline1.table_retrieval_pipeline postprocess --input_json data/tmp/baseline2_sparse_results_v2_251117.json
 ```
 
 7.3 Baseline3: Hybrid (Sparse + Dense search)

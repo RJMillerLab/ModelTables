@@ -15,13 +15,13 @@ def load_corpus_ids(corpus_file):
                 ids.append(entry['id'])
     return ids
 
-def find_table_file(table_id, base_dir):
+def find_table_file(table_id, v2_suffix, suffix, base_dir):
     """Find the corresponding table file for a given ID."""
     # Try different directories and patterns
     dirs_to_search = [
-        'tables_output',  # For arXiv papers
-        'deduped_github_csvs',  # For GitHub tables
-        'deduped_hugging_csvs'  # For HuggingFace tables
+        f'tables_output{v2_suffix}{suffix}',  # For arXiv papers
+        f'deduped_github_csvs{v2_suffix}{suffix}',  # For GitHub tables
+        f'deduped_hugging_csvs{v2_suffix}{suffix}',  # For HuggingFace tables
     ]
     
     for dir_name in dirs_to_search:
@@ -70,7 +70,7 @@ def table_to_text(df):
     # Join everything with commas in a single line and strip any leading/trailing whitespace
     return ','.join([','.join(columns)] + rows).strip()
 
-def load_table_data(corpus_file, base_dir, max_tokens=None):
+def load_table_data(corpus_file, v2_suffix, suffix, base_dir, max_tokens=None):
     """Load table data based on IDs from corpus."""
     queries = []
     
@@ -83,7 +83,7 @@ def load_table_data(corpus_file, base_dir, max_tokens=None):
     for table_id in ids:
         try:
             # Find the table file
-            table_file = find_table_file(table_id, base_dir)
+            table_file = find_table_file(table_id, v2_suffix, suffix, base_dir)
             if not table_file:
                 print(f"Warning: Could not find table file for {table_id}, skipping...")
                 continue
@@ -195,29 +195,23 @@ def create_queries_tsv(entries, output_file):
         print("TSV format verification passed!")
 
 def main():
-    # Support TAG environment variable for versioning
-    tag = os.environ.get('TAG', '')
-    suffix = f"_{tag}" if tag else ""
-    
     parser = argparse.ArgumentParser(description='Create queries.tsv from local table data')
-    parser.add_argument('--corpus', default='data/tmp/corpus/collection.jsonl',
-                        help='Path to corpus jsonl file')
-    parser.add_argument('--base-dir', default='data/processed',
-                        help='Base directory containing table files')
-    parser.add_argument('--output-dir', default='data/tmp/',
-                        help='Output directory for query files')
-    parser.add_argument('--max-tokens', type=int, default=None,
-                        help='Maximum number of tokens per query')
+    parser.add_argument('--v2_mode', action='store_true', help='Use v2 mode.')
+    parser.add_argument('--tag', type=str, default=None, help='Tag suffix for versioning (e.g., 251117)')
     args = parser.parse_args()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    
+    CORPUS_FILE = f'data/tmp/corpus{v2_suffix}{suffix}/collection{v2_suffix}{suffix}.jsonl'
+    MAX_TOKENS = None
+    BASE_DIR = 'data/processed'
 
-    print(f"🔄 Loading tables from {args.base_dir} based on corpus {args.corpus}...")
-    print(f"🔄 Maximum number of tokens per query: {args.max_tokens}")
-    entries = load_table_data(args.corpus, args.base_dir, args.max_tokens)
+    v2_suffix = "_v2" if args.v2_mode else ""
+    suffix = f"_{args.tag}" if args.tag else ""
 
-    queries_file = os.path.join(args.output_dir, f'queries_table{suffix}.tsv')
-    create_queries_tsv(entries, queries_file)
+    print(f"🔄 Loading tables from {BASE_DIR} based on corpus {CORPUS_FILE}...")
+    print(f"🔄 Maximum number of tokens per query: {MAX_TOKENS}")
+    entries = load_table_data(CORPUS_FILE, v2_suffix, suffix, BASE_DIR, MAX_TOKENS)
+    create_queries_tsv(entries, os.path.join('data', 'tmp', f'queries_table{v2_suffix}{suffix}.tsv'))
 
 if __name__ == "__main__":
     main()

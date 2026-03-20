@@ -28,7 +28,7 @@ import os
 import re
 import traceback
 from pathlib import Path
-
+import torch
 import faiss  # to read Faiss header only; cheap
 from pyserini.encode import AutoQueryEncoder
 from pyserini.search.faiss import FaissSearcher
@@ -60,53 +60,38 @@ def load_mapping(mapping_file: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sparse-index", required=True)
-    ap.add_argument("--dense-index", required=True)
-    ap.add_argument("--queries", default=None,
-                    help="Path to queries TSV file. If not specified, uses queries_table.tsv or queries_table_<TAG>.tsv if TAG env var is set.")
-    ap.add_argument("--mapping", default=None,
-                    help="Path to ID mapping JSON file. If not specified, uses queries_table_mapping.json or queries_table_<TAG>_mapping.json if TAG env var is set.")
-    ap.add_argument("--k", type=int, default=11)
+    ap.add_argument("--top_k", type=int, default=11)
     ap.add_argument("--alpha", type=float, default=0.45)
-    ap.add_argument("--device", default="cpu")
-    ap.add_argument("--output", type=str, default=None,
-                    help="Output JSON file path. If not specified, uses search_result_hybrid.json or search_result_hybrid_<TAG>.json if TAG env var is set.")
+    ap.add_argument("--tag", type=str, default=None, help="Tag suffix for versioning (e.g., 251117).")
+    ap.add_argument("--v2_mode", action="store_true", help="Use v2 mode.")
     args = ap.parse_args()
     
-    # Support TAG environment variable for versioning
-    tag = os.environ.get('TAG', '')
-    suffix = f"_{tag}" if tag else ""
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     
-    # Set default paths with tag support if not provided
-    queries_path = args.queries or f'data/tmp/queries_table{suffix}.tsv'
-    mapping_path = args.mapping or f'data/tmp/queries_table{suffix}_mapping.json'
+    queries_path = f'data/tmp/queries_table{v2_suffix}{suffix}.tsv'
+    mapping_path = f'data/tmp/queries_table{v2_suffix}{suffix}_mapping.json'
+    sparse_index_path = f'data/tmp/index_sparse{v2_suffix}{suffix}'
+    dense_index_path = f'data/tmp/index_dense{v2_suffix}{suffix}/index.faiss'
+    out_file = f'data/tmp/search_result_hybrid{v2_suffix}{suffix}.json'
+    encoder_name = "sentence-transformers/all-MiniLM-L6-v2"  # 384‑d
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # ---------------------------------------------------------------------
     # 1. dense side
     # ---------------------------------------------------------------------
     print("[init] dense‑Faiss searcher …")
-    encoder_name = "sentence-transformers/all-MiniLM-L6-v2"  # 384‑d
-    encoder = AutoQueryEncoder(
-        encoder_name,
-        device=args.device,
-        pooling="mean",
-        l2_norm=True,
-    )
+    encoder = AutoQueryEncoder(encoder_name, device=device, pooling="mean", l2_norm=True)
 
-    # ---- probe encoder dim (works for any return shape) ------------------
     probe_vec = encoder.encode(["dim_probe"])
     if probe_vec.ndim == 1:
         enc_dim = probe_vec.shape[0]
     else:
         enc_dim = probe_vec.shape[1]
 
-    # ---- read Faiss index dim -------------------------------------------
-    idx_path = Path(args.dense_index) / "index.faiss"
-    if not idx_path.exists():
-        idx_path = Path(args.dense_index) / "index"
-    if not idx_path.exists():
-        raise FileNotFoundError(f"Faiss index not found under {args.dense_index}")
-    idx_dim = faiss.read_index(str(idx_path)).d
+    if not os.path.exists(dense_index_path):
+        raise FileNotFoundError(f"Faiss index not found under {dense_index_path}")
+    idx_dim = faiss.read_index(str(dense_index_path)).d
 
     print(f"  ├─ Faiss dim:   {idx_dim}\n  └─ Encoder dim: {enc_dim}")
     if idx_dim != enc_dim:
@@ -116,13 +101,13 @@ def main():
             "   Re‑encode corpus with the same encoder, or load the encoder used for indexing."
         )
 
-    dense = FaissSearcher(str(Path(args.dense_index)), encoder)
+    dense = FaissSearcher(dense_index_path, encoder)
 
     # ---------------------------------------------------------------------
     # 2. sparse side
     # ---------------------------------------------------------------------
     print("[init] sparse‑Lucene (BM25) searcher …")
-    sparse = LuceneSearcher(args.sparse_index)
+    sparse = LuceneSearcher(sparse_index_path)
     sparse.set_bm25()
 
     # ---------------------------------------------------------------------
@@ -153,7 +138,7 @@ def main():
         query_txt = " ".join(toks[:max_terms]) if len(toks) > max_terms else text
 
         try:
-            hits = hybrid.search(query_txt, k=args.k, alpha=args.alpha)
+            hits = hybrid.search(query_txt, k=args.top_k, alpha=args.alpha)
         except Exception as e:
             title = str(e).splitlines()[0] or type(e).__name__
             print(f"  !! Error for {qid}: {title}, logged to {debug_log}")
@@ -170,10 +155,7 @@ def main():
     # ---------------------------------------------------------------------
     # 5. output
     # ---------------------------------------------------------------------
-    if args.output:
-        out_file = Path(args.output)
-    else:
-        out_file = Path(queries_path).parent / f"search_result_hybrid{suffix}.json"
+    
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     print(f"✅  Saved {len(results)} hybrid results → {out_file}")

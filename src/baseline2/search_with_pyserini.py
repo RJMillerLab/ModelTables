@@ -35,83 +35,40 @@ def load_queries(tsv_file):
 # Argument Parsing
 # --------------------
 
-def parse_args():
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Search with Pyserini")
-    parser.add_argument(
-        "--hits",
-        type=int,
-        default=11,
-        help="Number of hits (documents) to retrieve per query."
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output JSON file to save search results. If not specified, uses data/tmp/search_result.json or data/tmp/search_result_<TAG>.json if TAG env var is set."
-    )
-    parser.add_argument(
-        "--index",
-        type=str,
-        default=None,
-        help="Path to Pyserini index. If not specified, uses data/tmp/index or data/tmp/index_<TAG> if TAG env var is set."
-    )
-    parser.add_argument(
-        "--queries",
-        type=str,
-        default=None,
-        help="Path to queries TSV file. If not specified, uses data/tmp/queries_table.tsv."
-    )
-    parser.add_argument(
-        "--mapping",
-        type=str,
-        default=None,
-        help="Path to ID mapping JSON file. If not specified, uses data/tmp/queries_table_mapping.json."
-    )
-    return parser.parse_args()
-
 def main():
-    args = parse_args()
+    parser = argparse.ArgumentParser(description="Search with Pyserini")
+    parser.add_argument("--top_k", type=int, default=11, help="Number of hits (documents) to retrieve per query.")   
+    parser.add_argument("--tag", type=str, default=None, help="Tag suffix for versioning (e.g., 251117).")
+    parser.add_argument("--v2_mode", action="store_true", help="Use v2 mode.")
+    args = parser.parse_args()
     
-    # Support TAG environment variable for versioning
-    tag = os.environ.get('TAG', '')
-    suffix = f"_{tag}" if tag else ""
+    suffix = f"_{args.tag}" if args.tag else ""
+    v2_suffix = "_v2" if args.v2_mode else ""
     
-    # Set default paths with tag support
-    index_path = args.index or f'data/tmp/index{suffix}'
-    output_path = args.output or f'data/tmp/search_result{suffix}.json'
-    queries_path = args.queries or f'data/tmp/queries_table{suffix}.tsv'
-    mapping_path = args.mapping or f'data/tmp/queries_table{suffix}_mapping.json'
+    index_path =  f'data/tmp/index_sparse{v2_suffix}{suffix}'
+    output_path = f'data/tmp/search_result{v2_suffix}{suffix}.json'
+    queries_path = f'data/tmp/queries_table{v2_suffix}{suffix}.tsv'
+    mapping_path = f'data/tmp/queries_table{v2_suffix}{suffix}_mapping.json'
 
     # Initialize searcher
     searcher = LuceneSearcher(index_path)
     searcher.set_bm25()  # Use BM25 scoring
     
-    # Load queries and mapping
-    print("Loading queries...")
     queries = load_queries(queries_path)
-    print(f"Loaded {len(queries)} queries")
-    
-    print("Loading ID mapping...")
     id_mapping = load_id_mapping(mapping_path)
-    print(f"Loaded {len(id_mapping)} ID mappings")
     
-    # Perform search
     results = {}
     total = len(queries)
     for i, (qid, text) in enumerate(queries.items(), 1):
         print(f"Searching for query {qid} ({i}/{total})...")
         try:
-            hits = searcher.search(text, k=args.hits)  # Use user-specified hits
-            
-            # Store results with original IDs
+            hits = searcher.search(text, k=args.top_k)
             original_id = id_mapping[qid]
             results[original_id] = [hit.docid for hit in hits]
-        except Exception as e:
+        except Exception as e:    
             print(f"Error searching for query {qid}: {e}")
             continue
     
-    # Save results
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     print(f"Search results saved to {output_path}")
