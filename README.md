@@ -138,3 +138,14 @@ We would like to thank the following repositories and projects for their invalua
     * [librarian-bots/dataset_cards_with_metadata](https://huggingface.co/datasets/librarian-bots/dataset_cards_with_metadata)
 
 * **Semantic Scholar** API for their [academic graph and datasets](https://www.semanticscholar.org/product/api/tutorial), essential for building our citation network.
+
+If you find ModelTables useful, consider citing our paper:
+
+```bibtex
+@article{dong2025modeltables,
+  title={ModelTables: A Corpus of Tables about Models},
+  author={Dong, Zhengyuan and Zhong, Victor and Miller, Ren{\'e}e J},
+  journal={arXiv preprint arXiv:2512.16106},
+  year={2025}
+}
+```
