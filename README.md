@@ -68,9 +68,9 @@ Here we provide steps for quick inference. The script start from scratch will be
 
 The dataset is available through Google Drive for users with access:
 
-* **Full Dataset**: [Google Drive Folder](https://drive.google.com/drive/folders/1YLfkknrFuE9pWFJuarb4kyX1o5NtN-Y8?usp=sharing) - Contains the complete dataset with all processed tables, ground truth files, and intermediate results.
+* **Full Dataset**: [Google Drive Folder](https://drive.google.com/drive/folders/1YLfkknrFuE9pWFJuarb4kyX1o5NtN-Y8?usp=sharing) - Complete dataset with processed tables, ground-truth files, and intermediate results. This is the snapshot used for the paper v1 evaluation.
 
-* **Updated Tables**: [Google Drive Folder](https://drive.google.com/drive/folders/1h3gG8iRFgNZQV2K8z_ZdaZv3MUEJocRY?usp=sharing) - Contains the updated version of processed tables. We will release other files with the newest version with paper soon.
+* **Updated Tables**: [Google Drive Folder](https://drive.google.com/drive/folders/1f2tXNLcl0Dfi88DNhAD2R655dOBwOzb8?usp=drive_link) - Processed tables from dump snapshot **251117** (2025-11-17). Hugging Face resumed updates to this [dump](https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata) on 2026-03-23. This snapshot is newer than paper v1 and is not used in that release.
 
 The crawled tables from different resources are stored at
 
