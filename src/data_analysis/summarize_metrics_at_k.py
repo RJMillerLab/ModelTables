@@ -42,8 +42,10 @@ METHOD_LABELS = {
     "baseline2": "Sparse/BM25",
     "baseline3": "Hybrid",
     "baseline3_0712": "Hybrid",
+    "baseline5": "Keyword Search",
+    "baseline6": "Joinable Search",
 }
-COLORS = ("#d8ecff", "#8ec5f4", "#3f8fd2", "#0b4f9c", "#b5d7f5", "#2268b5")
+COLORS = ("#e5f2ff", "#b8dcff", "#78b8ee", "#3f8fd2", "#0b5fae", "#083b7a")
 
 
 def expand_inputs(patterns: Iterable[str]) -> list[str]:
@@ -153,7 +155,9 @@ def metric_value(row: dict[str, object], key: str) -> float:
     return float(value) if value not in ("", None) else 0.0
 
 
-def method_label(method: str) -> str:
+def method_label(method: str, label_overrides: dict[str, str] | None = None) -> str:
+    if label_overrides and method in label_overrides:
+        return label_overrides[method]
     return METHOD_LABELS.get(method, method.replace("_", " "))
 
 
@@ -208,21 +212,42 @@ def select_rows(
     return selected
 
 
-def draw_centered_legend(draw, methods: list[str], width: int, y: int, font, scale: int) -> None:
+def draw_centered_legend(
+    draw,
+    methods: list[str],
+    width: int,
+    y: int,
+    font,
+    scale: int,
+    label_overrides: dict[str, str] | None = None,
+) -> None:
     def s(value: float) -> int:
         return int(round(value * scale))
 
     swatch_w = 24
     label_gap = 10
     item_gap = 52
-    item_widths = [swatch_w + label_gap + text_width(draw, method_label(method), font) for method in methods]
-    legend_w = sum(item_widths) + item_gap * (len(methods) - 1)
-    legend_x = max(24, (width - legend_w) / 2)
-    for m_idx, method in enumerate(methods):
-        x = legend_x + sum(item_widths[:m_idx]) + item_gap * m_idx
-        color = hex_to_rgb(COLORS[m_idx % len(COLORS)])
-        draw.rectangle([s(x), s(y - 11), s(x + swatch_w), s(y + 3)], fill=color)
-        draw.text((s(x + swatch_w + label_gap), s(y - 3)), method_label(method), fill=(0, 0, 0), anchor="lm", font=font)
+    per_row = 3 if len(methods) > 4 else len(methods)
+    for row_idx in range(0, len(methods), per_row):
+        row_methods = methods[row_idx : row_idx + per_row]
+        item_widths = [
+            swatch_w + label_gap + text_width(draw, method_label(method, label_overrides), font)
+            for method in row_methods
+        ]
+        legend_w = sum(item_widths) + item_gap * (len(row_methods) - 1)
+        legend_x = max(24, (width - legend_w) / 2)
+        row_y = y + (row_idx // per_row) * 26
+        for m_idx, method in enumerate(row_methods):
+            x = legend_x + sum(item_widths[:m_idx]) + item_gap * m_idx
+            color = hex_to_rgb(COLORS[(row_idx + m_idx) % len(COLORS)])
+            draw.rectangle([s(x), s(row_y - 11), s(x + swatch_w), s(row_y + 3)], fill=color)
+            draw.text(
+                (s(x + swatch_w + label_gap), s(row_y - 3)),
+                method_label(method, label_overrides),
+                fill=(0, 0, 0),
+                anchor="lm",
+                font=font,
+            )
 
 
 def render_metric_pair_grid(
@@ -231,6 +256,7 @@ def render_metric_pair_grid(
     title: str,
     out_path: Path,
     ks: list[int],
+    label_overrides: dict[str, str] | None = None,
 ) -> None:
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -238,7 +264,7 @@ def render_metric_pair_grid(
         raise RuntimeError("Pillow is required to generate figures.") from exc
 
     scale = 2
-    width, height = 1320, 520
+    width, height = 1380, 520
     img = Image.new("RGB", (width * scale, height * scale), "white")
     draw = ImageDraw.Draw(img)
 
@@ -248,11 +274,13 @@ def render_metric_pair_grid(
     try:
         font = ImageFont.truetype("Arial.ttf", s(13))
         font_sm = ImageFont.truetype("Arial.ttf", s(10))
+        font_xs = ImageFont.truetype("Arial.ttf", s(8))
         font_title = ImageFont.truetype("Arial Bold.ttf", s(22))
         font_panel = ImageFont.truetype("Arial Bold.ttf", s(16))
     except Exception:
         font = ImageFont.load_default()
         font_sm = ImageFont.load_default()
+        font_xs = ImageFont.load_default()
         font_title = ImageFont.load_default()
         font_panel = ImageFont.load_default()
 
@@ -264,10 +292,10 @@ def render_metric_pair_grid(
         rotated = text_img.rotate(90, expand=True)
         img.paste(rotated.convert("RGB"), (s(x) - rotated.width // 2, s(y) - rotated.height // 2), rotated)
 
-    panel_w, panel_h = 285, 155
-    lefts = (86, 394, 702, 1010)
-    tops = {"precision": 78, "recall": 276}
-    pad_l, pad_r, pad_t, pad_b = 42, 10, 16, 30
+    panel_w, panel_h = 306, 150
+    lefts = (74, 405, 736, 1067)
+    tops = {"precision": 70, "recall": 250}
+    pad_l, pad_r, pad_t, pad_b = 39, 8, 15, 28
     y_max = {}
     for metric in ("precision", "recall"):
         values = [metric_value(row, f"{metric}@{k}") for row in rows for k in ks]
@@ -278,9 +306,18 @@ def render_metric_pair_grid(
         y1 = top + pad_t
         return y0 - value / y_max[metric] * (y0 - y1)
 
+    def draw_value_label(x: float, y: float, value: float) -> None:
+        label = f"{value:.2f}" if value >= 0.01 else f"{value:.3f}"
+        bbox = draw.textbbox((0, 0), label, font=font_xs)
+        text_img = Image.new("RGBA", (bbox[2] - bbox[0] + 4, bbox[3] - bbox[1] + 4), (255, 255, 255, 0))
+        text_draw = ImageDraw.Draw(text_img)
+        text_draw.text((2, 2), label, fill=(25, 25, 25), font=font_xs)
+        rotated = text_img.rotate(90, expand=True)
+        img.paste(rotated.convert("RGB"), (s(x) - rotated.width // 2, s(y) - rotated.height - s(2)), rotated)
+
     draw.text((s(width / 2), s(24)), title, fill=(0, 0, 0), anchor="mm", font=font_title)
     for gt, left in zip(GT_ORDER, lefts):
-        draw.text((s(left + panel_w / 2), s(54)), GT_LABELS[gt], fill=(0, 0, 0), anchor="mm", font=font_panel)
+        draw.text((s(left + panel_w / 2), s(49)), GT_LABELS[gt], fill=(0, 0, 0), anchor="mm", font=font_panel)
 
     for metric in ("precision", "recall"):
         top = tops[metric]
@@ -320,8 +357,9 @@ def render_metric_pair_grid(
                     y = y0 - bar_h
                     color = hex_to_rgb(COLORS[m_idx % len(COLORS)])
                     draw.rectangle([s(x), s(y), s(x + bar_w), s(y0)], fill=color)
+                    draw_value_label(x + bar_w / 2, y, value)
 
-    draw_centered_legend(draw, methods, width, 488, font, scale)
+    draw_centered_legend(draw, methods, width, 460, font, scale, label_overrides=label_overrides)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img = img.resize((width, height))
@@ -331,17 +369,29 @@ def render_metric_pair_grid(
 
 def write_figures(rows: list[dict[str, object]], fig_dir: str, ks: list[int]) -> None:
     out_dir = Path(fig_dir)
-    main_methods = ["starmie_shuffle_col", "baseline", "baseline2", "baseline3_0712"]
+    main_methods = ["baseline5", "baseline6", "starmie_shuffle_col", "baseline", "baseline2", "baseline3_0712"]
     starmie_methods = ["starmie_none", "starmie_drop_cell", "starmie_shuffle_row", "starmie_shuffle_col"]
     specs = [
-        ("main_results_precision_recall_at_k", main_methods, "Main Results Precision/Recall@k", True),
-        ("ablation_starmie_precision_recall_at_k", starmie_methods, "Starmie Structural Ablation Precision/Recall@k", False),
+        (
+            "main_results_precision_recall_at_k",
+            main_methods,
+            "Main Results Precision/Recall@k",
+            True,
+            {"starmie_shuffle_col": "Union Search"},
+        ),
+        (
+            "ablation_starmie_precision_recall_at_k",
+            starmie_methods,
+            "Starmie Structural Ablation Precision/Recall@k",
+            False,
+            None,
+        ),
     ]
-    for stem, methods, title, use_source_suffix in specs:
+    for stem, methods, title, use_source_suffix, label_overrides in specs:
         selected = select_rows(rows, methods, use_source_suffix=use_source_suffix)
         if selected:
             path = out_dir / f"fig_{stem}.png"
-            render_metric_pair_grid(selected, methods, title, path, ks)
+            render_metric_pair_grid(selected, methods, title, path, ks, label_overrides=label_overrides)
             print(f"saved figure: {path}")
 
 
