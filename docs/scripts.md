@@ -179,6 +179,7 @@ bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search_251117.log 2>&1 # Per
 bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_251117.log 2>&1 # Extract metrics based on ground truth and retrieval results; plot figures
 bash scripts/step3_processmetrics_all.sh <EXPERIMENT_INDEX> > logs/step3_processmetrics_all_251117.log 2>&1 # run baselines
 bash eval_per_resource.sh > logs/eval_per_resource_251117.log 2>&1 # Run ablation study on different resources (after getting results)
+python -m src.data_analysis.summarize_metrics_at_k --from-csv experiments/metrics_v1_final/source_metrics_at_1_3_5_10.csv --fig-dir experiments/metrics_v1_final # Generate compact figures with both precision and recall metrics.
 ```
 
 ### 7\. Baseline: Dense Search, Sparse Search, Hybrid Search
