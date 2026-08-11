@@ -25,6 +25,7 @@ GENERIC_TABLE_PATTERNS = [
     "1910.09700_table",
     "204823751_table"
 ]
+GITHUB_UI_SCAN_LINES = 128
 
 # Benchmark data (WDC removed)
 # Note: # Cols is total columns across all tables (avg_cols × #tables)
@@ -62,6 +63,55 @@ def _infer_resource_from_path(path):
         return "html"
     if "/llm_tables" in path or "/llm" in path:
         return "llm"
+    return None
+
+
+def read_head_text(path, max_lines=GITHUB_UI_SCAN_LINES):
+    try:
+        lines = []
+        with open(path, encoding="utf-8", errors="ignore") as handle:
+            for _ in range(max_lines):
+                line = handle.readline()
+                if not line:
+                    break
+                lines.append(line)
+        return "".join(lines).lower()
+    except OSError:
+        return ""
+
+
+def is_github_file_listing(path):
+    """Return True for GitHub repository file listings parsed as CSV tables."""
+    if "deduped_github_csvs" not in path:
+        return False
+    head = read_head_text(path)
+    repeated_name_header = "name .1" in head or "name , name" in head
+    repository_ui_marker = "latest commithistory" in head or "view all files" in head
+    return repeated_name_header and repository_ui_marker
+
+
+def is_github_code_diff(path):
+    """Return True for GitHub code-diff pages parsed as CSV tables."""
+    if "deduped_github_csvs" not in path:
+        return False
+    head = read_head_text(path, max_lines=16)
+    has_full_diff_header = (
+        "original file line number" in head
+        and "diff line number" in head
+        and "diff line change" in head
+    )
+    diff_change_only_header = head.lstrip().startswith("diff line change")
+    return has_full_diff_header or diff_change_only_header
+
+
+def invalid_table_reason(path):
+    filename = os.path.basename(path)
+    if any(pattern in filename for pattern in GENERIC_TABLE_PATTERNS):
+        return "generic_table"
+    if is_github_file_listing(path):
+        return "github_file_listing"
+    if is_github_code_diff(path):
+        return "github_code_diff"
     return None
 
 
@@ -245,15 +295,20 @@ def compute_resource_stats(df, resource, tag):
                     print(f"      - {p}")
     
     valid_paths = existing_paths
-    # Filter out generic / too-general tables
-    def is_generic_table(path):
-        filename = os.path.basename(path)
-        return any(pattern in filename for pattern in GENERIC_TABLE_PATTERNS)
-    
-    before_generic_filter = len(valid_paths)
-    valid_paths = valid_paths[~valid_paths.apply(is_generic_table)]
-    generic_filtered = before_generic_filter - len(valid_paths)
-    print(f"Filtered generic tables for {resource}: removed {generic_filtered:,} files.")
+
+    invalid_rows = []
+    invalid_mask = []
+    for path in valid_paths.tolist():
+        reason = invalid_table_reason(path)
+        invalid_mask.append(reason is not None)
+        if reason is not None:
+            invalid_rows.append({"resource": resource, "path": path, "reason": reason})
+    invalid_mask = pd.Series(invalid_mask, index=valid_paths.index)
+    before_invalid_filter = len(valid_paths)
+    valid_paths = valid_paths[~invalid_mask]
+    invalid_filtered = before_invalid_filter - len(valid_paths)
+    reason_counts = pd.Series([row["reason"] for row in invalid_rows]).value_counts().to_dict()
+    print(f"Filtered invalid tables for {resource}: removed {invalid_filtered:,} files. reasons={reason_counts}")
     
     unique_paths = valid_paths.unique().tolist()
 
@@ -378,6 +433,7 @@ def compute_resource_stats(df, resource, tag):
             f"{resource}-valid-dedup": valid_title_count_dedup
         },
         valid_title_valid_paths_set,
+        invalid_rows,
     )
 
 def create_combined_results(benchmark_data, resource_stats):
@@ -680,11 +736,13 @@ if __name__ == "__main__":
 
     resource_stats = {}
     combined_paths = set()
+    invalid_audit_rows = []
     for resource in RESOURCES:
         print(f"\nProcessing {resource}...")
-        stats, valid_paths_set = compute_resource_stats(df, resource, tag=args.tag)
+        stats, valid_paths_set, invalid_rows = compute_resource_stats(df, resource, tag=args.tag)
         resource_stats.update(stats)
         combined_paths.update(valid_paths_set)
+        invalid_audit_rows.extend(invalid_rows)
     results_df = create_combined_results(benchmark_data, resource_stats)
     results_path = os.path.join('data', 'analysis', f"benchmark_results{v2_suffix}{suffix}.parquet")
     to_parquet(results_df, results_path)
@@ -696,4 +754,8 @@ if __name__ == "__main__":
         for path in sorted(combined_paths):
             f.write(path + "\n")
     print(f"Saved concatenated valid-title list to {all_valid_title_valid_file} ({len(combined_paths)})")
-    print(f"  (Tables already filtered by size thresholds: max_cols={MAX_COLS}, max_rows={MAX_ROWS})")
+    print(f"  (Tables already filtered by invalid-table rules and size thresholds: max_cols={MAX_COLS}, max_rows={MAX_ROWS})")
+
+    invalid_audit_path = os.path.join('data', 'analysis', f"qc_invalid_tables{v2_suffix}{suffix}.csv")
+    pd.DataFrame(invalid_audit_rows, columns=["resource", "path", "reason"]).drop_duplicates().to_csv(invalid_audit_path, index=False)
+    print(f"Saved invalid-table audit to {invalid_audit_path} ({len(invalid_audit_rows)})")

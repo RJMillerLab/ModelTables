@@ -118,8 +118,12 @@ Ensure data quality and consistency before generating final ground truth.
 # Umm, dedup better happen before merge, maybe in the future TODO
 python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/step2_dedup_tables_v2_251117.log 2>&1  # Deduplicate raw tables, prioritizing Hugging Face > GitHub > HTML > LLM. Input: modelcard_step3_merged_v2_<tag>.parquet. Output: modelcard_step3_dedup_v2_<tag>.parquet, and others
 python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_v2_<tag>/dup_matrix_v2_<tag>.pkl, deduped_v2_<tag>/stats_v2_<tag>.json. Output: heatmaps heatmap_overlap_v2_<tag>.pdf / heatmap_percentage_v2_<tag>.pdf in data/analysis/
-PYTHONUNBUFFERED=1 python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_titles2ids_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt. Here we filter out over large tables (max_cols=100, max_rows=200)
+PYTHONUNBUFFERED=1 python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet. s2orc_titles2ids_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt, qc_invalid_tables_v2_<tag>.csv. Here we filter invalid extracted tables (generic tables, GitHub file listings, GitHub code-diff pages) and over-large tables (max_cols=100, max_rows=200) before writing the valid list.
 python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode --exclude_resources llm > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
+python -m src.data_analysis.collect_axcell_metric_vocabulary > logs/collect_axcell_metric_vocabulary.log 2>&1
+# Collect metric names plus task/dataset context names from released AxCell/Papers-with-Code taxonomy files; excludes ambiguous terms.
+python -m src.data_analysis.table_type_keyword --data-root /Users/z6dong/Repo/ModelTables --valid-list data/analysis/all_valid_title_valid_v2_251117.txt --sample-size 0 --out-dir data/table_type --evidence-scope header_rows --content-rows 3 --first-column-rows 30 --metric-vocab data/table_type/axcell_metric_vocabulary.txt --metric-vocab-only --context-vocab data/table_type/axcell_task_dataset_vocabulary.txt --require-numeric-evidence --diagnostic-labels --separate-training-logs --label-tsv data/table_type/table_type_labels_v2_251117.tsv --compact-output > logs/table_type_labels_v2_251117.log 2>&1
+# Classify valid tables into metric-explicit performance, taxonomy-context performance, HF training logs, and remaining non-performance; writes one compact TSV with table_path, label, resource, header.
 ```
 
 We could go for starmie searching and baselines searching. We need groundtruth for evaluation based on searched results and groundtruth results.
@@ -179,7 +183,10 @@ bash scripts/step3_hnsw_search.sh > logs/step3_hnsw_search_251117.log 2>&1 # Per
 bash scripts/step3_processmetrics.sh > logs/step3_processmetrics_251117.log 2>&1 # Extract metrics based on ground truth and retrieval results; plot figures
 bash scripts/step3_processmetrics_all.sh <EXPERIMENT_INDEX> > logs/step3_processmetrics_all_251117.log 2>&1 # run baselines
 bash eval_per_resource.sh > logs/eval_per_resource_251117.log 2>&1 # Run ablation study on different resources (after getting results)
-python -m src.data_analysis.summarize_metrics_at_k --from-csv experiments/metrics_v1_final/source_metrics_at_1_3_5_10.csv --fig-dir experiments/metrics_v1_final # Generate compact figures with both precision and recall metrics.
+bash scripts/run_processmetrics_presets.sh > logs/run_processmetrics_presets_251117.log 2>&1 # Run the curated paper result-table presets for Table 4 and Table 6.
+python scripts/make_tables_from_all_logs.py > logs/paper_result_tables_251117.tex # Generate LaTeX paper result tables from the processed metrics logs.
+cd ../ModelTables
+python -m src.data_analysis.summarize_metrics_at_k # Read metrics/*.json, save data/metrics/source_metrics_at_1_3_5_10.csv, and generate compact Precision/Recall@1/3/5/10 figures paired with the paper result tables.
 ```
 
 ### 7\. Baseline: Dense Search, Sparse Search, Hybrid Search

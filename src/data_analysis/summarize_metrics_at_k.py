@@ -7,9 +7,9 @@ P/R/MAP/F1@k columns from one or more JSON files.
 
 Example:
 python -m src.data_analysis.summarize_metrics_at_k \
-  --inputs "metrics_1030/metrics_scilake_final_none_tfidf_entity_*.json" \
-  --out-csv metrics_1030/metrics_scilake_final_none_at_1_3_5_10.csv \
-  --fig-dir experiments/metrics_v1_final
+  --inputs "metrics/metrics_scilake_final_*_tfidf_entity_*.json" "metrics/metrics_baseline*.json" \
+  --out-csv data/metrics/source_metrics_at_1_3_5_10.csv \
+  --fig-dir data/metrics
 """
 
 from __future__ import annotations
@@ -25,6 +25,12 @@ from typing import Iterable
 
 
 DEFAULT_KS = (1, 3, 5, 10)
+DEFAULT_INPUTS = (
+    "metrics/metrics_scilake_final_*_tfidf_entity_*.json",
+    "metrics/metrics_baseline*.json",
+)
+DEFAULT_OUT_CSV = "data/metrics/source_metrics_at_1_3_5_10.csv"
+DEFAULT_FIG_DIR = "data/metrics"
 METRIC_KEYS = ("precision", "recall", "map", "f1")
 GT_ORDER = ("direct", "model", "dataset", "union")
 GT_LABELS = {
@@ -225,9 +231,10 @@ def draw_centered_legend(
         return int(round(value * scale))
 
     swatch_w = 24
+    swatch_h = 14
     label_gap = 10
-    item_gap = 52
-    per_row = 3 if len(methods) > 4 else len(methods)
+    item_gap = 34
+    per_row = len(methods)
     for row_idx in range(0, len(methods), per_row):
         row_methods = methods[row_idx : row_idx + per_row]
         item_widths = [
@@ -240,9 +247,12 @@ def draw_centered_legend(
         for m_idx, method in enumerate(row_methods):
             x = legend_x + sum(item_widths[:m_idx]) + item_gap * m_idx
             color = hex_to_rgb(COLORS[(row_idx + m_idx) % len(COLORS)])
-            draw.rectangle([s(x), s(row_y - 11), s(x + swatch_w), s(row_y + 3)], fill=color)
+            draw.rectangle(
+                [s(x), s(row_y - swatch_h / 2), s(x + swatch_w), s(row_y + swatch_h / 2)],
+                fill=color,
+            )
             draw.text(
-                (s(x + swatch_w + label_gap), s(row_y - 3)),
+                (s(x + swatch_w + label_gap), s(row_y)),
                 method_label(method, label_overrides),
                 fill=(0, 0, 0),
                 anchor="lm",
@@ -254,6 +264,7 @@ def render_metric_pair_grid(
     rows: list[dict[str, object]],
     methods: list[str],
     title: str,
+    takeaway: str,
     out_path: Path,
     ks: list[int],
     label_overrides: dict[str, str] | None = None,
@@ -264,7 +275,7 @@ def render_metric_pair_grid(
         raise RuntimeError("Pillow is required to generate figures.") from exc
 
     scale = 2
-    width, height = 1380, 520
+    width, height = 1380, 540
     img = Image.new("RGB", (width * scale, height * scale), "white")
     draw = ImageDraw.Draw(img)
 
@@ -294,7 +305,7 @@ def render_metric_pair_grid(
 
     panel_w, panel_h = 306, 150
     lefts = (74, 405, 736, 1067)
-    tops = {"precision": 70, "recall": 250}
+    tops = {"precision": 88, "recall": 268}
     pad_l, pad_r, pad_t, pad_b = 39, 8, 15, 28
     y_max = {}
     for metric in ("precision", "recall"):
@@ -315,9 +326,16 @@ def render_metric_pair_grid(
         rotated = text_img.rotate(90, expand=True)
         img.paste(rotated.convert("RGB"), (s(x) - rotated.width // 2, s(y) - rotated.height - s(2)), rotated)
 
-    draw.text((s(width / 2), s(24)), title, fill=(0, 0, 0), anchor="mm", font=font_title)
+    draw.text((s(width / 2), s(20)), title, fill=(0, 0, 0), anchor="mm", font=font_title)
+    draw.text(
+        (s(width / 2), s(46)),
+        takeaway,
+        fill=(65, 65, 65),
+        anchor="mm",
+        font=font,
+    )
     for gt, left in zip(GT_ORDER, lefts):
-        draw.text((s(left + panel_w / 2), s(49)), GT_LABELS[gt], fill=(0, 0, 0), anchor="mm", font=font_panel)
+        draw.text((s(left + panel_w / 2), s(67)), GT_LABELS[gt], fill=(0, 0, 0), anchor="mm", font=font_panel)
 
     for metric in ("precision", "recall"):
         top = tops[metric]
@@ -359,7 +377,7 @@ def render_metric_pair_grid(
                     draw.rectangle([s(x), s(y), s(x + bar_w), s(y0)], fill=color)
                     draw_value_label(x + bar_w / 2, y, value)
 
-    draw_centered_legend(draw, methods, width, 460, font, scale, label_overrides=label_overrides)
+    draw_centered_legend(draw, methods, width, 486, font, scale, label_overrides=label_overrides)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img = img.resize((width, height))
@@ -376,6 +394,7 @@ def write_figures(rows: list[dict[str, object]], fig_dir: str, ks: list[int]) ->
             "main_results_precision_recall_at_k",
             main_methods,
             "Main Results Precision/Recall@k",
+            "Dense leads at @1 on Paper/Union GT; Hybrid is strongest at larger k and on Model/Dataset GT.",
             True,
             {"starmie_shuffle_col": "Union Search"},
         ),
@@ -383,15 +402,24 @@ def write_figures(rows: list[dict[str, object]], fig_dir: str, ks: list[int]) ->
             "ablation_starmie_precision_recall_at_k",
             starmie_methods,
             "Starmie Structural Ablation Precision/Recall@k",
+            "Shuffle Col consistently delivers the highest precision and recall across all GTs.",
             False,
             None,
         ),
     ]
-    for stem, methods, title, use_source_suffix, label_overrides in specs:
+    for stem, methods, title, takeaway, use_source_suffix, label_overrides in specs:
         selected = select_rows(rows, methods, use_source_suffix=use_source_suffix)
         if selected:
             path = out_dir / f"fig_{stem}.png"
-            render_metric_pair_grid(selected, methods, title, path, ks, label_overrides=label_overrides)
+            render_metric_pair_grid(
+                selected,
+                methods,
+                title,
+                takeaway,
+                path,
+                ks,
+                label_overrides=label_overrides,
+            )
             print(f"saved figure: {path}")
 
 
@@ -400,20 +428,19 @@ def main() -> None:
     parser.add_argument("--inputs", nargs="+", default=None, help="Metrics JSON paths or glob patterns.")
     parser.add_argument("--from-csv", default=None, help="Use an existing summary CSV instead of reading JSON.")
     parser.add_argument("--ks", default="1,3,5,10", help="Comma-separated k values.")
-    parser.add_argument("--out-csv", default=None)
+    parser.add_argument("--out-csv", default=DEFAULT_OUT_CSV)
     parser.add_argument("--out-md", default=None)
-    parser.add_argument("--fig-dir", default=None, help="Directory for PNG/PDF figures.")
+    parser.add_argument("--fig-dir", default=DEFAULT_FIG_DIR, help="Directory for PNG/PDF figures.")
     args = parser.parse_args()
 
     ks = [int(x) for x in args.ks.split(",") if x.strip()]
     if args.from_csv:
         rows = read_summary_csv(args.from_csv)
     else:
-        if not args.inputs:
-            raise ValueError("Pass --inputs or --from-csv.")
-        paths = expand_inputs(args.inputs)
+        input_patterns = args.inputs or list(DEFAULT_INPUTS)
+        paths = expand_inputs(input_patterns)
         if not paths:
-            raise FileNotFoundError(f"No metrics JSON files matched: {args.inputs}")
+            raise FileNotFoundError(f"No metrics JSON files matched: {input_patterns}")
         rows = [row_from_metrics(path, ks) for path in paths]
 
     rows.sort(
