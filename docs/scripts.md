@@ -79,8 +79,6 @@ python -m src.data_preprocess.s2orc_refcit_API --tag 251117 > logs/s2orc_refcit_
 
 
 # Download arXiv HTML, extract tables from arXiv HTML files.
-#python -m bak.analyze_bibtex_arxiv_ids --tag 251117 > logs/analyze_bibtex_arxiv_ids_251117.log 2>&1 # Input: s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet, Output: bibte_title_arxiv_s2orc_<tag>.parquet  # try saving some title:arxiv from bibtex
-
 # Resolve title→arxiv_id. Init: s2orc + arxiv_titles_cache concat; then bibtex + OAI rescue; sync html_path from folder.
 # Input: s2orc_titles2ids_<tag>.parquet (query_title, retrieved_title), arxiv_titles_cache_<tag>.json (url→title, init only)
 #       bibtex_title_arxiv_<tag>.parquet, title2arxiv_oai_index_<tag>.parquet
@@ -135,7 +133,7 @@ This section details the process of generating ground truth labels for table uni
 ```bash
 python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_references_cache_<tag>.parquet (use columns), s2orc_titles2ids_<tag>.parquet (use minimum corpusIds as main Key). Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
 
-PYTHONUNBUFFERED=1 python -m src.data_gt.step3_gt --tag 251117 --v2_mode > logs/step3_gt_v2_251117.log 2>&1  # Build ground truth (paper-level). Input: modelcard_citation_all_matrices_<tag>.pkl.gz, modelcard_step3_dedup_v2_<tag>.parquet, s2orc_titles2ids_<tag>.parquet, modelcard_all_title_list_<tag>.parquet. Output: data/gt/* (no versioning)
+PYTHONUNBUFFERED=1 python -m src.data_gt.step3_gt --tag 251117 --v2_mode > logs/step3_gt_v2_251117.log 2>&1  # Build paper-level GT using data/analysis/all_valid_title_valid_v2_<tag>.txt as the table-validity source, then enrich each final edge Parquet in place with source/destination table-type labels; table names remain index-mapped by csv_list_v2_<tag>.pkl. Output: data/gt_v2_<tag>/csv_csv_final_*.parquet.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).
 python -m src.data_gt.turn_tus_into_pickle > logs/turn_tus_into_pickle.log 2>&1
 # (deprecate) python -m src.data_gt.gt_combine > logs/gt_combine.log 2>&1
