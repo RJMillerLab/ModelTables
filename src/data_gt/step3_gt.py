@@ -1,8 +1,12 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-03
-Last Modified: 2025-04-16
-Description: Build SciLake union benchmark tables.
+Last Modified: 2026-08-11
+Description: Build BibTeX-anchored SciLake union benchmark tables.
+
+Only successfully parsed primary model-card BibTeX titles that resolve to a
+Semantic Scholar paper are used as paper anchors. The table-validity list still
+defines which linked tables may become GT nodes.
 
 Usage:
 python -m src.data_gt.step3_gt --tag 251117 --v2_mode
@@ -10,7 +14,7 @@ python -m src.data_gt.step3_gt --tag 251117 --v2_mode
 from multiprocessing import set_start_method
 set_start_method("fork", force=True)
 
-import os, json, gzip, pickle, time
+import os, json, gzip, pickle, re, time
 import duckdb
 import pandas as pd
 import numpy as np
@@ -18,6 +22,28 @@ from collections import defaultdict
 from itertools import combinations
 from scipy.sparse import csr_matrix, coo_matrix, save_npz, load_npz
 from src.utils import is_list_like, to_list_safe
+
+
+GENERIC_NAV_TITLES = {
+    "quick start",
+    "table of contents",
+    "tables of contents",
+}
+RESUME_EXISTING_GT = False
+
+
+def is_generic_navigation_title(title: str) -> bool:
+    """Return whether a resolved paper title is actually a README navigation label."""
+    normalized = re.sub(r"\s+", " ", str(title).lower()).strip()
+    normalized = re.sub(r"^[^a-z0-9]+|[^a-z0-9]+$", "", normalized)
+    return normalized in GENERIC_NAV_TITLES
+
+
+def normalize_title_key(title: str) -> str:
+    """Match title variants using the existing intra-row title-dedup convention."""
+    if not isinstance(title, str):
+        return ""
+    return title.replace("{", "").replace("}", "").replace("-", "").replace(" ", "").replace(".", "").lower().strip()
 
 
 ############## Multiplication ####################
@@ -211,6 +237,11 @@ def get_final_csv_csv_adj_by_join(
     base_dir = os.path.dirname(path_outside_parquet)
     os.makedirs(base_dir, exist_ok=True)
     stem = os.path.splitext(os.path.basename(path_outside_parquet))[0]
+
+    if RESUME_EXISTING_GT and os.path.exists(path_outside_parquet) and os.path.getsize(path_outside_parquet) > 0:
+        print(f"[join] Step2 resume existing outside Parquet: {path_outside_parquet}")
+        return
+
     pathP = os.path.join(base_dir, f"{stem}_P_edges_tmp.parquet")
 
     local_csrnpz_to_parquet(P_npz_path, pathP, row_col_names=("paper_i", "paper_j"))
@@ -218,8 +249,9 @@ def get_final_csv_csv_adj_by_join(
 
     # 2) Chunked DuckDB join (split by paper_i range) to keep temp usage bounded.
     n_paper = get_n_rows_from_csrnpz(P_npz_path)
-    chunk_size = 10_000
+    chunk_size = 10
     out_parts_glob = os.path.join(base_dir, f"{stem}_outside_part_*.parquet")
+    dedup_parts_glob = os.path.join(base_dir, f"{stem}_dedup_part_*.parquet")
 
     temp_dir = os.path.join("data", "tmp", "duckdb_temp")
     os.makedirs(temp_dir, exist_ok=True)
@@ -232,10 +264,16 @@ def get_final_csv_csv_adj_by_join(
         t_all = time.time()
         part_paths = []
         part_idx = 0
+        resumed_parts = 0
         for start in range(0, n_paper, chunk_size):
             end = min(start + chunk_size, n_paper)
             part_path = os.path.join(base_dir, f"{stem}_outside_part_{part_idx:05d}.parquet")
             part_paths.append(part_path)
+
+            if RESUME_EXISTING_GT and os.path.exists(part_path) and os.path.getsize(part_path) > 0:
+                resumed_parts += 1
+                part_idx += 1
+                continue
 
             t1 = time.time()
             query = f"""
@@ -247,28 +285,67 @@ def get_final_csv_csv_adj_by_join(
                 JOIN read_parquet('{A_parquet_path}') b
                   ON p.paper_j = b.paper
                 WHERE p.paper_i >= {start} AND p.paper_i < {end}
-            ) TO '{part_path}' (FORMAT PARQUET);
+            ) TO '{part_path}' (FORMAT PARQUET, OVERWRITE_OR_IGNORE TRUE);
             """
             con.execute(query)
             print(f"[join] Step2 chunk {part_idx}: paper_i=[{start},{end}) time={time.time() - t1:.4f}s out={part_path}")
             part_idx += 1
 
-        # 3) Merge all part Parquets into the final outside Parquet (dedup on (src_csv, dst_csv)).
+        if resumed_parts:
+            print(f"[join] Step2 resumed {resumed_parts}/{part_idx} existing chunk files")
+
+        # 3) Deduplicate bounded src_csv ranges independently.
+        for path in os.listdir(base_dir):
+            if path.startswith(f"{stem}_dedup_part_") and path.endswith(".parquet"):
+                os.remove(os.path.join(base_dir, path))
+
+        (max_src_csv,) = con.execute(
+            f"SELECT max(src_csv) FROM read_parquet('{out_parts_glob}')"
+        ).fetchone()
+        src_bucket_size = 5_000
+        src_starts = list(range(0, int(max_src_csv) + 1, src_bucket_size))
+        dedup_paths = []
+        for bucket_idx, src_start in enumerate(src_starts):
+            src_end = src_start + src_bucket_size
+            dedup_path = os.path.join(base_dir, f"{stem}_dedup_part_{bucket_idx:05d}.parquet")
+            dedup_paths.append(dedup_path)
+            t_bucket = time.time()
+            con.execute(
+                f"""
+                COPY (
+                    SELECT DISTINCT src_csv, dst_csv
+                    FROM read_parquet('{out_parts_glob}')
+                    WHERE src_csv >= {src_start} AND src_csv < {src_end}
+                ) TO '{dedup_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                """
+            )
+            print(
+                f"[join] Step2 dedup src bucket {bucket_idx + 1}/{len(src_starts)} "
+                f"[{src_start},{src_end}): time={time.time() - t_bucket:.4f}s"
+            )
+
+        # 5) Concatenate already-disjoint source partitions without another DISTINCT.
         t1 = time.time()
-        merge_query = f"""
-        COPY (
-            SELECT DISTINCT src_csv, dst_csv
-            FROM read_parquet('{out_parts_glob}')
-        ) TO '{path_outside_parquet}' (FORMAT PARQUET);
-        """
-        con.execute(merge_query)
-        print(f"[join] Step2 merge parts: time={time.time() - t1:.4f}s out={path_outside_parquet}")
+        con.execute(
+            f"""
+            COPY (
+                SELECT src_csv, dst_csv
+                FROM read_parquet('{dedup_parts_glob}')
+            ) TO '{path_outside_parquet}' (FORMAT PARQUET, COMPRESSION ZSTD, OVERWRITE_OR_IGNORE TRUE);
+            """
+        )
+        print(f"[join] Step2 merge dedup partitions: time={time.time() - t1:.4f}s out={path_outside_parquet}")
         print(f"[join] Step2 total time={time.time() - t_all:.4f}s chunks={part_idx} n_paper={n_paper} chunk_size={chunk_size}")
     finally:
         con.close()
 
-    # 4) Cleanup chunk outputs and temp P edges to reduce disk usage.
+    # 5) Cleanup chunk outputs and temporary dedup files.
     for p in part_paths:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    for p in dedup_paths:
         try:
             os.remove(p)
         except OSError:
@@ -304,29 +381,179 @@ def concat_csv_csv_adj_by_join(
     base_dir = os.path.dirname(path_final_parquet)
     os.makedirs(base_dir, exist_ok=True)
     path_within_parquet = os.path.join(base_dir, "csv_csv_within_tmp.parquet")
+    final_stem = os.path.splitext(os.path.basename(path_final_parquet))[0]
+    final_parts_glob = os.path.join(base_dir, f"{final_stem}_part_*.parquet")
 
     # 1) within-model npz → edge list Parquet
     local_csrnpz_to_parquet(within_npz_path, path_within_parquet, row_col_names=("src_csv", "dst_csv"))
 
-    # 2) DuckDB concat + dedup + remove self-loops → write final Parquet
+    # 2) Deduplicate bounded source ranges across within/outside edges.
     con = duckdb.connect()
     try:
-        t1 = time.time()
-        query = f"""
-        COPY (
-            SELECT DISTINCT src_csv, dst_csv
+        for path in os.listdir(base_dir):
+            if path.startswith(f"{final_stem}_part_") and path.endswith(".parquet"):
+                os.remove(os.path.join(base_dir, path))
+
+        (max_src_csv,) = con.execute(
+            f"""
+            SELECT max(src_csv)
             FROM (
-                SELECT src_csv, dst_csv FROM read_parquet('{path_within_parquet}')
+                SELECT src_csv FROM read_parquet('{path_within_parquet}')
                 UNION ALL
-                SELECT src_csv, dst_csv FROM read_parquet('{path_outside_parquet}')
+                SELECT src_csv FROM read_parquet('{path_outside_parquet}')
             )
-            WHERE src_csv <> dst_csv
-        ) TO '{path_final_parquet}' (FORMAT PARQUET);
-        """
-        con.execute(query)
-        print(f"[join] Step3 concat via DuckDB→Parquet: time={time.time() - t1:.4f}s, out={path_final_parquet}")
+            """
+        ).fetchone()
+        src_bucket_size = 5_000
+        src_starts = list(range(0, int(max_src_csv) + 1, src_bucket_size))
+        final_parts = []
+        for bucket_idx, src_start in enumerate(src_starts):
+            src_end = src_start + src_bucket_size
+            part_path = os.path.join(base_dir, f"{final_stem}_part_{bucket_idx:05d}.parquet")
+            final_parts.append(part_path)
+            t_bucket = time.time()
+            con.execute(
+                f"""
+                COPY (
+                    SELECT DISTINCT src_csv, dst_csv
+                    FROM (
+                        SELECT src_csv, dst_csv FROM read_parquet('{path_within_parquet}')
+                        UNION ALL
+                        SELECT src_csv, dst_csv FROM read_parquet('{path_outside_parquet}')
+                    )
+                    WHERE src_csv >= {src_start}
+                      AND src_csv < {src_end}
+                      AND src_csv <> dst_csv
+                ) TO '{part_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                """
+            )
+            print(
+                f"[join] Step3 dedup src bucket {bucket_idx + 1}/{len(src_starts)} "
+                f"[{src_start},{src_end}): time={time.time() - t_bucket:.4f}s"
+            )
+
+        t1 = time.time()
+        con.execute(
+            f"""
+            COPY (
+                SELECT src_csv, dst_csv
+                FROM read_parquet('{final_parts_glob}')
+            ) TO '{path_final_parquet}' (FORMAT PARQUET, COMPRESSION ZSTD, OVERWRITE_OR_IGNORE TRUE);
+            """
+        )
+        print(f"[join] Step3 merge source partitions: time={time.time() - t1:.4f}s, out={path_final_parquet}")
     finally:
         con.close()
+
+    for path in final_parts:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    try:
+        os.remove(path_within_parquet)
+    except OSError:
+        pass
+
+
+def load_table_type_labels(label_tsv_path: str) -> dict[str, str]:
+    """Load one table-type label per CSV basename and reject conflicting labels."""
+    if not os.path.exists(label_tsv_path):
+        raise FileNotFoundError(
+            f"Table-type labels not found: {label_tsv_path}. "
+            "Run src.data_analysis.table_type_keyword first."
+        )
+
+    labels_df = pd.read_csv(
+        label_tsv_path,
+        sep="\t",
+        usecols=["table_path", "label"],
+        dtype=str,
+    ).dropna()
+    labels_df["csv_name"] = labels_df["table_path"].map(os.path.basename)
+
+    conflicts = labels_df.groupby("csv_name")["label"].nunique()
+    conflicts = conflicts[conflicts > 1]
+    if not conflicts.empty:
+        examples = ", ".join(conflicts.index[:5])
+        raise ValueError(
+            f"Conflicting table-type labels for {len(conflicts)} CSV basenames; "
+            f"examples: {examples}"
+        )
+
+    labels = (
+        labels_df.drop_duplicates("csv_name", keep="last")
+        .set_index("csv_name")["label"]
+        .to_dict()
+    )
+    print(f"[table-type] Loaded {len(labels)} labels from {label_tsv_path}")
+    return labels
+
+
+def load_valid_table_names(valid_tables_path: str) -> set[str]:
+    """Load the QC-valid table list as CSV basenames."""
+    if not os.path.exists(valid_tables_path):
+        raise FileNotFoundError(
+            f"Valid-table list not found: {valid_tables_path}. "
+            "Run src.data_analysis.qc_stats first."
+        )
+
+    with open(valid_tables_path, encoding="utf-8") as f:
+        valid_tables = {
+            os.path.basename(line.strip())
+            for line in f
+            if line.strip()
+        }
+    print(f"[valid-tables] Loaded {len(valid_tables)} tables from {valid_tables_path}")
+    return valid_tables
+
+
+def add_table_type_labels_to_gt_parquet(
+    parquet_path: str,
+    csv_list: list[str],
+    table_type_labels: dict[str, str],
+) -> None:
+    """Enrich a GT edge Parquet in place with CSV names and table-type labels."""
+    csv_meta = pd.DataFrame(
+        {
+            "csv_idx": np.arange(len(csv_list), dtype=np.int64),
+            "csv_name": csv_list,
+            "table_type": [table_type_labels.get(name) for name in csv_list],
+        }
+    )
+    missing = csv_meta.loc[csv_meta["table_type"].isna(), "csv_name"]
+    if not missing.empty:
+        examples = ", ".join(missing.head(5))
+        raise ValueError(
+            f"Missing table-type labels for {len(missing)} of {len(csv_list)} GT tables; "
+            f"examples: {examples}"
+        )
+
+    temp_path = f"{parquet_path}.table_type_tmp"
+    con = duckdb.connect()
+    try:
+        con.register("csv_meta", csv_meta)
+        parquet_sql = os.path.abspath(parquet_path).replace("'", "''")
+        temp_sql = os.path.abspath(temp_path).replace("'", "''")
+        con.execute(
+            f"""
+            COPY (
+                SELECT
+                    edges.src_csv,
+                    edges.dst_csv,
+                    src.table_type AS src_table_type,
+                    dst.table_type AS dst_table_type
+                FROM read_parquet('{parquet_sql}') AS edges
+                JOIN csv_meta AS src ON edges.src_csv = src.csv_idx
+                JOIN csv_meta AS dst ON edges.dst_csv = dst.csv_idx
+            ) TO '{temp_sql}' (FORMAT PARQUET, OVERWRITE_OR_IGNORE TRUE);
+            """
+        )
+    finally:
+        con.close()
+
+    os.replace(temp_path, parquet_path)
+    print(f"[table-type] Updated GT Parquet in place: {parquet_path}")
 
 ############## defined path ####################
 def get_npz_path(v2_suffix, suffix, root_dir):
@@ -384,13 +611,15 @@ def load_paper_index():
     print(f"[DEBUG] Loaded paper_index with length: {len(paper_index)}")
     return paper_index
 
-def load_titles_to_tables_with_modelid():
-    """Load titles_to_tables_with_modelid (rows) via DuckDB. Dedup by (titles, csvs) in SQL; returns (rows, count_before_dedup)."""
+def load_titles_to_tables_with_modelid(valid_table_names=None):
+    """Load BibTeX-resolved paper titles and their QC-valid model-card tables."""
     print(f"Loading table source from: step3_dedup (DuckDB)")
     valid_title_path = os.path.abspath(FILES["valid_title"])
+    title_list_path = os.path.abspath(FILES["title_list"])
     step3_path = os.path.abspath(FILES["step3_dedup"])
     step3_path_sql = step3_path.replace("\\", "/")
     valid_title_path_sql = valid_title_path.replace("\\", "/")
+    title_list_path_sql = title_list_path.replace("\\", "/")
 
     con = duckdb.connect(":memory:")
     try:
@@ -417,12 +646,24 @@ def load_titles_to_tables_with_modelid():
         )
         con.execute(
             """
+            CREATE VIEW bibtex AS
+            SELECT
+                modelId,
+                list_transform(parsed_bibtex_tuple_list, entry -> entry.title) AS parsed_bibtex_titles
+            FROM read_parquet(?)
+            """.replace("read_parquet(?)", f"read_parquet('{title_list_path_sql}')")
+        )
+        con.execute(
+            """
             CREATE VIEW joined AS
-            SELECT s.all_table_list_dedup, t.all_title_list_valid
+            SELECT s.all_table_list_dedup, t.all_title_list_valid, b.parsed_bibtex_titles
             FROM step3 AS s
             JOIN titles AS t USING (modelId)
+            JOIN bibtex AS b USING (modelId)
             WHERE all_title_list_valid IS NOT NULL
               AND array_length(all_title_list_valid, 1) > 0
+              AND parsed_bibtex_titles IS NOT NULL
+              AND array_length(parsed_bibtex_titles, 1) > 0
               AND all_table_list_dedup IS NOT NULL
               AND array_length(all_table_list_dedup, 1) > 0
             """
@@ -430,7 +671,7 @@ def load_titles_to_tables_with_modelid():
         (count_before_dedup,) = con.execute("SELECT count(*) FROM joined").fetchone()
         df = con.execute(
             """
-            SELECT DISTINCT all_table_list_dedup, all_title_list_valid
+            SELECT DISTINCT all_table_list_dedup, all_title_list_valid, parsed_bibtex_titles
             FROM joined
             """
         ).fetchdf()
@@ -439,12 +680,46 @@ def load_titles_to_tables_with_modelid():
 
     # Normalize CSV paths to basenames once here so downstream code only sees basenames.
     rows = []
-    for titles, csvs in zip(df["all_title_list_valid"], df["all_table_list_dedup"]):
+    filtered_table_refs = 0
+    filtered_rows = 0
+    filtered_title_refs = 0
+    unmatched_bibtex_title_refs = 0
+    for titles, csvs, bibtex_titles in zip(
+        df["all_title_list_valid"],
+        df["all_table_list_dedup"],
+        df["parsed_bibtex_titles"],
+    ):
         titles = list(titles)
+        bibtex_title_keys = {normalize_title_key(title) for title in bibtex_titles}
+        kept_titles = [
+            title
+            for title in titles
+            if normalize_title_key(title) in bibtex_title_keys and not is_generic_navigation_title(title)
+        ]
+        filtered_title_refs += len(titles) - len(kept_titles)
+        titles = kept_titles
+        unmatched_bibtex_title_refs += len(bibtex_titles) - len(bibtex_title_keys & {normalize_title_key(title) for title in titles})
+        if not titles:
+            continue
         csvs = [os.path.basename(c) for c in csvs]
+        if valid_table_names is not None:
+            kept_csvs = [csv_name for csv_name in csvs if csv_name in valid_table_names]
+            filtered_table_refs += len(csvs) - len(kept_csvs)
+            csvs = kept_csvs
+        if not csvs:
+            filtered_rows += 1
+            continue
         rows.append((titles, csvs))
     count_after_dedup = len(rows)
     print(f"[DEBUG] Dedup (by titles+csvs): before {count_before_dedup}, after {count_after_dedup}")
+    if valid_table_names is not None:
+        print(
+            f"[valid-tables] Removed {filtered_table_refs} invalid table references "
+            f"and {filtered_rows} rows with no valid tables"
+        )
+    print(f"[bibtex-titles] Kept {sum(len(titles) for titles, _ in rows)} resolved primary-BibTeX title references")
+    print(f"[bibtex-titles] Removed {filtered_title_refs} non-BibTeX, unresolved, or navigation title references")
+    print(f"[bibtex-titles] Parsed BibTeX titles without a resolved valid-title match: {unmatched_bibtex_title_refs}")
     print(f"[DEBUG] Loaded titles_to_tables_with_modelid with length: {len(rows)}")
     return rows
 
@@ -516,20 +791,34 @@ def build_titles2cid():
     print(f"[DEBUG] Sample of cid2titles (first 3 items): {dict(list(cid2titles.items())[:3])}")
     return title2cid
 
-def build_element_matrix_at_one_time():
+def build_element_matrix_at_one_time(valid_table_names, table_type_labels):
     # modelId-paperList-csvList, Our aim is to use paper-paper matrix to build {csv:[csv1, csv2]} related json
     """High‑level orchestration for building GT tables."""
     t1 = time.time()
     # ---------- modelId → csv mapping (DuckDB SQL → titles_to_tables_with_modelid only) ----------
-    titles_to_tables_with_modelid = load_titles_to_tables_with_modelid()
+    titles_to_tables_with_modelid = load_titles_to_tables_with_modelid(valid_table_names)
     print(f"Step0: Loaded titles_to_tables_with_modelid with length: {len(titles_to_tables_with_modelid)} in {time.time() - t1:.2f} seconds")
     t1 = time.time()
     # build global CSV list & index
     flat = [c for _, cs in titles_to_tables_with_modelid for c in cs]
     all_csvs = list(dict.fromkeys(flat))# already basename in titles_to_tables_with_modelid
+    missing_labels = [csv_name for csv_name in all_csvs if csv_name not in table_type_labels]
+    if missing_labels:
+        examples = ", ".join(missing_labels[:5])
+        raise ValueError(
+            f"Missing table-type labels for {len(missing_labels)} valid GT tables; "
+            f"examples: {examples}"
+        )
+    table_type_counts = pd.Series(
+        [table_type_labels[csv_name] for csv_name in all_csvs],
+        dtype="string",
+    ).value_counts()
+    print(f"[table-type] GT tables after valid-table filtering: {len(all_csvs)}")
+    for table_type, count in table_type_counts.items():
+        print(f"[table-type]   {table_type}: {count} ({count / len(all_csvs):.1%})")
     #all_csvs = [os.path.basename(csv) for csv in all_csvs]
     #csv_list_path = f"data/gt{v2_suffix}{suffix}/csv_list{v2_suffix}{suffix}.pkl"
-    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix, "/Users/doradong/Repo/ModelTables")
+    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix, os.getcwd())
     csv_list_path = LEVEL_CSVLIST["direct"]
     with open(csv_list_path, "wb") as f:
         pickle.dump(all_csvs, f)
@@ -543,8 +832,16 @@ def build_element_matrix_at_one_time():
     t1 = time.time()
     build_A_matrix_paper2csv(titles_to_tables_with_modelid, csv2idx)
     print(f"time to build A matrix: ", time.time() - t1)
+    return all_csvs
 
-def build_ground_truth(rel_key, overlap_rate_threshold, suffix, v2_suffix):
+def build_ground_truth(
+    rel_key,
+    overlap_rate_threshold,
+    suffix,
+    v2_suffix,
+    csv_list,
+    table_type_labels,
+):
     t1 = time.time()
     paper_paper_adj = build_paper_matrix(rel_key, overlap_rate_threshold)
     print(f"time to build paper-paper adjacency matrix: ", time.time() - t1)
@@ -566,6 +863,25 @@ def build_ground_truth(rel_key, overlap_rate_threshold, suffix, v2_suffix):
     os.makedirs(gt_dir, exist_ok=True)
     outside_parquet = os.path.join(gt_dir, f"csv_csv_outside_{rel_key}{v2_suffix}{suffix}.parquet")
     final_parquet = os.path.join(gt_dir, f"csv_csv_final_{rel_key}{v2_suffix}{suffix}.parquet")
+
+    if RESUME_EXISTING_GT and os.path.exists(final_parquet) and os.path.getsize(final_parquet) > 0:
+        con = duckdb.connect()
+        try:
+            columns = {
+                row[0]
+                for row in con.execute(
+                    f"DESCRIBE SELECT * FROM read_parquet('{final_parquet}')"
+                ).fetchall()
+            }
+        finally:
+            con.close()
+        if {"src_table_type", "dst_table_type"}.issubset(columns):
+            print(f"[resume] Completed labeled GT Parquet already exists: {final_parquet}")
+            return
+        if {"src_csv", "dst_csv"}.issubset(columns):
+            print(f"[resume] Adding labels to completed GT edge Parquet: {final_parquet}")
+            add_table_type_labels_to_gt_parquet(final_parquet, csv_list, table_type_labels)
+            return
 
     '''
     # by multiplication: old implementation, deprecated for memory 
@@ -594,6 +910,7 @@ def build_ground_truth(rel_key, overlap_rate_threshold, suffix, v2_suffix):
     get_final_csv_csv_adj_by_join(A_parquet_path, P_npz_path, outside_parquet)
     # Step 3: merge within-model adjacency with outside edges, fully in DuckDB/Parquet.
     concat_csv_csv_adj_by_join(within_npz_path, outside_parquet, final_parquet)
+    add_table_type_labels_to_gt_parquet(final_parquet, csv_list, table_type_labels)
 
     '''# Materialize final boolean csr matrix from the merged Parquet edges into .npz.
     matrix_path = f"data/gt{v2_suffix}{suffix}/csv_pair_matrix_{rel_key}{v2_suffix}{suffix}.npz"
@@ -605,14 +922,31 @@ def build_ground_truth(rel_key, overlap_rate_threshold, suffix, v2_suffix):
     )'''
 
     print(f"time to build final GT matrix: ", time.time() - t1)
-    print(f"✅ Sparse matrix saved to {matrix_path}")
+    print(f"✅ GT edge Parquet saved to {final_parquet}")
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build SciLake union benchmark tables.")
     parser.add_argument("--tag", dest="tag", default=None, help="Tag suffix for versioning (e.g., 251117). Enables versioning mode for input files.")
     parser.add_argument("--v2_mode", dest="v2_mode", action="store_true", help="Use v2 mode.")
+    parser.add_argument(
+        "--table-type-labels",
+        default=None,
+        help="Table-type label TSV. Defaults to data/table_type/table_type_labels[_v2][_tag].tsv.",
+    )
+    parser.add_argument(
+        "--valid-tables",
+        default=None,
+        help="QC-valid table TXT. Defaults to data/analysis/all_valid_title_valid[_v2][_tag].txt.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse completed GT relation/chunk Parquets from an interrupted run.",
+    )
     args = parser.parse_args()
+
+    RESUME_EXISTING_GT = args.resume
 
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
@@ -620,9 +954,13 @@ if __name__ == "__main__":
     FILES = {
         "combined": f"data/processed/modelcard_citation_all_matrices{suffix}.pkl.gz",
         "titles2ids": f"data/processed/s2orc_titles2ids{suffix}.parquet",
-        "title_list": f"data/processed/modelcard_all_title_list{suffix}.parquet",
         "step3_dedup": f"data/processed/modelcard_step3_dedup{v2_suffix}{suffix}.parquet",
-        "valid_title": f"data/processed/all_title_list_valid{v2_suffix}{suffix}.parquet"
+        "title_list": f"data/processed/modelcard_all_title_list{suffix}.parquet",
+        "valid_title": f"data/processed/all_title_list_valid{v2_suffix}{suffix}.parquet",
+        "valid_tables": args.valid_tables
+        or f"data/analysis/all_valid_title_valid{v2_suffix}{suffix}.txt",
+        "table_type_labels": args.table_type_labels
+        or f"data/table_type/table_type_labels{v2_suffix}{suffix}.tsv",
     }
 
     # Always print paths in use so you can verify in the log
@@ -638,13 +976,18 @@ if __name__ == "__main__":
         'direct_label', 
         'direct_label_influential', 
         'direct_label_methodology_or_result', 
-        'direct_label_methodology_or_result_influential', 
-        'max_pr', 
-        'max_pr_influential', 
-        'max_pr_methodology_or_result', 
-        'max_pr_methodology_or_result_influential'
+        'direct_label_methodology_or_result_influential',
     ]
     OVERLAP_RATE_THRESHOLD = 0.0
-    build_element_matrix_at_one_time()
+    valid_table_names = load_valid_table_names(FILES["valid_tables"])
+    table_type_labels = load_table_type_labels(FILES["table_type_labels"])
+    csv_list = build_element_matrix_at_one_time(valid_table_names, table_type_labels)
     for rel_key in REL_KEY_LIST:
-        build_ground_truth(rel_key=rel_key, overlap_rate_threshold=OVERLAP_RATE_THRESHOLD, suffix=suffix, v2_suffix=v2_suffix)
+        build_ground_truth(
+            rel_key=rel_key,
+            overlap_rate_threshold=OVERLAP_RATE_THRESHOLD,
+            suffix=suffix,
+            v2_suffix=v2_suffix,
+            csv_list=csv_list,
+            table_type_labels=table_type_labels,
+        )
