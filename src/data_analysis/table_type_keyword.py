@@ -12,7 +12,7 @@ three-way type-aware retrieval analysis:
 Example:
 python -m src.data_analysis.table_type_keyword \
   --data-root /Users/z6dong/Repo/ModelTables \
-  --valid-list data/analysis/all_valid_title_valid_v2_251117.txt \
+  --dedup-parquet data/processed/modelcard_step3_dedup_v2_251117.parquet \
   --sample-size 3000 \
   --out-dir data/table_type
 """
@@ -419,6 +419,32 @@ def resolve_path(data_root: Path, listed_path: str) -> Path:
     return data_root / path
 
 
+def load_paths_from_dedup_parquet(parquet_path: Path) -> tuple[list[str], Counter[str]]:
+    """Return QC-valid, unique table paths from the full deduplicated corpus."""
+    import pandas as pd
+    from src.data_analysis.qc_stats import RESOURCES, invalid_table_reason
+
+    dataframe = pd.read_parquet(parquet_path)
+    paths: list[str] = []
+    invalid_counts: Counter[str] = Counter()
+    seen: set[str] = set()
+    for resource, columns in RESOURCES.items():
+        column = columns[0]
+        if column not in dataframe:
+            continue
+        for path in dataframe[column].explode().dropna():
+            if not isinstance(path, str) or path in seen:
+                continue
+            # Deduplicate model-table references before opening files for QC.
+            seen.add(path)
+            reason = invalid_table_reason(path)
+            if reason:
+                invalid_counts[reason] += 1
+                continue
+            paths.append(path)
+    return paths, invalid_counts
+
+
 def write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -641,8 +667,15 @@ def run(args: argparse.Namespace) -> None:
         context_terms = load_vocabulary(Path(args.context_vocab))
 
     data_root = Path(args.data_root)
-    valid_list = data_root / args.valid_list
-    paths = [line.strip() for line in valid_list.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if args.dedup_parquet:
+        dedup_parquet = resolve_path(data_root, args.dedup_parquet)
+        paths, invalid_counts = load_paths_from_dedup_parquet(dedup_parquet)
+        print(f"input=full_dedup parquet={dedup_parquet}")
+        print(f"qc_invalid_excluded={sum(invalid_counts.values())} reasons={dict(invalid_counts)}")
+    else:
+        valid_list = resolve_path(data_root, args.valid_list)
+        paths = [line.strip() for line in valid_list.read_text(encoding="utf-8").splitlines() if line.strip()]
+        print(f"input=path_list list={valid_list}")
     if args.sample_size and args.sample_size < len(paths):
         random.seed(args.seed)
         paths = random.sample(paths, args.sample_size)
@@ -799,7 +832,8 @@ def run(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run keyword-based table type classification.")
     parser.add_argument("--data-root", default=".")
-    parser.add_argument("--valid-list", default="data/analysis/all_valid_title_valid_v2_251117.txt")
+    parser.add_argument("--valid-list", default="data/analysis/all_valid_title_valid_v2_251117.txt", help="Optional explicit path list, used when --dedup-parquet is omitted.")
+    parser.add_argument("--dedup-parquet", default="data/processed/modelcard_step3_dedup_v2_251117.parquet", help="Full deduplicated corpus; QC-invalid tables are excluded. Set to an empty string to use --valid-list.")
     parser.add_argument("--sample-size", type=int, default=3000)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--out-dir", default="data/table_type")

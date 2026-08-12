@@ -17,8 +17,10 @@ from src.utils import to_parquet, load_config, is_list_like, to_list_safe
 import csv
 
 # Filter configuration for tables that are too long or too wide
-MAX_COLS = 100  # Maximum number of columns
-MAX_ROWS = 200  # Maximum number of rows
+# These limits apply only to the final paper-valid evaluation list. The corpus
+# statistics retain all QC-valid tables regardless of shape.
+MAX_COLS = 300  # Maximum number of columns for evaluation
+MAX_ROWS = 1000  # Maximum number of data rows for evaluation
 
 # ====== Skip generic CSV sets ======
 GENERIC_TABLE_PATTERNS = [
