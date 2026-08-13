@@ -118,7 +118,7 @@ python -m src.data_preprocess.step2_dedup_tables --tag 251117 --v2_mode > logs/s
 python -m src.data_analysis.qc_dedup_fig --tag 251117 --v2_mode > logs/qc_dedup_fig_v2_251117.log 2>&1  # Generate heatmaps from dedup results. Input: deduped_v2_<tag>/dup_matrix_v2_<tag>.pkl, deduped_v2_<tag>/stats_v2_<tag>.json. Output: heatmaps heatmap_overlap_v2_<tag>.pdf / heatmap_percentage_v2_<tag>.pdf in data/analysis/
 PYTHONUNBUFFERED=1 python -m src.data_analysis.qc_stats --tag 251117 --v2_mode > logs/qc_stats_v2_251117.log 2>&1  # Print table #rows #cols. Input: modelcard_step3_dedup_v2_<tag>.parquet, s2orc_titles2ids_<tag>.parquet. Output: benchmark_results_v2_<tag>.parquet, all_title_list_valid_v2_<tag>.parquet, all_valid_title_valid_v2_<tag>.txt, qc_invalid_tables_v2_<tag>.csv. Invalid extracted tables (generic tables, GitHub file listings, GitHub code-diff pages) are excluded from all statistics; shape limits (max_cols=300, max_rows=1000) apply only when writing the paper-valid evaluation list.
 python -m src.data_analysis.qc_stats_fig --tag 251117 --v2_mode --exclude_resources llm > logs/qc_stats_fig_v2_251117.log 2>&1  # Plot benchmark results. Input: benchmark_results_v2_<tag>.parquet. Output: benchmark_metrics_vertical_v2_<tag>.pdf/png
-python -m src.data_analysis.plot_compact_corpus_statistics
+python -m src.data_analysis.plot_compact_corpus_statistics  # Reproduce the dual-axis corpus comparison: table counts on the left log axis and validated average rows/columns on the right log axis. Input: data/analysis/benchmark_results_v2_251117.parquet. Output: data/analysis/corpus_statistics_compact.pdf/png.
 python -m src.data_analysis.bibtex_valid_title_distribution --tag 251117 --v2_mode  # Plot per-model-card counts of parsed primary BibTeX entries and resolved valid paper titles. Output: data/analysis/bibtex_valid_title_count_distribution_v2_<tag>.pdf/png.
 python -m src.data_analysis.collect_axcell_metric_vocabulary > logs/collect_axcell_metric_vocabulary.log 2>&1
 # Collect metric names plus task/dataset context names from released AxCell/Papers-with-Code taxonomy files; excludes ambiguous terms.
@@ -137,7 +137,7 @@ This section details the process of generating ground truth labels for table uni
 ```bash
 python -m src.data_gt.paper_citation_overlap --tag 251117 > logs/paper_citation_overlap_251117.log 2>&1  # Compute paper-pair citation overlap scores for ground truth. Input: s2orc_references_cache_<tag>.parquet (use columns), s2orc_titles2ids_<tag>.parquet (use minimum corpusIds as main Key). Output: modelcard_citation_all_matrices_<tag>.pkl.gz (REQUIRED for step3_gt)
 
-PYTHONUNBUFFERED=1 python -m src.data_gt.step3_gt --tag 251117 --v2_mode > logs/step3_gt_v2_251117.log 2>&1  # Build BibTeX-anchored paper-level GT: only primary parsed BibTeX titles that resolve in all_title_list_valid are paper anchors; data/analysis/all_valid_title_valid_v2_<tag>.txt supplies GT table nodes. Final edge Parquets include source/destination table-type labels; csv names remain index-mapped by csv_list_v2_<tag>.pkl. Output: data/gt_v2_<tag>/csv_csv_final_*.parquet.
+PYTHONUNBUFFERED=1 python -m src.data_gt.step3_gt --tag 251117 --v2_mode > logs/step3_gt_v2_251117.log 2>&1  # Build BibTeX-anchored paper-level GT from primary resolved BibTeX titles and QC-valid tables. Output: data/gt_v2_<tag>/csv_pair_matrix_*.npz and csv_list_v2_<tag>.pkl for Starmie evaluation.
 # Process SQLite ground truth into pickle files (if applicable from other benchmarks).
 python -m src.data_gt.turn_tus_into_pickle > logs/turn_tus_into_pickle.log 2>&1
 # (deprecate) python -m src.data_gt.gt_combine > logs/gt_combine.log 2>&1
@@ -285,6 +285,7 @@ python -m src.data_analysis.table_model_counts_over_time --tag 251117 --v2_mode 
 # step by step filtering img
 python -m src.data_analysis.card_statistics --tag 251117 > logs/card_statistics_251117.log 2>&1 # get statistics of model cards
 python -m src.data_analysis.hf_models_analysis --tag 251117 --v2_mode > logs/hf_models_analysis_v2_251117.log 2>&1 # get statistics of models in Hugging Face: hf_models_analysis.png and hf_cross_analysis.png
+python -m src.data_analysis.model_coverage_statistics --tag 251117 --snapshot-date 2025-09-20 --v2_mode > logs/model_coverage_statistics_v2_251117.log 2>&1 # Query the actual v2-processed data and generate one horizontal coverage chart plus auditable JSON/CSV. The public dataset snapshot is 2025-09-20; 251117 is the processing tag. Corpus coverage stops at models linked to at least one ModelCard, GitHub, or arXiv table; BibTeX/paper resolution is downstream evaluation filtering and is intentionally excluded.
 python -m src.data_analysis.model_snapshot_overlap > logs/model_snapshot_overlap_251117.log 2>&1 # compare modelId overlap between two fixed snapshots: V1 (no tag, no v2) vs V2 (tag 251117 + v2): data/analysis/model_snapshot_overlap.png
 
 python -m src.data_analysis.align_tables_output_versions --dir-a data/processed/tables_output --dir-b data/processed/tables_output_v2_251117 > logs/align_tables_output_arxiv.log 2>&1  

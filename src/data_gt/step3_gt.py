@@ -1,8 +1,8 @@
 """
 Author: Zhengyuan Dong
 Created: 2025-04-03
-Last Modified: 2026-08-11
-Description: Build BibTeX-anchored SciLake union benchmark tables.
+Last Modified: 2026-08-12
+Description: Build BibTeX-anchored SciLake union benchmark tables as CSR matrices.
 
 Only successfully parsed primary model-card BibTeX titles that resolve to a
 Semantic Scholar paper are used as paper anchors. The table-validity list still
@@ -14,14 +14,16 @@ python -m src.data_gt.step3_gt --tag 251117 --v2_mode
 from multiprocessing import set_start_method
 set_start_method("fork", force=True)
 
-import os, json, gzip, pickle, re, time
+import os, gzip, pickle, re, time
+import shutil
+import tempfile
+import zipfile
 import duckdb
 import pandas as pd
 import numpy as np
 from collections import defaultdict
 from itertools import combinations
-from scipy.sparse import csr_matrix, coo_matrix, save_npz, load_npz
-from src.utils import is_list_like, to_list_safe
+from scipy.sparse import coo_matrix, save_npz, load_npz
 
 
 GENERIC_NAV_TITLES = {
@@ -29,7 +31,7 @@ GENERIC_NAV_TITLES = {
     "table of contents",
     "tables of contents",
 }
-RESUME_EXISTING_GT = False
+PAPER_CHUNK_SIZE = 2500
 
 
 def is_generic_navigation_title(title: str) -> bool:
@@ -45,105 +47,6 @@ def normalize_title_key(title: str) -> str:
         return ""
     return title.replace("{", "").replace("}", "").replace("-", "").replace(" ", "").replace(".", "").lower().strip()
 
-
-############## Multiplication ####################
-
-def fast_multiply(A: csr_matrix, B: csr_matrix):
-    """
-    Fast multiply C = A @ B with two layers of simple pruning
-
-    First layer of pruning:
-    - Drop rows of A that are all zero
-    - Drop columns of B that are all zero
-
-    Second layer of pruning:
-    - Drop columns of A that are all zero
-    - Drop rows of B that are all zero
-
-    Finally, restore the dropped rows/columns with zeros, so the returned C is still the original size.
-    Also print the pruning ratios and a rough "dense computation ratio".
-    """
-    # Ensure A and B are CSR matrices for stable getnnz / slicing
-    if not isinstance(A, csr_matrix):
-        A = A.tocsr()
-    if not isinstance(B, csr_matrix):
-        B = B.tocsr()
-
-    n_rows_A, n_cols_A = A.shape
-    n_rows_B, n_cols_B = B.shape
-    assert n_cols_A == n_rows_B, "Shape mismatch for A @ B"
-
-    print("[fast-matmul] === A @ B start ===")
-    print("[fast-matmul] A:", A.shape, "nnz", A.nnz,
-          "| B:", B.shape, "nnz", B.nnz)
-
-    # 1) Outer layer: non-zero rows of A / non-zero columns of B
-    row_mask_A = np.diff(A.indptr) > 0
-    col_nnz_B = np.asarray(B.getnnz(axis=0)).ravel()
-    col_mask_B = col_nnz_B > 0
-
-    kept_rows_A = int(row_mask_A.sum())
-    kept_cols_B = int(col_mask_B.sum())
-    print(f"[fast-matmul] keep A rows: {kept_rows_A}/{n_rows_A} "
-          f"(dropped {n_rows_A - kept_rows_A} zero rows)")
-    print(f"[fast-matmul] keep B cols: {kept_cols_B}/{n_cols_B} "
-          f"(dropped {n_cols_B - kept_cols_B} zero cols)")
-
-    A_outer = A[row_mask_A]
-    B_outer = B[:, col_mask_B]
-
-    # 2) Shared dimension: only keep k where both A_outer[:, k] and B_outer[k, :] are non-zero
-    col_nnz_A = np.asarray(A_outer.getnnz(axis=0)).ravel()
-    row_nnz_B = np.asarray(B_outer.getnnz(axis=1)).ravel()
-    active = (col_nnz_A > 0) & (row_nnz_B > 0)
-    idx = np.where(active)[0]
-
-    print(f"[fast-matmul] active shared indices: {len(idx)}/{A_outer.shape[1]} "
-          f"(dropped {A_outer.shape[1] - len(idx)} columns(A)/rows(B))")
-
-    # Rough dense work estimate: original ~ n_rows_A * n_cols_A * n_cols_B
-    dense_before = float(n_rows_A) * float(n_cols_A) * float(n_cols_B)
-    dense_after = float(kept_rows_A) * float(len(idx)) * float(kept_cols_B)
-    ratio = dense_after / dense_before if dense_before > 0 else 1.0
-    print(f"[fast-matmul] approx dense-work ratio after pruning: {ratio:.4e} "
-          f"(~{ratio*100:.2f}% of original)")
-
-    # 3) Perform multiplication on the pruned submatrices
-    A_inner = A_outer[:, idx]
-    B_inner = B_outer[idx, :]
-    C_inner = A_inner.dot(B_inner)
-    print("[fast-matmul] inner result shape:", C_inner.shape, "nnz:", C_inner.nnz)
-
-    # 4) Restore rows/columns to original size (dropped positions are all zeros)
-    if kept_rows_A == n_rows_A:
-        C_rows_restored = C_inner
-    else:
-        C_rows_restored = csr_matrix((n_rows_A, kept_cols_B), dtype=C_inner.dtype)
-        C_rows_restored[row_mask_A] = C_inner
-
-    if kept_cols_B == n_cols_B:
-        C_full = C_rows_restored
-    else:
-        C_full = csr_matrix((n_rows_A, n_cols_B), dtype=C_inner.dtype)
-        C_full[:, col_mask_B] = C_rows_restored
-
-    print("[fast-matmul] full result shape:", C_full.shape, "nnz:", C_full.nnz)
-    print("[fast-matmul] === A @ B done ===")
-    return C_full
-
-def get_final_csv_csv_adj_by_multiplication(paper_csv_adj, paper_paper_adj):
-    paper_csv_adj = paper_csv_adj.astype(np.int8).tocsr()
-    paper_paper_adj = paper_paper_adj.astype(np.int8).tocsr()
-    t1 = time.time()
-    tmp = paper_csv_adj.T.dot(paper_paper_adj)
-    print(f"dot1: A^T @ P done, time={time.time() - t1:.4f}s, shape={tmp.shape}, nnz={tmp.nnz}")
-
-    t1 = time.time()
-    # Prune zero rows/cols to reduce matmul workload
-    csv_csv_adj_outside_model = fast_multiply(A=tmp, B=paper_csv_adj)
-    #csv_csv_adj_outside_model = tmp.dot(paper_csv_adj).astype(bool).tocsr()
-    print(f"dot2: C=A^T P A via fast_multiply done, time={time.time() - t1:.4f}s, shape={csv_csv_adj_outside_model.shape}, nnz={csv_csv_adj_outside_model.nnz}")
-    return csv_csv_adj_outside_model
 
 ############## Local CSR <-> Parquet helpers ####################
 
@@ -169,45 +72,81 @@ def local_csrnpz_to_parquet(npz_path: str, parquet_path: str, row_col_names=("ro
     print(f"[local] csrnpz→parquet: npz={npz_path}, parquet={parquet_path}, edges={len(df)}")
 
 
-def local_parquet_to_csrnpz(
+def parquet_to_csrnpz(
     parquet_path: str,
     npz_path: str,
     shape: tuple[int, int],
     row_col_names=("row_idx", "col_idx"),
+    batch_size: int = 1_000_000,
 ) -> None:
-    """
-    Convert a local Parquet edge list into a CSR .npz file.
-
-    - parquet_path: input Parquet with (row, col) index columns
-    - npz_path: output .npz path to save CSR matrix
-    - shape: (n_rows, n_cols) of the target matrix
-    - row_col_names: (row_name, col_name) used in the Parquet file
-    """
+    """Write the final GT matrix without loading all edges into memory."""
     row_name, col_name = row_col_names
-    con = duckdb.connect()
-    try:
-        t_load = time.time()
-        df = con.execute(
-            f"SELECT {row_name}, {col_name} FROM read_parquet('{parquet_path}')"
-        ).df()
-        print(f"[local] parquet→csrnpz load: parquet={parquet_path}, rows={len(df)}, time={time.time() - t_load:.4f}s")
-    finally:
-        con.close()
-
     n_rows, n_cols = shape
-    if df.empty:
-        M = csr_matrix((n_rows, n_cols), dtype=bool)
-    else:
-        rows = df[row_name].to_numpy(dtype=np.int64)
-        cols = df[col_name].to_numpy(dtype=np.int64)
-        data = np.ones(len(rows), dtype=np.int8)
-        t_mat = time.time()
-        M = csr_matrix((data, (rows, cols)), shape=(n_rows, n_cols)).astype(bool).tocsr()
-        print(f"[local] parquet→csrnpz materialize: shape={M.shape}, nnz={M.nnz}, build_time={time.time() - t_mat:.4f}s")
+    parquet_sql = os.path.abspath(parquet_path).replace("'", "''")
+    output_dir = os.path.dirname(npz_path)
+    os.makedirs(output_dir, exist_ok=True)
+    temp_dir = tempfile.mkdtemp(prefix="csr_export_", dir=output_dir)
+    try:
+        counts = np.zeros(n_rows, dtype=np.int64)
+        con = duckdb.connect()
+        try:
+            reader = con.execute(
+                f"SELECT {row_name}, {col_name} FROM read_parquet('{parquet_sql}')"
+            ).to_arrow_reader(batch_size)
+            total = 0
+            for batch in reader:
+                rows = batch.column(0).to_numpy(zero_copy_only=False).astype(np.int64, copy=False)
+                counts += np.bincount(rows, minlength=n_rows)
+                total += len(rows)
+        finally:
+            con.close()
 
-    os.makedirs(os.path.dirname(npz_path), exist_ok=True)
-    save_npz(npz_path, M, compressed=True)
-    print(f"[local] parquet→csrnpz saved: npz={npz_path}")
+        indptr = np.empty(n_rows + 1, dtype=np.int64)
+        indptr[0] = 0
+        np.cumsum(counts, out=indptr[1:])
+        if total > np.iinfo(np.int32).max:
+            raise ValueError(f"CSR export has {total} edges, exceeding int32 index capacity")
+
+        indices_path = os.path.join(temp_dir, "indices.npy")
+        data_path = os.path.join(temp_dir, "data.npy")
+        indptr_path = os.path.join(temp_dir, "indptr.npy")
+        indices = np.lib.format.open_memmap(indices_path, mode="w+", dtype=np.int32, shape=(total,))
+        data = np.lib.format.open_memmap(data_path, mode="w+", dtype=np.bool_, shape=(total,))
+        positions = indptr[:-1].copy()
+        con = duckdb.connect()
+        try:
+            reader = con.execute(
+                f"SELECT {row_name}, {col_name} FROM read_parquet('{parquet_sql}')"
+            ).to_arrow_reader(batch_size)
+            for batch in reader:
+                rows = batch.column(0).to_numpy(zero_copy_only=False).astype(np.int64, copy=False)
+                cols = batch.column(1).to_numpy(zero_copy_only=False).astype(np.int32, copy=False)
+                order = np.argsort(rows, kind="stable")
+                rows, cols = rows[order], cols[order]
+                starts = np.r_[0, np.flatnonzero(np.diff(rows)) + 1]
+                stops = np.r_[starts[1:], len(rows)]
+                for start, stop in zip(starts, stops):
+                    row = rows[start]
+                    write_start = positions[row]
+                    write_stop = write_start + stop - start
+                    indices[write_start:write_stop] = cols[start:stop]
+                    data[write_start:write_stop] = True
+                    positions[row] = write_stop
+        finally:
+            con.close()
+
+        np.save(indptr_path, indptr)
+        del indices, data
+        format_path = os.path.join(temp_dir, "format.npy")
+        shape_path = os.path.join(temp_dir, "shape.npy")
+        np.save(format_path, np.asarray("csr"))
+        np.save(shape_path, np.asarray((n_rows, n_cols), dtype=np.int64))
+        with zipfile.ZipFile(npz_path, "w", compression=zipfile.ZIP_STORED) as archive:
+            for name in ("format.npy", "shape.npy", "data.npy", "indices.npy", "indptr.npy"):
+                archive.write(os.path.join(temp_dir, name), arcname=name)
+        print(f"[stream] parquet→csrnpz saved: npz={npz_path}, shape={shape}, edges={total}")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def get_n_rows_from_csrnpz(npz_path: str) -> int:
@@ -238,10 +177,6 @@ def get_final_csv_csv_adj_by_join(
     os.makedirs(base_dir, exist_ok=True)
     stem = os.path.splitext(os.path.basename(path_outside_parquet))[0]
 
-    if RESUME_EXISTING_GT and os.path.exists(path_outside_parquet) and os.path.getsize(path_outside_parquet) > 0:
-        print(f"[join] Step2 resume existing outside Parquet: {path_outside_parquet}")
-        return
-
     pathP = os.path.join(base_dir, f"{stem}_P_edges_tmp.parquet")
 
     local_csrnpz_to_parquet(P_npz_path, pathP, row_col_names=("paper_i", "paper_j"))
@@ -249,7 +184,9 @@ def get_final_csv_csv_adj_by_join(
 
     # 2) Chunked DuckDB join (split by paper_i range) to keep temp usage bounded.
     n_paper = get_n_rows_from_csrnpz(P_npz_path)
-    chunk_size = 10
+    chunk_size = PAPER_CHUNK_SIZE
+    if chunk_size < 1:
+        raise ValueError(f"paper chunk size must be positive, got {chunk_size}")
     out_parts_glob = os.path.join(base_dir, f"{stem}_outside_part_*.parquet")
     dedup_parts_glob = os.path.join(base_dir, f"{stem}_dedup_part_*.parquet")
 
@@ -264,16 +201,10 @@ def get_final_csv_csv_adj_by_join(
         t_all = time.time()
         part_paths = []
         part_idx = 0
-        resumed_parts = 0
         for start in range(0, n_paper, chunk_size):
             end = min(start + chunk_size, n_paper)
             part_path = os.path.join(base_dir, f"{stem}_outside_part_{part_idx:05d}.parquet")
             part_paths.append(part_path)
-
-            if RESUME_EXISTING_GT and os.path.exists(part_path) and os.path.getsize(part_path) > 0:
-                resumed_parts += 1
-                part_idx += 1
-                continue
 
             t1 = time.time()
             query = f"""
@@ -290,9 +221,6 @@ def get_final_csv_csv_adj_by_join(
             con.execute(query)
             print(f"[join] Step2 chunk {part_idx}: paper_i=[{start},{end}) time={time.time() - t1:.4f}s out={part_path}")
             part_idx += 1
-
-        if resumed_parts:
-            print(f"[join] Step2 resumed {resumed_parts}/{part_idx} existing chunk files")
 
         # 3) Deduplicate bounded src_csv ranges independently.
         for path in os.listdir(base_dir):
@@ -354,11 +282,6 @@ def get_final_csv_csv_adj_by_join(
         os.remove(pathP)
     except OSError:
         pass
-
-def concat_csv_csv_adj_by_addition(csv_csv_adj_within_model, csv_csv_adj_outside_model):
-    M = (csv_csv_adj_within_model + csv_csv_adj_outside_model).astype(bool).tocsr() # we didn't care count
-    M.setdiag(False)# remove self-loop if any
-    return M
 
 def concat_csv_csv_adj_by_join(
     within_npz_path: str,
@@ -456,40 +379,6 @@ def concat_csv_csv_adj_by_join(
         pass
 
 
-def load_table_type_labels(label_tsv_path: str) -> dict[str, str]:
-    """Load one table-type label per CSV basename and reject conflicting labels."""
-    if not os.path.exists(label_tsv_path):
-        raise FileNotFoundError(
-            f"Table-type labels not found: {label_tsv_path}. "
-            "Run src.data_analysis.table_type_keyword first."
-        )
-
-    labels_df = pd.read_csv(
-        label_tsv_path,
-        sep="\t",
-        usecols=["table_path", "label"],
-        dtype=str,
-    ).dropna()
-    labels_df["csv_name"] = labels_df["table_path"].map(os.path.basename)
-
-    conflicts = labels_df.groupby("csv_name")["label"].nunique()
-    conflicts = conflicts[conflicts > 1]
-    if not conflicts.empty:
-        examples = ", ".join(conflicts.index[:5])
-        raise ValueError(
-            f"Conflicting table-type labels for {len(conflicts)} CSV basenames; "
-            f"examples: {examples}"
-        )
-
-    labels = (
-        labels_df.drop_duplicates("csv_name", keep="last")
-        .set_index("csv_name")["label"]
-        .to_dict()
-    )
-    print(f"[table-type] Loaded {len(labels)} labels from {label_tsv_path}")
-    return labels
-
-
 def load_valid_table_names(valid_tables_path: str) -> set[str]:
     """Load the QC-valid table list as CSV basenames."""
     if not os.path.exists(valid_tables_path):
@@ -506,87 +395,6 @@ def load_valid_table_names(valid_tables_path: str) -> set[str]:
         }
     print(f"[valid-tables] Loaded {len(valid_tables)} tables from {valid_tables_path}")
     return valid_tables
-
-
-def add_table_type_labels_to_gt_parquet(
-    parquet_path: str,
-    csv_list: list[str],
-    table_type_labels: dict[str, str],
-) -> None:
-    """Enrich a GT edge Parquet in place with CSV names and table-type labels."""
-    csv_meta = pd.DataFrame(
-        {
-            "csv_idx": np.arange(len(csv_list), dtype=np.int64),
-            "csv_name": csv_list,
-            "table_type": [table_type_labels.get(name) for name in csv_list],
-        }
-    )
-    missing = csv_meta.loc[csv_meta["table_type"].isna(), "csv_name"]
-    if not missing.empty:
-        examples = ", ".join(missing.head(5))
-        raise ValueError(
-            f"Missing table-type labels for {len(missing)} of {len(csv_list)} GT tables; "
-            f"examples: {examples}"
-        )
-
-    temp_path = f"{parquet_path}.table_type_tmp"
-    con = duckdb.connect()
-    try:
-        con.register("csv_meta", csv_meta)
-        parquet_sql = os.path.abspath(parquet_path).replace("'", "''")
-        temp_sql = os.path.abspath(temp_path).replace("'", "''")
-        con.execute(
-            f"""
-            COPY (
-                SELECT
-                    edges.src_csv,
-                    edges.dst_csv,
-                    src.table_type AS src_table_type,
-                    dst.table_type AS dst_table_type
-                FROM read_parquet('{parquet_sql}') AS edges
-                JOIN csv_meta AS src ON edges.src_csv = src.csv_idx
-                JOIN csv_meta AS dst ON edges.dst_csv = dst.csv_idx
-            ) TO '{temp_sql}' (FORMAT PARQUET, OVERWRITE_OR_IGNORE TRUE);
-            """
-        )
-    finally:
-        con.close()
-
-    os.replace(temp_path, parquet_path)
-    print(f"[table-type] Updated GT Parquet in place: {parquet_path}")
-
-############## defined path ####################
-def get_npz_path(v2_suffix, suffix, root_dir):
-    LEVEL_NPZ = {
-        "direct": os.path.join(root_dir, 'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_direct_label{v2_suffix}{suffix}.npz"),
-        "direct_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_direct_label_influential{v2_suffix}{suffix}.npz"),
-        "direct_methodology_or_result": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_direct_label_methodology_or_result{v2_suffix}{suffix}.npz"),
-        "direct_methodology_or_result_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_direct_label_methodology_or_result_influential{v2_suffix}{suffix}.npz"),
-        "max_pr": os.path.join('data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr{v2_suffix}{suffix}.npz"),
-        "max_pr_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_influential{v2_suffix}{suffix}.npz"),
-        "max_pr_methodology_or_result": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.npz"),
-        "max_pr_methodology_or_result_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.npz"),
-        "union": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_union_direct_processed{v2_suffix}{suffix}.npz"),
-        "model": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"scilake_gt_modellink_model_adj_processed{v2_suffix}{suffix}.npz"),
-        "dataset": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"scilake_gt_modellink_dataset_adj_processed{v2_suffix}{suffix}.npz"),
-    }
-
-    # Mapping of level names to CSV list pickle filenames
-    CANONICAL_CSVLIST = f"csv_list{v2_suffix}{suffix}.pkl"
-    LEVEL_CSVLIST = {
-        "direct": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
-        "direct_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
-        "direct_methodology_or_result": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
-        "direct_methodology_or_result_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
-        "max_pr": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
-        "max_pr_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"{CANONICAL_CSVLIST}"),
-        "max_pr_methodology_or_result": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_methodology_or_result{v2_suffix}{suffix}.pkl"),
-        "max_pr_methodology_or_result_influential": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_matrix_max_pr_methodology_or_result_influential{v2_suffix}{suffix}.pkl"),
-        "union": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"csv_pair_union_direct_processed_csv_list{v2_suffix}{suffix}.pkl"),
-        "model": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"scilake_gt_modellink_model_adj_csv_list{v2_suffix}{suffix}_processed.pkl"),
-        "dataset": os.path.join(root_dir,'data', f'gt{v2_suffix}{suffix}', f"scilake_gt_modellink_dataset_adj_csv_list{v2_suffix}{suffix}_processed.pkl"),
-    }
-    return LEVEL_NPZ, LEVEL_CSVLIST
 
 
 # ===== FACTORIES =========================================================== #
@@ -791,7 +599,7 @@ def build_titles2cid():
     print(f"[DEBUG] Sample of cid2titles (first 3 items): {dict(list(cid2titles.items())[:3])}")
     return title2cid
 
-def build_element_matrix_at_one_time(valid_table_names, table_type_labels):
+def build_element_matrix_at_one_time(valid_table_names):
     # modelId-paperList-csvList, Our aim is to use paper-paper matrix to build {csv:[csv1, csv2]} related json
     """High‑level orchestration for building GT tables."""
     t1 = time.time()
@@ -802,24 +610,8 @@ def build_element_matrix_at_one_time(valid_table_names, table_type_labels):
     # build global CSV list & index
     flat = [c for _, cs in titles_to_tables_with_modelid for c in cs]
     all_csvs = list(dict.fromkeys(flat))# already basename in titles_to_tables_with_modelid
-    missing_labels = [csv_name for csv_name in all_csvs if csv_name not in table_type_labels]
-    if missing_labels:
-        examples = ", ".join(missing_labels[:5])
-        raise ValueError(
-            f"Missing table-type labels for {len(missing_labels)} valid GT tables; "
-            f"examples: {examples}"
-        )
-    table_type_counts = pd.Series(
-        [table_type_labels[csv_name] for csv_name in all_csvs],
-        dtype="string",
-    ).value_counts()
-    print(f"[table-type] GT tables after valid-table filtering: {len(all_csvs)}")
-    for table_type, count in table_type_counts.items():
-        print(f"[table-type]   {table_type}: {count} ({count / len(all_csvs):.1%})")
-    #all_csvs = [os.path.basename(csv) for csv in all_csvs]
-    #csv_list_path = f"data/gt{v2_suffix}{suffix}/csv_list{v2_suffix}{suffix}.pkl"
-    LEVEL_NPZ, LEVEL_CSVLIST = get_npz_path(v2_suffix, suffix, os.getcwd())
-    csv_list_path = LEVEL_CSVLIST["direct"]
+    print(f"[valid-tables] GT tables after valid-table filtering: {len(all_csvs)}")
+    csv_list_path = f"data/gt{v2_suffix}{suffix}/csv_list{v2_suffix}{suffix}.pkl"
     with open(csv_list_path, "wb") as f:
         pickle.dump(all_csvs, f)
     print(f"✅ CSV list saved (order matches matrix rows/cols) to {csv_list_path}")
@@ -840,9 +632,16 @@ def build_ground_truth(
     suffix,
     v2_suffix,
     csv_list,
-    table_type_labels,
 ):
     t1 = time.time()
+    gt_dir = f"data/gt{v2_suffix}{suffix}"
+    os.makedirs(gt_dir, exist_ok=True)
+    matrix_path = os.path.join(gt_dir, f"csv_pair_matrix_{rel_key}{v2_suffix}{suffix}.npz")
+    if os.path.exists(matrix_path):
+        print(f"[skip] Final GT matrix already exists: {matrix_path}")
+        return
+    outside_parquet = os.path.join(gt_dir, f"csv_csv_outside_{rel_key}{v2_suffix}{suffix}.parquet")
+    final_parquet = os.path.join(gt_dir, f"csv_csv_final_{rel_key}{v2_suffix}{suffix}.parquet")
     paper_paper_adj = build_paper_matrix(rel_key, overlap_rate_threshold)
     print(f"time to build paper-paper adjacency matrix: ", time.time() - t1)
     assert paper_paper_adj.data.dtype == np.bool_
@@ -858,71 +657,13 @@ def build_ground_truth(
     # Persist paper-paper adjacency once so Step2 can work purely from disk.
     save_npz(P_npz_path, paper_paper_adj, compressed=True)
 
-    # Derive Parquet paths for outside edges and final merged edges.
-    gt_dir = f"data/gt{v2_suffix}{suffix}"
-    os.makedirs(gt_dir, exist_ok=True)
-    outside_parquet = os.path.join(gt_dir, f"csv_csv_outside_{rel_key}{v2_suffix}{suffix}.parquet")
-    final_parquet = os.path.join(gt_dir, f"csv_csv_final_{rel_key}{v2_suffix}{suffix}.parquet")
-
-    if RESUME_EXISTING_GT and os.path.exists(final_parquet) and os.path.getsize(final_parquet) > 0:
-        con = duckdb.connect()
-        try:
-            columns = {
-                row[0]
-                for row in con.execute(
-                    f"DESCRIBE SELECT * FROM read_parquet('{final_parquet}')"
-                ).fetchall()
-            }
-        finally:
-            con.close()
-        if {"src_table_type", "dst_table_type"}.issubset(columns):
-            print(f"[resume] Completed labeled GT Parquet already exists: {final_parquet}")
-            return
-        if {"src_csv", "dst_csv"}.issubset(columns):
-            print(f"[resume] Adding labels to completed GT edge Parquet: {final_parquet}")
-            add_table_type_labels_to_gt_parquet(final_parquet, csv_list, table_type_labels)
-            return
-
-    '''
-    # by multiplication: old implementation, deprecated for memory 
-    usage
-    csv_csv_adj_within_model = load_npz(f"data/gt{v2_suffix}
-    {suffix}/B_matrix{v2_suffix}{suffix}.npz")
-    paper_csv_adj = load_npz(f"data/gt{v2_suffix}{suffix}/A_matrix
-    {v2_suffix}{suffix}.npz")
-    csv_csv_adj_within_model = csv_csv_adj_within_model.astype(np.
-    int8).tocsr()
-    paper_csv_adj = load_npz(A_npz_path)
-
-    outside_edges = get_final_csv_csv_adj_by_multiplication
-    (paper_csv_adj, paper_paper_adj)
-    M = concat_csv_csv_adj_by_addition(csv_csv_adj_within_model, 
-    outside_edges)
-    matrix_path = f"data/gt{v2_suffix}{suffix}/csv_pair_matrix_
-    {rel_key}{v2_suffix}{suffix}.npz"
-    save_npz(matrix_path, M, compressed=True)
-    print(f"✅ Sparse matrix saved to {matrix_path}")
-    print(f"[DEBUG] Final M matrix shape: {M.shape}, nnz: {M.nnz}")
-    print(f"time to build final GT matrix: ", time.time() - t1)
-    '''
-
-    # Step 2: compute outside-model csv‑csv edges via DuckDB join (Aᵀ·P·A semantics) → Parquet only.
     get_final_csv_csv_adj_by_join(A_parquet_path, P_npz_path, outside_parquet)
-    # Step 3: merge within-model adjacency with outside edges, fully in DuckDB/Parquet.
     concat_csv_csv_adj_by_join(within_npz_path, outside_parquet, final_parquet)
-    add_table_type_labels_to_gt_parquet(final_parquet, csv_list, table_type_labels)
-
-    '''# Materialize final boolean csr matrix from the merged Parquet edges into .npz.
-    matrix_path = f"data/gt{v2_suffix}{suffix}/csv_pair_matrix_{rel_key}{v2_suffix}{suffix}.npz"
-    local_parquet_to_csrnpz(
-        parquet_path=final_parquet,
-        npz_path=matrix_path,
-        shape=(n_csv, n_csv),
-        row_col_names=("src_csv", "dst_csv"),
-    )'''
+    parquet_to_csrnpz(final_parquet, matrix_path, (n_csv, n_csv), ("src_csv", "dst_csv"))
+    for path in (P_npz_path, outside_parquet, final_parquet): os.remove(path)
 
     print(f"time to build final GT matrix: ", time.time() - t1)
-    print(f"✅ GT edge Parquet saved to {final_parquet}")
+    print(f"✅ GT matrix saved to {matrix_path}")
 
 if __name__ == "__main__":
     import argparse
@@ -930,23 +671,11 @@ if __name__ == "__main__":
     parser.add_argument("--tag", dest="tag", default=None, help="Tag suffix for versioning (e.g., 251117). Enables versioning mode for input files.")
     parser.add_argument("--v2_mode", dest="v2_mode", action="store_true", help="Use v2 mode.")
     parser.add_argument(
-        "--table-type-labels",
-        default=None,
-        help="Table-type label TSV. Defaults to data/table_type/table_type_labels[_v2][_tag].tsv.",
-    )
-    parser.add_argument(
         "--valid-tables",
         default=None,
         help="QC-valid table TXT. Defaults to data/analysis/all_valid_title_valid[_v2][_tag].txt.",
     )
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Reuse completed GT relation/chunk Parquets from an interrupted run.",
-    )
     args = parser.parse_args()
-
-    RESUME_EXISTING_GT = args.resume
 
     suffix = f"_{args.tag}" if args.tag else ""
     v2_suffix = "_v2" if args.v2_mode else ""
@@ -959,8 +688,6 @@ if __name__ == "__main__":
         "valid_title": f"data/processed/all_title_list_valid{v2_suffix}{suffix}.parquet",
         "valid_tables": args.valid_tables
         or f"data/analysis/all_valid_title_valid{v2_suffix}{suffix}.txt",
-        "table_type_labels": args.table_type_labels
-        or f"data/table_type/table_type_labels{v2_suffix}{suffix}.tsv",
     }
 
     # Always print paths in use so you can verify in the log
@@ -978,10 +705,11 @@ if __name__ == "__main__":
         'direct_label_methodology_or_result', 
         'direct_label_methodology_or_result_influential',
     ]
+    if all(os.path.exists(f"data/gt{v2_suffix}{suffix}/csv_pair_matrix_{rel_key}{v2_suffix}{suffix}.npz") for rel_key in REL_KEY_LIST):
+        raise SystemExit("[skip] All final GT matrices already exist.")
     OVERLAP_RATE_THRESHOLD = 0.0
     valid_table_names = load_valid_table_names(FILES["valid_tables"])
-    table_type_labels = load_table_type_labels(FILES["table_type_labels"])
-    csv_list = build_element_matrix_at_one_time(valid_table_names, table_type_labels)
+    csv_list = build_element_matrix_at_one_time(valid_table_names)
     for rel_key in REL_KEY_LIST:
         build_ground_truth(
             rel_key=rel_key,
@@ -989,5 +717,15 @@ if __name__ == "__main__":
             suffix=suffix,
             v2_suffix=v2_suffix,
             csv_list=csv_list,
-            table_type_labels=table_type_labels,
         )
+
+    # A/B are shared construction intermediates and are unnecessary after all requested relations finish.
+    for intermediate_path in (
+        f"data/gt{v2_suffix}{suffix}/A_matrix{v2_suffix}{suffix}.npz",
+        f"data/gt{v2_suffix}{suffix}/A_edges{v2_suffix}{suffix}.parquet",
+        f"data/gt{v2_suffix}{suffix}/B_matrix{v2_suffix}{suffix}.npz",
+    ):
+        try:
+            os.remove(intermediate_path)
+        except OSError:
+            pass
